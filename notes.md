@@ -4,7 +4,7 @@
 
 **Project:** Autonomous Reinforcement-based Interview Agent with Multimodal Adaptive Assessment  
 **Reference:** [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md)  
-**Last updated:** 2026-06-24
+**Last updated:** 2026-06-24 (Module 3 documented)
 
 ---
 
@@ -15,8 +15,9 @@
 3. [Folder Structure (Current)](#folder-structure-current)
 4. [Module 1 — Speech-to-Text (STT)](#module-1--speech-to-text-stt)
 5. [Module 2 — Vision](#module-2--vision)
-6. [Change Log](#change-log)
-7. [Next Steps](#next-steps)
+6. [Module 3 — Prosody](#module-3--prosody)
+7. [Change Log](#change-log)
+8. [Next Steps](#next-steps)
 
 ---
 
@@ -26,7 +27,7 @@
 |--------|--------|-------|-------|
 | Module 1 — STT | **Implemented** (offline) | Krissh | Streaming mode deferred |
 | Module 2 — Vision | **Implemented** (single frame + turn summary) | Krissh | L2CS fallback via head pose if weights missing |
-| Module 3 — Prosody | Not started | Krissh | — |
+| Module 3 — Prosody | **In progress** (helpers only) | Krissh | `extract()` is `pass`; `baseline.py` empty; librosa-based so far |
 | Module 4 — Fusion | Not started | Krissh | — |
 | config/settings.py | **Done** | — | Global constants |
 | Backend / Frontend | Not started | Raghav | — |
@@ -103,18 +104,22 @@ ARIA/
 │   ├── module_01_stt/
 │   │   ├── __init__.py
 │   │   └── transcriber.py
-│   └── module_02_vision/
-│       ├── __init__.py
-│       ├── face_mesh.py
-│       ├── emotion.py
-│       ├── gaze.py
-│       └── vision_processor.py      # Orchestrator (parallel threads + turn summary)
+│   ├── module_02_vision/
+│   │   ├── __init__.py
+│   │   ├── face_mesh.py
+│   │   ├── emotion.py
+│   │   ├── gaze.py
+│   │   └── vision_processor.py      # Orchestrator (parallel threads + turn summary)
+│   └── module_3_prosody/            # Note: guide says module_03_prosody
+│       ├── extractor.py             # ProsodyExtractor — partial
+│       └── baseline.py              # Empty — baseline calibration TODO
 ├── models/                          # gitignored — L2CS weights go here
 ├── data/                            # gitignored datasets
 └── tests/
     ├── conftest.py
     ├── test_stt.py
     └── test_vision.py
+    # test_prosody.py — not yet created
 ```
 
 ---
@@ -445,7 +450,239 @@ pytest tests/test_vision.py -v -m integration  # requires mediapipe, deepface
 
 ---
 
+## Module 3 — Prosody
+
+### Purpose
+
+Extract speech prosody features from a candidate's turn audio — pitch, energy, MFCCs, pauses, disfluencies, speech rate, and (once baseline calibration is wired) deviation from the candidate's personal baseline. These features feed Module 4 (Fusion) and Module 10 (Cognitive Load).
+
+### Files (current)
+
+| File | Role | Status |
+|------|------|--------|
+| `modules/module_3_prosody/extractor.py` | `ProsodyExtractor` class + librosa helpers | **Partial** — helpers implemented, `extract()` is `pass` |
+| `modules/module_3_prosody/baseline.py` | Per-candidate baseline storage + deviation | **Empty** — not started |
+| `modules/module_3_prosody/__init__.py` | Public exports | **Missing** |
+
+> **Naming note:** The master guide specifies `modules/module_03_prosody/`. The repo currently uses `modules/module_3_prosody/`. Confirm which naming convention to standardize on before integration.
+
+### Tooling
+
+| Source | Current code | Master guide spec |
+|--------|--------------|-------------------|
+| Pitch / MFCC / energy / VAD | **librosa** | SpeechBrain + openSMILE |
+| Baseline calibration | Not implemented | In-memory dict keyed by `candidate_id` |
+| Config constants | Commented out in `extractor.py` | `config/settings.py` → `AUDIO_SAMPLE_RATE`, `MFCC_COEFFICIENTS`, `BASELINE_TURNS` |
+
+The current implementation uses **librosa only** (no SpeechBrain or openSMILE yet). That is a valid Phase 1 approach for pitch/MFCC/energy; openSMILE would add jitter/shimmer and richer openSMILE eGeMAPS features later.
+
+### Input contract (from guide)
+
+```python
+audio_clip: np.ndarray  # full audio of one candidate turn, 16 kHz mono float32
+turn_id: int            # baseline turns are turn_id <= 2
+candidate_id: str       # key for personal baseline lookup
+response_latency_ms: float | None  # passed through from Module 1 (STT)
+```
+
+### Output contract (exact schema — guide Section 5)
+
+```python
+{
+    "pitch_mean": float,
+    "pitch_variance": float,
+    "pitch_range": float,
+    "speech_rate": float,               # syllables per second — NOT YET IMPLEMENTED
+    "pause_count": int,                 # pauses > 250 ms — NOT YET IMPLEMENTED
+    "pause_total_duration_ms": float,   # NOT YET IMPLEMENTED
+    "disfluency_count": int,            # um/uh/erm/like — NOT YET IMPLEMENTED
+    "disfluency_timestamps": [float],   # NOT YET IMPLEMENTED
+    "response_latency_ms": float,       # from STT — param accepted, not returned yet
+    "energy_mean": float,
+    "jitter": float,                    # NOT YET IMPLEMENTED
+    "shimmer": float,                   # NOT YET IMPLEMENTED
+    "mfcc_vector": list,                # 13 coefficients — IMPLEMENTED
+    "speech_to_silence_ratio": float,   # NOT YET IMPLEMENTED (helper exists)
+    "pitch_deviation": float | None,    # NOT YET IMPLEMENTED (needs baseline.py)
+    "rate_deviation": float | None,     # NOT YET IMPLEMENTED
+    "energy_deviation": float | None    # NOT YET IMPLEMENTED
+}
+```
+
+### Current implementation — `ProsodyExtractor`
+
+#### Public entry point
+
+```python
+class ProsodyExtractor:
+    def extract(self, audio_clip, turn_id, candidate_id, response_latency_ms=None):
+        pass  # NOT IMPLEMENTED — must orchestrate helpers + baseline
+```
+
+The `extract()` method is the integration point. It should:
+
+1. Call `_validate_audio(audio_clip)` → normalized float32 mono array
+2. Use `AUDIO_SAMPLE_RATE` from `config/settings.py` (16000)
+3. Run all feature helpers below
+4. For `turn_id <= BASELINE_TURNS` (2): store baseline via `baseline.py`, set deviation fields to `None`
+5. For `turn_id > 2`: compute `(current - baseline) / baseline` for pitch, rate, energy
+6. Pass through `response_latency_ms` from Module 1
+7. Return the full output dict
+
+#### Implemented private helpers (`extractor.py`)
+
+| Method | What it does | Returns |
+|--------|--------------|---------|
+| `_validate_audio(audio_clip)` | Ensures 1D non-empty array; casts float32; replaces NaN; peak-normalizes if \|amp\| > 1.0 | `np.ndarray` |
+| `_compute_duration(audio_arr, sample_rate)` | Duration in seconds | `float` |
+| `_compute_pitch_features(audio_arr, sample_rate)` | F0 via `librosa.yin` (C2–C7 range); filters non-finite values | `{pitch_mean, pitch_variance, pitch_range}` |
+| `_compute_energy(audio_arr)` | Mean RMS energy via `librosa.feature.rms` | `float` |
+| `_compute_mfcc(audio_arr, sample_rate, n_mfcc=13)` | 13 MFCCs, mean across time axis | `list[float]` (length 13) |
+| `_detect_speech_intervals(audio_arr, top_db=30)` | Non-silent intervals via `librosa.effects.split` | `np.ndarray` shape `(N, 2)` — **not wired into output yet** |
+
+#### How implemented helpers work
+
+**Audio validation (`_validate_audio`):**
+
+```
+raw audio_clip
+    → np.asarray
+    → reject if empty or not 1D
+    → float32 + nan_to_num
+    → peak normalize if max |amp| > 1.0
+    → return clean array
+```
+
+**Pitch (`_compute_pitch_features`):**
+
+- Short-circuits to zeros if clip < 0.1 s or near-silent (`max |amp| < 1e-6`)
+- Uses YIN algorithm (`librosa.yin`) — robust monophonic F0 estimator
+- Filters out non-finite pitch frames before computing mean, variance, range
+
+**Energy (`_compute_energy`):**
+
+- RMS frame energy via librosa, returns temporal mean
+
+**MFCC (`_compute_mfcc`):**
+
+- Default 13 coefficients (matches `MFCC_COEFFICIENTS` in settings)
+- Returns time-averaged MFCC vector as a Python list
+
+**Speech intervals (`_detect_speech_intervals`):**
+
+- Intended for pause detection and speech-to-silence ratio
+- Returns sample-index pairs `[start, end)` for each voiced segment
+- Not yet consumed by `extract()` — will drive `pause_count`, `pause_total_duration_ms`, and `speech_to_silence_ratio`
+
+### Baseline logic (guide spec — not yet in code)
+
+```
+Turns 1–2 (turn_id <= BASELINE_TURNS):
+    → store pitch_mean, speech_rate, energy_mean as personal baseline for candidate_id
+    → pitch_deviation, rate_deviation, energy_deviation = None
+
+Turns 3+:
+    → deviation = (current - baseline) / baseline  for pitch, rate, energy
+```
+
+`baseline.py` is currently **empty**. Expected responsibilities:
+
+- In-memory dict: `{candidate_id: {"pitch_mean", "speech_rate", "energy_mean"}}`
+- `store_baseline(candidate_id, features)` — called on turns 1–2
+- `compute_deviations(candidate_id, features)` — called on turns 3+
+
+### Architecture (target state)
+
+```
+┌──────────────────┐     ┌─────────────────────┐     ┌──────────────────┐
+│  audio_clip      │────▶│  ProsodyExtractor   │────▶│  prosody dict    │
+│  turn_id         │     │  .extract()         │     │  (full schema)   │
+│  candidate_id    │     └─────────┬───────────┘     └──────────────────┘
+│  response_lat_ms │               │
+└──────────────────┘               │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │  _validate_audio             │
+                    │  _compute_pitch_features     │
+                    │  _compute_energy             │
+                    │  _compute_mfcc               │
+                    │  _detect_speech_intervals    │
+                    │  (+ TODO: rate, jitter,      │
+                    │     shimmer, disfluency)     │
+                    └──────────────┬───────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │  baseline.py               │
+                    │  store / compute deviation │
+                    │  (turn_id <= 2 vs 3+)      │
+                    └──────────────────────────────┘
+```
+
+### Integration with other modules
+
+| Source | Field used by Module 3 |
+|--------|------------------------|
+| Module 1 (STT) | `response_latency_ms` — pass into `extract()` as optional param |
+| Module 1 (STT) | Transcript text — needed for disfluency detection (not wired yet) |
+| `config/settings.py` | `AUDIO_SAMPLE_RATE=16000`, `MFCC_COEFFICIENTS=13`, `BASELINE_TURNS=2` |
+
+### Open issues in current code (documented — not fixed)
+
+These were observed in `extractor.py` / `baseline.py`. **Do not change without confirming with Krissh:**
+
+1. **`extract()` is `pass`** — no features are returned yet; module is not callable end-to-end.
+2. **`baseline.py` is empty`** — baseline calibration and deviation fields cannot work.
+3. **Config import commented out** — line 3 references `SAMPLE_RATE`, `N_MFCC`, `HOP_LENGTH` which do not exist in `settings.py` (actual names: `AUDIO_SAMPLE_RATE`, `MFCC_COEFFICIENTS`).
+4. **`ValueError` message on line 15** — `raise ValueError("...", audio_arr.shape)` passes shape as a second arg; Python ignores it. Should be an f-string if fixed.
+5. **No `__init__.py`** — package cannot be imported as `from modules.module_3_prosody import ProsodyExtractor`.
+6. **Folder name mismatch** — `module_3_prosody` vs guide's `module_03_prosody`.
+7. **Missing features vs spec** — speech_rate, pauses, disfluencies, jitter, shimmer, speech_to_silence_ratio, deviation fields.
+8. **`_detect_speech_intervals` unused** — helper exists but not connected to pause/ratio metrics.
+9. **No tests** — `tests/test_prosody.py` not created yet.
+
+### Planned public API (once complete)
+
+```python
+from modules.module_3_prosody import ProsodyExtractor
+
+extractor = ProsodyExtractor()
+prosody = extractor.extract(
+    audio_clip=turn_audio,       # np.ndarray, 16 kHz mono
+    turn_id=1,
+    candidate_id="candidate_abc",
+    response_latency_ms=850.0,   # from Module 1
+)
+```
+
+### Tests (planned — guide Section 10)
+
+```powershell
+pytest tests/test_prosody.py -v
+```
+
+Minimum assertions when implemented:
+
+- Extract features from a 30-second audio clip
+- `mfcc_vector` has 13 elements
+- `speech_rate` is a positive float
+- Turns 1–2: deviation fields are `None`
+- Turn 3+: deviation fields are floats
+
+---
+
 ## Change Log
+
+### 2026-06-24 — Module 3 prosody folder documented (user-added)
+
+**Observed in repo (not modified by assistant):**
+
+- `modules/module_3_prosody/extractor.py` — `ProsodyExtractor` with librosa helpers (pitch, energy, MFCC, speech intervals); `extract()` still `pass`
+- `modules/module_3_prosody/baseline.py` — empty file
+
+**Updated:**
+
+- `notes.md` — full Module 3 section, status table, folder structure, open issues list
 
 ### 2026-06-24 — Initial Phase 1 foundation (Modules 1 & 2)
 
@@ -462,7 +699,7 @@ pytest tests/test_vision.py -v -m integration  # requires mediapipe, deepface
 
 **Not created yet (per build order):**
 
-- Module 3 Prosody
+- Module 3 Prosody — finish `extract()`, `baseline.py`, tests
 - Module 4 Fusion
 - `config/rl_spec.py`
 - Backend / Frontend
@@ -474,12 +711,18 @@ pytest tests/test_vision.py -v -m integration  # requires mediapipe, deepface
 
 Per [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md) Section 9 build order:
 
-1. **Module 3 — Prosody** (`extractor.py`, `baseline.py`) — SpeechBrain + openSMILE on turn audio
-2. **Module 2 enhancement** — validate per-turn summary with real webcam footage at 2 fps
-3. **Module 4 — Fusion V1** (`concat_fusion.py`) — concatenate text + vision + prosody features
-4. **End-to-end test** — one simulated turn through Modules 1→2→3→4, print `turn_signal`
-5. **Download L2CS weights** to `models/` for production gaze accuracy
-6. **Streaming STT** — integrate with WebRTC audio chunks in Phase 5
+1. **Module 3 — finish implementation:**
+   - Wire `extract()` to call existing helpers
+   - Implement `baseline.py` (store turns 1–2, deviation turns 3+)
+   - Add pause/rate/disfluency/jitter/shimmer (librosa and/or openSMILE)
+   - Uncomment config imports using `AUDIO_SAMPLE_RATE`, `MFCC_COEFFICIENTS`
+   - Add `__init__.py` and `tests/test_prosody.py`
+2. **Resolve folder naming** — `module_3_prosody` vs `module_03_prosody`
+3. **Module 2 enhancement** — validate per-turn summary with real webcam footage at 2 fps
+4. **Module 4 — Fusion V1** (`concat_fusion.py`) — concatenate text + vision + prosody features
+5. **End-to-end test** — one simulated turn through Modules 1→2→3→4, print `turn_signal`
+6. **Download L2CS weights** to `models/` for production gaze accuracy
+7. **Streaming STT** — integrate with WebRTC audio chunks in Phase 5
 
 ---
 
@@ -505,6 +748,8 @@ turn_signal = {
 ```
 
 Modules 1 and 2 currently supply: `transcript`, `word_timestamps`, `language`, `response_latency_ms`, and `vision`.
+
+Module 3 will supply the `prosody` block once `extract()` and `baseline.py` are complete. Partial helpers already compute pitch, energy, and MFCCs internally.
 
 ---
 

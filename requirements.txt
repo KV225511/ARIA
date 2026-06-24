@@ -24,3 +24,5 @@ librosa
 soundfile
 python-dotenv
 pytest
+opensmile
+
