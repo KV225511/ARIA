@@ -1,0 +1,26 @@
+# ARIA — Module 1 & 2 dependencies (Phase 1 foundation)
+# Install full stack per ARIA_Coding_Assistant_Guide.md Section 7
+
+# Core ML (Step 1)
+torch
+torchvision
+torchaudio
+
+# STT (Step 2)
+faster-whisper
+
+# Vision (Step 3)
+mediapipe
+deepface==0.0.79
+opencv-python
+
+# L2CS-Net gaze (official repo)
+# pip install git+https://github.com/Ahmednull/L2CS-Net.git
+
+# Utilities (Step 10)
+numpy
+scipy
+librosa
+soundfile
+python-dotenv
+pytest

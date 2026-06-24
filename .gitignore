@@ -1,0 +1,15 @@
+.venv/
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+data/datasets/
+data/processed/
+data/synthetic/
+models/
+*.wav
+*.mp4
+*.pkl
+*.safetensors
