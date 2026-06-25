@@ -1,5 +1,4 @@
 # ARIA — Module 1 & 2 dependencies (Phase 1 foundation)
-# Install full stack per ARIA_Coding_Assistant_Guide.md Section 7
 
 # Core ML (Step 1)
 torch

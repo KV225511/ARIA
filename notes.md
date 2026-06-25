@@ -4,7 +4,7 @@
 
 **Project:** Autonomous Reinforcement-based Interview Agent with Multimodal Adaptive Assessment  
 **Reference:** [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md)  
-**Last updated:** 2026-06-24 (Module 3 documented)
+**Last updated:** 2026-06-24 (Module 3 complete + tests)
 
 ---
 
@@ -27,7 +27,7 @@
 |--------|--------|-------|-------|
 | Module 1 — STT | **Implemented** (offline) | Krissh | Streaming mode deferred |
 | Module 2 — Vision | **Implemented** (single frame + turn summary) | Krissh | L2CS fallback via head pose if weights missing |
-| Module 3 — Prosody | **In progress** (helpers only) | Krissh | `extract()` is `pass`; `baseline.py` empty; librosa-based so far |
+| Module 3 — Prosody | **Implemented** | Krissh | openSMILE eGeMAPS + librosa VAD; baseline via `pipeline.py` |
 | Module 4 — Fusion | Not started | Krissh | — |
 | config/settings.py | **Done** | — | Global constants |
 | Backend / Frontend | Not started | Raghav | — |
@@ -110,16 +110,18 @@ ARIA/
 │   │   ├── emotion.py
 │   │   ├── gaze.py
 │   │   └── vision_processor.py      # Orchestrator (parallel threads + turn summary)
-│   └── module_3_prosody/            # Note: guide says module_03_prosody
-│       ├── extractor.py             # ProsodyExtractor — partial
-│       └── baseline.py              # Empty — baseline calibration TODO
+│   └── module_3_prosody/            # Guide says module_03_prosody
+│       ├── extractor.py             # ProsodyExtractor — raw feature extraction
+│       ├── baseline.py              # ProsodyBaselineManager — deviation calibration
+│       └── pipeline.py              # process_prosody_turn() — extractor + baseline
 ├── models/                          # gitignored — L2CS weights go here
 ├── data/                            # gitignored datasets
+├── pytest.ini                       # integration test marker
 └── tests/
     ├── conftest.py
     ├── test_stt.py
-    └── test_vision.py
-    # test_prosody.py — not yet created
+    ├── test_vision.py
+    └── test_prosody.py
 ```
 
 ---
@@ -454,231 +456,255 @@ pytest tests/test_vision.py -v -m integration  # requires mediapipe, deepface
 
 ### Purpose
 
-Extract speech prosody features from a candidate's turn audio — pitch, energy, MFCCs, pauses, disfluencies, speech rate, and (once baseline calibration is wired) deviation from the candidate's personal baseline. These features feed Module 4 (Fusion) and Module 10 (Cognitive Load).
+Extract speech prosody features from a candidate's turn audio — pitch, energy, MFCCs, pauses, disfluencies, speech rate, jitter, shimmer, and personal-baseline deviations. Output feeds Module 4 (Fusion) and Module 10 (Cognitive Load).
 
-### Files (current)
+### Files
 
 | File | Role | Status |
 |------|------|--------|
-| `modules/module_3_prosody/extractor.py` | `ProsodyExtractor` class + librosa helpers | **Partial** — helpers implemented, `extract()` is `pass` |
-| `modules/module_3_prosody/baseline.py` | Per-candidate baseline storage + deviation | **Empty** — not started |
+| `modules/module_3_prosody/extractor.py` | `ProsodyExtractor` — raw audio → prosody dict | **Done** |
+| `modules/module_3_prosody/baseline.py` | `ProsodyBaselineManager` — baseline store + deviations | **Done** |
+| `modules/module_3_prosody/pipeline.py` | `process_prosody_turn()` — wires extractor + baseline | **Done** |
 | `modules/module_3_prosody/__init__.py` | Public exports | **Missing** |
+| `tests/test_prosody.py` | Unit + integration tests | **Done** |
 
-> **Naming note:** The master guide specifies `modules/module_03_prosody/`. The repo currently uses `modules/module_3_prosody/`. Confirm which naming convention to standardize on before integration.
+> **Naming note:** Guide specifies `module_03_prosody/`; repo uses `module_3_prosody/`. `pipeline.py` imports match the actual folder name.
 
 ### Tooling
 
-| Source | Current code | Master guide spec |
-|--------|--------------|-------------------|
-| Pitch / MFCC / energy / VAD | **librosa** | SpeechBrain + openSMILE |
-| Baseline calibration | Not implemented | In-memory dict keyed by `candidate_id` |
-| Config constants | Commented out in `extractor.py` | `config/settings.py` → `AUDIO_SAMPLE_RATE`, `MFCC_COEFFICIENTS`, `BASELINE_TURNS` |
+| Feature | Implementation |
+|---------|----------------|
+| Pitch, jitter, shimmer, loudness | **openSMILE** eGeMAPSv02 (LLD + Functionals) |
+| Pause detection, speech intervals | **librosa** `effects.split` |
+| Speech rate, disfluencies | Heuristic syllable count + STT `word_timestamps` |
+| Baseline calibration | In-memory `ProsodyBaselineManager` |
+| Config | `AUDIO_SAMPLE_RATE`, `MFCC_COEFFICIENTS` from `config/settings.py` |
 
-The current implementation uses **librosa only** (no SpeechBrain or openSMILE yet). That is a valid Phase 1 approach for pitch/MFCC/energy; openSMILE would add jitter/shimmer and richer openSMILE eGeMAPS features later.
+SpeechBrain is listed in the guide but **not used** — openSMILE covers jitter/shimmer/pitch. Acceptable deviation from guide tooling.
 
-### Input contract (from guide)
+### Input contract
+
+**Guide minimum:**
 
 ```python
-audio_clip: np.ndarray  # full audio of one candidate turn, 16 kHz mono float32
-turn_id: int            # baseline turns are turn_id <= 2
-candidate_id: str       # key for personal baseline lookup
-response_latency_ms: float | None  # passed through from Module 1 (STT)
+audio_clip: np.ndarray  # 16 kHz mono float32
+turn_id: int
+candidate_id: str
 ```
 
-### Output contract (exact schema — guide Section 5)
+**`ProsodyExtractor.extract()` — audio features only:**
+
+```python
+audio_clip: np.ndarray
+word_timestamps: list | None   # from Module 1 STT
+response_latency_ms: float | None
+```
+
+**`process_prosody_turn()` — full turn with baseline:**
+
+```python
+audio_clip: np.ndarray
+turn_id: int
+candidate_id: str
+word_timestamps: list | None
+response_latency_ms: float | None
+```
+
+### Output contract
+
+**Raw output from `ProsodyExtractor.extract()`** (no deviation fields):
 
 ```python
 {
     "pitch_mean": float,
     "pitch_variance": float,
     "pitch_range": float,
-    "speech_rate": float,               # syllables per second — NOT YET IMPLEMENTED
-    "pause_count": int,                 # pauses > 250 ms — NOT YET IMPLEMENTED
-    "pause_total_duration_ms": float,   # NOT YET IMPLEMENTED
-    "disfluency_count": int,            # um/uh/erm/like — NOT YET IMPLEMENTED
-    "disfluency_timestamps": [float],   # NOT YET IMPLEMENTED
-    "response_latency_ms": float,       # from STT — param accepted, not returned yet
+    "speech_rate": float,
+    "pause_count": int,
+    "pause_total_duration_ms": float,
+    "disfluency_count": int,
+    "disfluency_timestamps": [float],
+    "response_latency_ms": float,
     "energy_mean": float,
-    "jitter": float,                    # NOT YET IMPLEMENTED
-    "shimmer": float,                   # NOT YET IMPLEMENTED
-    "mfcc_vector": list,                # 13 coefficients — IMPLEMENTED
-    "speech_to_silence_ratio": float,   # NOT YET IMPLEMENTED (helper exists)
-    "pitch_deviation": float | None,    # NOT YET IMPLEMENTED (needs baseline.py)
-    "rate_deviation": float | None,     # NOT YET IMPLEMENTED
-    "energy_deviation": float | None    # NOT YET IMPLEMENTED
+    "jitter": float,
+    "shimmer": float,
+    "mfcc_vector": list,            # length 13
+    "speech_to_silence_ratio": float,
 }
 ```
 
-### Current implementation — `ProsodyExtractor`
+**Full output from `process_prosody_turn()` or `baseline.update_with_baseline()`:**
 
-#### Public entry point
+Adds deviation fields per guide:
 
 ```python
-class ProsodyExtractor:
-    def extract(self, audio_clip, turn_id, candidate_id, response_latency_ms=None):
-        pass  # NOT IMPLEMENTED — must orchestrate helpers + baseline
+{
+    # ... all raw fields above ...
+    "pitch_deviation": float | None,   # None on turns 1–2
+    "rate_deviation": float | None,
+    "energy_deviation": float | None,
+}
 ```
 
-The `extract()` method is the integration point. It should:
-
-1. Call `_validate_audio(audio_clip)` → normalized float32 mono array
-2. Use `AUDIO_SAMPLE_RATE` from `config/settings.py` (16000)
-3. Run all feature helpers below
-4. For `turn_id <= BASELINE_TURNS` (2): store baseline via `baseline.py`, set deviation fields to `None`
-5. For `turn_id > 2`: compute `(current - baseline) / baseline` for pitch, rate, energy
-6. Pass through `response_latency_ms` from Module 1
-7. Return the full output dict
-
-#### Implemented private helpers (`extractor.py`)
-
-| Method | What it does | Returns |
-|--------|--------------|---------|
-| `_validate_audio(audio_clip)` | Ensures 1D non-empty array; casts float32; replaces NaN; peak-normalizes if \|amp\| > 1.0 | `np.ndarray` |
-| `_compute_duration(audio_arr, sample_rate)` | Duration in seconds | `float` |
-| `_compute_pitch_features(audio_arr, sample_rate)` | F0 via `librosa.yin` (C2–C7 range); filters non-finite values | `{pitch_mean, pitch_variance, pitch_range}` |
-| `_compute_energy(audio_arr)` | Mean RMS energy via `librosa.feature.rms` | `float` |
-| `_compute_mfcc(audio_arr, sample_rate, n_mfcc=13)` | 13 MFCCs, mean across time axis | `list[float]` (length 13) |
-| `_detect_speech_intervals(audio_arr, top_db=30)` | Non-silent intervals via `librosa.effects.split` | `np.ndarray` shape `(N, 2)` — **not wired into output yet** |
-
-#### How implemented helpers work
-
-**Audio validation (`_validate_audio`):**
+### Architecture
 
 ```
-raw audio_clip
-    → np.asarray
-    → reject if empty or not 1D
-    → float32 + nan_to_num
-    → peak normalize if max |amp| > 1.0
-    → return clean array
-```
-
-**Pitch (`_compute_pitch_features`):**
-
-- Short-circuits to zeros if clip < 0.1 s or near-silent (`max |amp| < 1e-6`)
-- Uses YIN algorithm (`librosa.yin`) — robust monophonic F0 estimator
-- Filters out non-finite pitch frames before computing mean, variance, range
-
-**Energy (`_compute_energy`):**
-
-- RMS frame energy via librosa, returns temporal mean
-
-**MFCC (`_compute_mfcc`):**
-
-- Default 13 coefficients (matches `MFCC_COEFFICIENTS` in settings)
-- Returns time-averaged MFCC vector as a Python list
-
-**Speech intervals (`_detect_speech_intervals`):**
-
-- Intended for pause detection and speech-to-silence ratio
-- Returns sample-index pairs `[start, end)` for each voiced segment
-- Not yet consumed by `extract()` — will drive `pause_count`, `pause_total_duration_ms`, and `speech_to_silence_ratio`
-
-### Baseline logic (guide spec — not yet in code)
-
-```
-Turns 1–2 (turn_id <= BASELINE_TURNS):
-    → store pitch_mean, speech_rate, energy_mean as personal baseline for candidate_id
-    → pitch_deviation, rate_deviation, energy_deviation = None
-
-Turns 3+:
-    → deviation = (current - baseline) / baseline  for pitch, rate, energy
-```
-
-`baseline.py` is currently **empty**. Expected responsibilities:
-
-- In-memory dict: `{candidate_id: {"pitch_mean", "speech_rate", "energy_mean"}}`
-- `store_baseline(candidate_id, features)` — called on turns 1–2
-- `compute_deviations(candidate_id, features)` — called on turns 3+
-
-### Architecture (target state)
-
-```
-┌──────────────────┐     ┌─────────────────────┐     ┌──────────────────┐
-│  audio_clip      │────▶│  ProsodyExtractor   │────▶│  prosody dict    │
-│  turn_id         │     │  .extract()         │     │  (full schema)   │
-│  candidate_id    │     └─────────┬───────────┘     └──────────────────┘
-│  response_lat_ms │               │
-└──────────────────┘               │
-                                   ▼
-                    ┌──────────────────────────────┐
-                    │  _validate_audio             │
-                    │  _compute_pitch_features     │
-                    │  _compute_energy             │
-                    │  _compute_mfcc               │
-                    │  _detect_speech_intervals    │
-                    │  (+ TODO: rate, jitter,      │
-                    │     shimmer, disfluency)     │
-                    └──────────────┬───────────────┘
+Module 1 (STT)
+  word_timestamps ──┐
+  response_latency ─┤
+                    ▼
+audio_clip ──▶ ProsodyExtractor.extract() ──▶ raw prosody dict
+                    │                              │
+                    │ openSMILE eGeMAPSv02         │
+                    │ librosa VAD/split            │
+                    └──────────────────────────────┘
                                    │
                                    ▼
-                    ┌──────────────────────────────┐
-                    │  baseline.py               │
-                    │  store / compute deviation │
-                    │  (turn_id <= 2 vs 3+)      │
-                    └──────────────────────────────┘
+                    ProsodyBaselineManager.update_with_baseline()
+                      turn_id <= 2 → store baseline, deviations = None
+                      turn_id >  2 → deviation = (current - baseline) / baseline
+                                   │
+                                   ▼
+                           final prosody dict → turn_signal["prosody"]
 ```
 
-### Integration with other modules
-
-| Source | Field used by Module 3 |
-|--------|------------------------|
-| Module 1 (STT) | `response_latency_ms` — pass into `extract()` as optional param |
-| Module 1 (STT) | Transcript text — needed for disfluency detection (not wired yet) |
-| `config/settings.py` | `AUDIO_SAMPLE_RATE=16000`, `MFCC_COEFFICIENTS=13`, `BASELINE_TURNS=2` |
-
-### Open issues in current code (documented — not fixed)
-
-These were observed in `extractor.py` / `baseline.py`. **Do not change without confirming with Krissh:**
-
-1. **`extract()` is `pass`** — no features are returned yet; module is not callable end-to-end.
-2. **`baseline.py` is empty`** — baseline calibration and deviation fields cannot work.
-3. **Config import commented out** — line 3 references `SAMPLE_RATE`, `N_MFCC`, `HOP_LENGTH` which do not exist in `settings.py` (actual names: `AUDIO_SAMPLE_RATE`, `MFCC_COEFFICIENTS`).
-4. **`ValueError` message on line 15** — `raise ValueError("...", audio_arr.shape)` passes shape as a second arg; Python ignores it. Should be an f-string if fixed.
-5. **No `__init__.py`** — package cannot be imported as `from modules.module_3_prosody import ProsodyExtractor`.
-6. **Folder name mismatch** — `module_3_prosody` vs guide's `module_03_prosody`.
-7. **Missing features vs spec** — speech_rate, pauses, disfluencies, jitter, shimmer, speech_to_silence_ratio, deviation fields.
-8. **`_detect_speech_intervals` unused** — helper exists but not connected to pause/ratio metrics.
-9. **No tests** — `tests/test_prosody.py` not created yet.
-
-### Planned public API (once complete)
+**Recommended entry point for backend:**
 
 ```python
-from modules.module_3_prosody import ProsodyExtractor
+from modules.module_3_prosody.pipeline import process_prosody_turn
 
-extractor = ProsodyExtractor()
-prosody = extractor.extract(
-    audio_clip=turn_audio,       # np.ndarray, 16 kHz mono
-    turn_id=1,
-    candidate_id="candidate_abc",
-    response_latency_ms=850.0,   # from Module 1
+prosody = process_prosody_turn(
+    audio_clip=turn_audio,
+    turn_id=turn_id,
+    candidate_id=candidate_id,
+    word_timestamps=stt_result["word_timestamps"],
+    response_latency_ms=stt_result["response_latency_ms"],
 )
 ```
 
-### Tests (planned — guide Section 10)
+### `ProsodyExtractor` — method reference
 
-```powershell
-pytest tests/test_prosody.py -v
+| Method | Source | Output |
+|--------|--------|--------|
+| `_validate_audio` | numpy | Normalized float32 mono array |
+| `_compute_pitch_features` | openSMILE LLD → semitones → **Hz** | pitch mean/var/range |
+| `_compute_energy` | openSMILE LLD `Loudness_sma3` | mean loudness |
+| `_compute_mfcc` | librosa `feature.mfcc` (13 coeffs, time-averaged) | 13-element list |
+| `_compute_jitter` | Functionals `jitterLocal_sma3nz_amean` | float |
+| `_compute_shimmer` | Functionals `shimmerLocaldB_sma3nz_amean` | float |
+| `_detect_speech_intervals` | librosa `effects.split(top_db=30)` | `(N, 2)` sample intervals |
+| `_compute_pause_features` | gaps between intervals > 250 ms | pause_count, pause_total_duration_ms |
+| `_compute_speech_to_silence_ratio` | speech duration / silence duration | float |
+| `_compute_speech_rate` | syllables / speaking duration from word_timestamps | syllables/sec |
+| `_compute_disfluencies` | filler words um/uh/erm/hmm/ah/like | count + timestamps |
+| `_normalize_response_latency` | passthrough with validation | float ≥ 0 |
+
+### `ProsodyBaselineManager` — baseline logic
+
+Matches guide spec:
+
+```
+Turn 1–2 (turn_id <= baseline_turns):
+  → append {pitch_mean, speech_rate, energy_mean} to baseline_turns[]
+  → after 2 turns: compute mean baseline across both turns
+  → pitch_deviation, rate_deviation, energy_deviation = None
+
+Turn 3+:
+  → deviation = (current - baseline) / baseline  (safe: returns 0.0 if baseline ≈ 0)
 ```
 
-Minimum assertions when implemented:
+State stored in memory: `self.baselines[candidate_id]`.
 
-- Extract features from a 30-second audio clip
-- `mfcc_vector` has 13 elements
-- `speech_rate` is a positive float
-- Turns 1–2: deviation fields are `None`
-- Turn 3+: deviation fields are floats
+### Guide compliance checklist
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| All output schema keys present | ✅ | Via extractor + baseline pipeline |
+| Pauses > 250 ms | ✅ | Strict `>` threshold |
+| Disfluency fillers um/uh/erm/like | ✅ | Also detects hmm, ah |
+| Baseline turns 1–2, deviation turn 3+ | ✅ | `ProsodyBaselineManager` |
+| openSMILE | ✅ | eGeMAPSv02 |
+| SpeechBrain | ❌ | Not used — openSMILE sufficient |
+| pitch_mean in Hz | ✅ | Semitones converted via `27.5 * 2^(st/12)` |
+| energy_mean as RMS | ⚠️ | Returns openSMILE loudness (sone) — optional to change |
+| mfcc_vector (13 coeffs) | ✅ | librosa MFCC (eGeMAPS has no MFCCs) |
+| Folder name `module_03_prosody` | ⚠️ | Uses `module_3_prosody` — optional rename |
+| `extract()` API | ✅ | Audio-only; `turn_id`/`candidate_id` on pipeline/baseline |
+
+### Suggested improvements (optional — code works without these)
+
+1. ~~**Convert pitch semitones → Hz**~~ — **Done**
+
+2. ~~**Fix MFCC extraction**~~ — **Done** (librosa for MFCC; openSMILE for jitter/shimmer/pitch)
+
+3. **Cache openSMILE calls in `extract()`** — optional performance optimization (LLD called twice, Functionals three times per turn)
+
+4. **Wire `BASELINE_TURNS` from settings** — optional; `pipeline.py` hardcodes `baseline_turns=2`
+
+5. **Resample non-16 kHz audio** — optional if all input is guaranteed 16 kHz from STT/WebRTC
+
+6. **Rename folder** to `module_03_prosody` — optional naming consistency
+
+7. ~~**Remove unused `turn_id`/`candidate_id` from `extract()`**~~ — **Done** (baseline params stay on `process_prosody_turn()`)
+
+8. **Add `__init__.py`** — optional cleaner imports
+
+9. **Use RMS for `energy_mean`** — optional; current loudness (sone) works for baseline deviation
+
+### Tests
+
+```powershell
+pytest tests/test_prosody.py -v                  # unit tests (mocked openSMILE)
+pytest tests/test_prosody.py -v -m integration   # real openSMILE on 30s fixture
+```
+
+**Coverage:**
+
+| Test group | What it validates |
+|------------|-------------------|
+| `TestProsodyBaselineManager` | Deviations None on turns 1–2; float on turn 3; safe division |
+| `TestProsodyExtractorHelpers` | Validation, pauses, speech rate, disfluencies, latency |
+| `TestProsodyExtractorExtract` | Full raw schema keys (mocked openSMILE) |
+| `TestProsodyPipeline` | End-to-end extractor + baseline via `process_prosody_turn` |
+| `TestProsodyIntegration` | 30s audio clip; mfcc length 13; baseline flow with real openSMILE |
 
 ---
 
 ## Change Log
 
-### 2026-06-24 — Module 3 prosody folder documented (user-added)
+### 2026-06-24 — Module 3 fixes: pitch Hz, librosa MFCC, extract API
+
+**Fixed in `extractor.py`:**
+
+- Pitch: semitones → Hz before mean/variance/range
+- MFCC: librosa instead of openSMILE (eGeMAPS has no MFCCs)
+- `extract()` signature: removed unused `turn_id` / `candidate_id` (baseline stays in pipeline)
+
+**Updated:** `pipeline.py`, `tests/test_prosody.py`, `notes.md`
+
+### 2026-06-24 — Module 3 complete: tests + notes update
+
+**Added:**
+
+- `tests/test_prosody.py` — 13 unit tests + 2 integration tests (openSMILE)
+- `pytest.ini` — registers `integration` marker
+- `tests/conftest.py` — `ensure_prosody_fixture()` for 30s audio
+
+**Fixed:**
+
+- `pipeline.py` import path: `module_03_prosody` → `module_3_prosody` (was broken)
+
+**Updated:**
+
+- `notes.md` — full Module 3 documentation, compliance checklist, improvement suggestions
+
+### 2026-06-24 — Module 3 prosody implementation (user)
 
 **Observed in repo (not modified by assistant):**
 
-- `modules/module_3_prosody/extractor.py` — `ProsodyExtractor` with librosa helpers (pitch, energy, MFCC, speech intervals); `extract()` still `pass`
-- `modules/module_3_prosody/baseline.py` — empty file
+- `modules/module_3_prosody/extractor.py` — full `ProsodyExtractor` with openSMILE eGeMAPS + librosa
+- `modules/module_3_prosody/baseline.py` — `ProsodyBaselineManager`
+- `modules/module_3_prosody/pipeline.py` — `process_prosody_turn()` orchestrator
 
 **Updated:**
 
@@ -699,7 +725,6 @@ Minimum assertions when implemented:
 
 **Not created yet (per build order):**
 
-- Module 3 Prosody — finish `extract()`, `baseline.py`, tests
 - Module 4 Fusion
 - `config/rl_spec.py`
 - Backend / Frontend
@@ -711,18 +736,12 @@ Minimum assertions when implemented:
 
 Per [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md) Section 9 build order:
 
-1. **Module 3 — finish implementation:**
-   - Wire `extract()` to call existing helpers
-   - Implement `baseline.py` (store turns 1–2, deviation turns 3+)
-   - Add pause/rate/disfluency/jitter/shimmer (librosa and/or openSMILE)
-   - Uncomment config imports using `AUDIO_SAMPLE_RATE`, `MFCC_COEFFICIENTS`
-   - Add `__init__.py` and `tests/test_prosody.py`
-2. **Resolve folder naming** — `module_3_prosody` vs `module_03_prosody`
-3. **Module 2 enhancement** — validate per-turn summary with real webcam footage at 2 fps
-4. **Module 4 — Fusion V1** (`concat_fusion.py`) — concatenate text + vision + prosody features
-5. **End-to-end test** — one simulated turn through Modules 1→2→3→4, print `turn_signal`
-6. **Download L2CS weights** to `models/` for production gaze accuracy
-7. **Streaming STT** — integrate with WebRTC audio chunks in Phase 5
+1. **Module 3 improvements** — pitch Hz conversion, MFCC fix, cache openSMILE calls (see Module 3 section)
+2. **Module 4 — Fusion V1** (`concat_fusion.py`) — concatenate text + vision + prosody features
+3. **End-to-end test** — one simulated turn through Modules 1→2→3→4, print `turn_signal`
+4. **Module 2 enhancement** — validate per-turn summary with real webcam footage at 2 fps
+5. **Download L2CS weights** to `models/` for production gaze accuracy
+6. **Streaming STT** — integrate with WebRTC audio chunks in Phase 5
 
 ---
 
@@ -739,7 +758,7 @@ turn_signal = {
     "language": str,                      # Module 1
     "response_latency_ms": float,         # Module 1
     "vision": { ... },                    # Module 2 per-turn summary
-    "prosody": { ... },                   # Module 3 (TODO)
+    "prosody": { ... },                   # Module 3 ✅ via process_prosody_turn()
     "fused_vector": list,                 # Module 4 (TODO)
     "cognitive_load_label": str,          # Module 10 (TODO)
     "distress_score": float,              # Module 10 (TODO)
@@ -747,9 +766,7 @@ turn_signal = {
 }
 ```
 
-Modules 1 and 2 currently supply: `transcript`, `word_timestamps`, `language`, `response_latency_ms`, and `vision`.
-
-Module 3 will supply the `prosody` block once `extract()` and `baseline.py` are complete. Partial helpers already compute pitch, energy, and MFCCs internally.
+Modules 1, 2, and 3 currently supply: `transcript`, `word_timestamps`, `language`, `response_latency_ms`, `vision`, and `prosody` (via `process_prosody_turn()`).
 
 ---
 
