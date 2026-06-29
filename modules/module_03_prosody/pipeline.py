@@ -1,5 +1,5 @@
-from modules.module_3_prosody.extractor import ProsodyExtractor
-from modules.module_3_prosody.baseline import ProsodyBaselineManager
+from modules.module_03_prosody.extractor import ProsodyExtractor
+from modules.module_03_prosody.baseline import ProsodyBaselineManager
 
 
 # Create these once so baseline memory is not lost after every turn
