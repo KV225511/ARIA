@@ -13,9 +13,11 @@ from typing import Any
 
 import numpy as np
 
+from config.settings import VALID_EMOTION_LABELS
 from modules.module_02_vision.emotion import EmotionAnalyzer
 from modules.module_02_vision.face_mesh import AU_KEYS, FaceMeshAnalyzer
 from modules.module_02_vision.gaze import GazeEstimator
+from modules.module_02_vision.baseline import VisionBaselineManager
 
 # Module-level singletons — loaded once, not per frame
 _face_mesh: FaceMeshAnalyzer | None = None
@@ -34,6 +36,10 @@ def _get_analyzers() -> tuple[FaceMeshAnalyzer, EmotionAnalyzer, GazeEstimator]:
     return _face_mesh, _emotion, _gaze
 
 
+def _empty_emotion_distribution() -> dict[str, float]:
+    return {label: 0.0 for label in VALID_EMOTION_LABELS}
+
+
 class VisionProcessor:
     """Process webcam frames and produce per-turn vision summaries."""
 
@@ -41,11 +47,18 @@ class VisionProcessor:
         self._face_mesh, self._emotion, self._gaze = _get_analyzers()
         self._turn_frames: list[dict[str, Any]] = []
         self._turn_start_ms: float = 0.0
+        # P2 — Reuse a single thread pool across frames instead of
+        # creating/destroying one per 500ms frame.
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        self.baseline_manager = VisionBaselineManager()
 
     def start_turn(self, timestamp_ms: float = 0.0) -> None:
         """Reset frame buffer for a new conversational turn."""
         self._turn_frames = []
         self._turn_start_ms = timestamp_ms
+        # P1 — Clear blink state so a blink straddling two turns
+        # doesn't produce a phantom cross-turn blink.
+        self._face_mesh.reset_state()
 
     def process_frame(
         self,
@@ -57,36 +70,51 @@ class VisionProcessor:
 
         Returns full per-frame schema dict, or None if no face detected.
         """
-        mesh_result: dict[str, Any] | None = None
-        emotion_result: dict[str, Any] = {"emotion_label": "blank", "emotion_confidence": 0.0}
-        gaze_result: dict[str, Any] = {
-            "gaze_vector": {"yaw": 0.0, "pitch": 0.0},
-            "eye_contact_score": 0.5,
-        }
+        # Run face mesh and emotion in parallel.
+        # Gaze runs after mesh completes (needs head_pose for fallback).
+        mesh_future = self._executor.submit(
+            self._face_mesh.process_frame, frame, timestamp_ms
+        )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            mesh_future = executor.submit(
-                self._face_mesh.process_frame, frame, timestamp_ms
-            )
-            emotion_future = executor.submit(self._emotion.process_frame, frame)
+        # We don't know if a face exists yet.  Submit emotion speculatively;
+        # if no face, we'll discard the result.
+        emotion_future = self._executor.submit(
+            self._emotion.process_frame, frame, True  # optimistic face_detected
+        )
 
-            mesh_result = mesh_future.result()
-            emotion_result = emotion_future.result()
+        mesh_result = mesh_future.result()
+        face_detected = mesh_result is not None
 
-            head_pose = mesh_result["head_pose"] if mesh_result else None
-            gaze_future = executor.submit(
-                self._gaze.process_frame, frame, head_pose
-            )
-            gaze_result = gaze_future.result()
-
-        if mesh_result is None:
+        if not face_detected:
+            # P2 — Discard speculative emotion result (DeepFace would
+            # have analysed background noise) and return None.
+            emotion_future.result()  # consume to avoid dangling future
             return None
+
+        emotion_result = emotion_future.result()
+
+        # P2 — If mesh found a face but emotion somehow failed, guard it.
+        if not face_detected:
+            emotion_result = {
+                "emotion_label": "blank",
+                "emotion_confidence": 0.0,
+                "emotion_distribution": _empty_emotion_distribution(),
+            }
+
+        head_pose = mesh_result["head_pose"]
+        gaze_future = self._executor.submit(
+            self._gaze.process_frame, frame, head_pose
+        )
+        gaze_result = gaze_future.result()
 
         frame_output = {
             "landmarks": mesh_result["landmarks"],
             "au_activations": mesh_result["au_activations"],
             "emotion_label": emotion_result["emotion_label"],
             "emotion_confidence": emotion_result["emotion_confidence"],
+            "emotion_distribution": emotion_result.get(
+                "emotion_distribution", _empty_emotion_distribution()
+            ),
             "gaze_vector": gaze_result["gaze_vector"],
             "eye_contact_score": gaze_result["eye_contact_score"],
             "head_pose": mesh_result["head_pose"],
@@ -96,13 +124,20 @@ class VisionProcessor:
         self._turn_frames.append(frame_output)
         return frame_output
 
-    def summarize_turn(self, turn_duration_ms: float | None = None) -> dict[str, Any]:
+    def summarize_turn(
+        self,
+        turn_duration_ms: float | None = None,
+        candidate_id: str | None = None,
+        turn_id: int | None = None,
+    ) -> dict[str, Any]:
         """
         Aggregate all frames collected during the current turn.
 
         Args:
             turn_duration_ms: Duration of the turn in ms (for blink_rate).
                 If None, estimated from frame count * 500ms.
+            candidate_id: Unique candidate ID for baseline deviation tracking.
+            turn_id: Current conversational turn number (1-indexed).
         """
         if not self._turn_frames:
             return _empty_turn_summary()
@@ -115,6 +150,15 @@ class VisionProcessor:
             au_means[key] = float(
                 np.mean([f["au_activations"][key] for f in self._turn_frames])
             )
+
+        # Average emotion distribution across all frames in the turn
+        dist_means: dict[str, float] = {label: 0.0 for label in VALID_EMOTION_LABELS}
+        for label in VALID_EMOTION_LABELS:
+            values = [
+                f.get("emotion_distribution", {}).get(label, 0.0)
+                for f in self._turn_frames
+            ]
+            dist_means[label] = round(float(np.mean(values)), 4)
 
         gaze_yaw = float(
             np.mean([f["gaze_vector"]["yaw"] for f in self._turn_frames])
@@ -136,8 +180,9 @@ class VisionProcessor:
         duration_min = max(turn_duration_ms / 60000.0, 1e-6)
         blink_rate = blink_count / duration_min
 
-        return {
+        summary = {
             "emotion_label": emotion_label,
+            "emotion_distribution": dist_means,
             "au_activations": au_means,
             "gaze_vector": {"yaw": gaze_yaw, "pitch": gaze_pitch},
             "eye_contact_score": eye_contact,
@@ -147,17 +192,35 @@ class VisionProcessor:
                 "yaw": head_yaw,
             },
             "blink_rate": float(blink_rate),
+            "au_deviations": None,
+            "eye_contact_deviation": None,
+            "blink_rate_deviation": None,
         }
+
+        if candidate_id is not None and turn_id is not None:
+            summary = self.baseline_manager.update_with_baseline(
+                candidate_id=candidate_id, turn_id=turn_id, vision_summary=summary
+            )
+
+        return summary
+
+    def close(self) -> None:
+        """Shut down the thread pool executor."""
+        self._executor.shutdown(wait=False)
 
 
 def _empty_turn_summary() -> dict[str, Any]:
     return {
         "emotion_label": "blank",
+        "emotion_distribution": {label: 0.0 for label in VALID_EMOTION_LABELS},
         "au_activations": {key: 0.0 for key in AU_KEYS},
         "gaze_vector": {"yaw": 0.0, "pitch": 0.0},
         "eye_contact_score": 0.0,
         "head_pose": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
         "blink_rate": 0.0,
+        "au_deviations": None,
+        "eye_contact_deviation": None,
+        "blink_rate_deviation": None,
     }
 
 
@@ -168,6 +231,7 @@ FRAME_OUTPUT_KEYS = frozenset(
         "au_activations",
         "emotion_label",
         "emotion_confidence",
+        "emotion_distribution",
         "gaze_vector",
         "eye_contact_score",
         "head_pose",

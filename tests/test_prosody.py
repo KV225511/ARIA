@@ -9,9 +9,9 @@ import pandas as pd
 import pytest
 
 from config.settings import AUDIO_SAMPLE_RATE, MFCC_COEFFICIENTS
-from modules.module_3_prosody.baseline import ProsodyBaselineManager
-from modules.module_3_prosody.extractor import ProsodyExtractor
-from modules.module_3_prosody.pipeline import process_prosody_turn
+from modules.module_03_prosody.baseline import ProsodyBaselineManager
+from modules.module_03_prosody.extractor import ProsodyExtractor
+from modules.module_03_prosody.pipeline import process_prosody_turn
 from tests.conftest import ensure_prosody_fixture
 
 RAW_PROSODY_KEYS = frozenset(
@@ -183,15 +183,13 @@ class TestProsodyExtractorHelpers:
 
     def test_pitch_features_converted_to_hz(self):
         extractor = ProsodyExtractor()
-        lld_df = pd.DataFrame({"F0semitoneFrom27.5Hz_sma3nz": [0.0, 12.0]})
-        extractor.smile_lld.process_signal = MagicMock(return_value=lld_df)
-        sample = np.ones(AUDIO_SAMPLE_RATE // 10, dtype=np.float32) * 0.5
+        lld_df = pd.DataFrame({"F0semitoneFrom27.5Hz_sma3nz": [12.0, 24.0]})
 
-        result = extractor._compute_pitch_features(sample, AUDIO_SAMPLE_RATE)
+        result = extractor._compute_pitch_features(lld_df)
 
-        # 0 semitones → 27.5 Hz, 12 semitones → 55.0 Hz
-        assert result["pitch_mean"] == pytest.approx(41.25)
-        assert result["pitch_range"] == pytest.approx(27.5)
+        # 12 semitones → 55.0 Hz, 24 semitones → 110.0 Hz
+        assert result["pitch_mean"] == pytest.approx(82.5)
+        assert result["pitch_range"] == pytest.approx(55.0)
 
     def test_compute_mfcc_returns_nonzero_librosa_coefficients(self, sample_audio):
         extractor = ProsodyExtractor()
@@ -229,9 +227,9 @@ class TestProsodyPipeline:
         extractor = _make_extractor_with_mocks()
 
         with patch(
-            "modules.module_3_prosody.pipeline.prosody_extractor", extractor
+            "modules.module_03_prosody.pipeline.prosody_extractor", extractor
         ), patch(
-            "modules.module_3_prosody.pipeline.prosody_baseline_manager", manager
+            "modules.module_03_prosody.pipeline.prosody_baseline_manager", manager
         ), patch.object(
             extractor,
             "_detect_speech_intervals",
@@ -292,8 +290,8 @@ class TestProsodyIntegration:
             audio = audio.mean(axis=1)
 
         # Use fresh manager/extractor via direct calls to avoid singleton state bleed
-        from modules.module_3_prosody.baseline import ProsodyBaselineManager
-        from modules.module_3_prosody.extractor import ProsodyExtractor
+        from modules.module_03_prosody.baseline import ProsodyBaselineManager
+        from modules.module_03_prosody.extractor import ProsodyExtractor
 
         extractor = ProsodyExtractor()
         manager = ProsodyBaselineManager(baseline_turns=2)

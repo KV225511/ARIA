@@ -9,6 +9,7 @@ from config.settings import VALID_EMOTION_LABELS
 from modules.module_02_vision.emotion import remap_emotion_label
 from modules.module_02_vision.face_mesh import AU_KEYS, _estimate_au_activations
 from modules.module_02_vision.gaze import _eye_contact_from_gaze
+from modules.module_02_vision.baseline import VisionBaselineManager
 from modules.module_02_vision.vision_processor import (
     FRAME_OUTPUT_KEYS,
     VisionProcessor,
@@ -58,6 +59,7 @@ def test_summarize_turn_from_mock_frames():
         "au_activations": {k: 0.5 for k in AU_KEYS},
         "emotion_label": "engaged",
         "emotion_confidence": 0.8,
+        "emotion_distribution": {"engaged": 0.8, "calm": 0.2},
         "gaze_vector": {"yaw": 2.0, "pitch": -1.0},
         "eye_contact_score": 0.9,
         "head_pose": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
@@ -74,7 +76,7 @@ def test_summarize_turn_from_mock_frames():
 
 
 def test_frame_output_keys_complete():
-    assert len(FRAME_OUTPUT_KEYS) == 9
+    assert len(FRAME_OUTPUT_KEYS) == 10
 
 
 @pytest.mark.integration
@@ -89,3 +91,32 @@ def test_process_single_frame_integration():
         assert result["emotion_label"] in VALID_EMOTION_LABELS
         assert "yaw" in result["gaze_vector"]
         assert "pitch" in result["gaze_vector"]
+
+
+def test_vision_baseline_manager_flow():
+    mgr = VisionBaselineManager(baseline_turns=2)
+    base_summary = {
+        "au_activations": {k: 0.2 for k in AU_KEYS},
+        "eye_contact_score": 0.8,
+        "blink_rate": 15.0,
+    }
+
+    # Turn 1 & Turn 2: baselines collected, deviations should be None
+    t1 = mgr.update_with_baseline("cand_1", 1, base_summary)
+    assert t1["au_deviations"] is None
+    assert t1["eye_contact_deviation"] is None
+
+    t2 = mgr.update_with_baseline("cand_1", 2, base_summary)
+    assert t2["au_deviations"] is None
+
+    # Turn 3: 50% increase in eye contact score and AU12
+    high_summary = {
+        "au_activations": {k: (0.3 if k == "AU12" else 0.2) for k in AU_KEYS},
+        "eye_contact_score": 1.2,  # 0.8 -> 1.2 (+50%)
+        "blink_rate": 15.0,
+    }
+    t3 = mgr.update_with_baseline("cand_1", 3, high_summary)
+    assert t3["au_deviations"] is not None
+    assert t3["au_deviations"]["AU12"] == pytest.approx(0.5)
+    assert t3["eye_contact_deviation"] == pytest.approx(0.5)
+    assert t3["blink_rate_deviation"] == pytest.approx(0.0)

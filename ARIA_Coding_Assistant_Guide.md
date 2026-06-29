@@ -72,8 +72,10 @@ ARIA/
 │   │
 │   ├── module_04_fusion/
 │   │   ├── __init__.py
-│   │   ├── concat_fusion.py        # V1 — simple concatenation (build first)
-│   │   └── attention_fusion.py     # V2 — cross-modal attention transformer (build after V1 works)
+│   │   ├── schema.py               # Defines canonical feature vector schema and indices
+│   │   ├── normalizer.py           # Feature scaling and dynamic missing modality imputation
+│   │   ├── fusion_engine.py        # Dynamic orchestration engine
+│   │   └── attention_fusion.py     # Dynamic cross-modal attention gating network (GMU)
 │   │
 │   ├── module_05_ontology/
 │   │   ├── __init__.py
@@ -343,47 +345,49 @@ pip install speechbrain opensmile
 
 ---
 
-### MODULE 4 — Multimodal Fusion Layer
-**Files:** `modules/module_04_fusion/concat_fusion.py`, `attention_fusion.py`
+### MODULE 4 — Dynamic Multimodal Fusion Engine
+**Files:** `schema.py`, `normalizer.py`, `fusion_engine.py`, `attention_fusion.py`
 **Owner:** Krissh
-**Build V1 (concat) first. V2 (attention) only after all three input modules work.**
+**Strategy:** Implement an adaptive, data-driven multimodal optimization model that dynamically fuses text, vision, and voice signals.
 
 **Input:**
 ```python
 transcript: str                     # from Module 1
-vision_summary: dict                # from Module 2 per-turn summary
-prosody_features: dict              # from Module 3
+vision_summary: dict                # from Module 2 per-turn summary (includes emotion_distribution & deviations)
+prosody_features: dict              # from Module 3 (includes personal baseline deviations)
 turn_id: int
+candidate_id: str
 ```
 
-**V1 Output (concat_fusion.py):**
+**Final Dynamic Output (`fusion_engine.py` / `attention_fusion.py`):**
 ```python
 {
-    "fused_vector": list,           # concatenated feature vector, fixed dimension
-    "fusion_method": "concat",
-    "vector_dim": int               # document this value once computed
-}
-```
-
-**V2 Output (attention_fusion.py):**
-```python
-{
-    "fused_vector": list,           # attention-weighted fused vector
-    "fusion_method": "cross_modal_attention",
-    "modality_weights": {           # how much each modality contributed this turn
+    "fused_vector": list,           # Optimized latent feature vector aligned to schema.FULL_FEATURE_SCHEMA
+    "fusion_method": "cross_modal_attention_gated",
+    "modality_weights": {           # Dynamic softmax attention weights normalized across sensors
         "text": float,
         "vision": float,
         "prosody": float
     },
+    "modality_confidences": dict,   # Real-time sensor reliability estimates [0.0, 1.0]
+    "modality_mask": dict,          # Binary flags indicating which modalities were active vs imputed
+    "cross_modal_dissonance": float,# Flag indicating dissonance across modalities (e.g., confident words + shaking voice)
     "vector_dim": int
 }
 ```
 
-**V2 Architecture:**
-- Three separate encoders: text encoder (BERT-small), vision encoder (linear projection), prosody encoder (linear projection)
-- Cross-modal attention: each modality attends to the other two
-- Output: weighted sum → single fixed-dim vector
-- Trained with session-level competency labels as supervision signal
+**Dynamic Optimization & Enhancement Requirements (Instructions for Assistants):**
+1. **Dynamic Missing Modality Imputation (`normalizer.py`):**
+   - Never inject hardcoded `0.0` or `-1.0` magic numbers when a modality drops out (e.g., webcam disconnects or candidate stays silent).
+   - If a signal is missing or uncalibrated during Turns 1–2, dynamically impute missing features using the candidate's historical baseline average or apply dynamic binary attention masks (`modality_mask: {"text": 1, "vision": 0, "prosody": 1}`).
+2. **Non-Lossy Continuous Feature Alignment (`schema.py` & `fusion_engine.py`):**
+   - Preserve continuous probability distributions (`emotion_distribution`) and relative deviation vectors (`au_deviations`, `pitch_deviation`) rather than compressing categorical labels into arbitrary scalar scores.
+3. **Dynamic Cross-Modal Gating Network (`attention_fusion.py`):**
+   - Implement a Gated Multimodal Unit (GMU) or Cross-Attention layer that dynamically calculates real-time confidence scores per sensor ($c_{\text{text}}, c_{\text{vision}}, c_{\text{prosody}}$).
+   - If vision confidence degrades (e.g. poor lighting or face occluded), the gating network automatically shifts attention weights onto speech semantics and vocal prosody.
+4. **System-Wide Dynamic Enhancements:**
+   - **Temporal Warmup Weighting:** Weight recent interview turns higher than earlier turns when computing overall candidate assessment, allowing candidates who experience initial interview anxiety to warm up without permanent penalty.
+   - **Closed-Loop Adaptive Questioning:** Feed cognitive load anomalies ($Z$-scores) and cross-modal dissonance scores directly to Module 8 (LLM Question Generator) so the interviewer agent dynamically scaffolds difficulty or asks probe questions when dissonance is detected.
 
 ---
 

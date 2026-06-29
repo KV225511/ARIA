@@ -115,6 +115,10 @@ def _eye_contact_from_gaze(yaw: float, pitch: float) -> float:
     Map gaze angles to 0-1 eye contact score.
 
     Assumes camera is at frame center; score decays as |yaw| and |pitch| increase.
+
+    TODO: The weights (0.6/0.4) and divisors (30°/25°) are arbitrary.  When
+    per-candidate vision baseline calibration is implemented, derive these from
+    the candidate's natural gaze center observed during turns 1–2.
     """
     yaw_penalty = min(abs(yaw) / 30.0, 1.0)
     pitch_penalty = min(abs(pitch) / 25.0, 1.0)

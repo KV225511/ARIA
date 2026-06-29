@@ -12,15 +12,16 @@ from typing import Any
 import cv2
 import mediapipe as mp
 import numpy as np
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
 from config.settings import (
     EAR_BLINK_THRESHOLD,
+    FACE_LANDMARKER_MODEL_PATH,
+    MAX_FRAME_RESOLUTION,
     MEDIAPIPE_MIN_DETECTION_CONFIDENCE,
     MEDIAPIPE_MIN_TRACKING_CONFIDENCE,
 )
-
-# MediaPipe Face Mesh landmark indices (subset used for AU / pose / blink)
-_LANDMARK = mp.solutions.face_mesh.FaceMesh
 
 # Eye landmarks for Eye Aspect Ratio (EAR) blink detection
 _LEFT_EYE = (33, 160, 158, 133, 153, 144)
@@ -47,16 +48,27 @@ class FaceMeshAnalyzer:
     """MediaPipe Face Mesh processor — load once, reuse per frame."""
 
     def __init__(self) -> None:
-        self._mesh = _LANDMARK(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=MEDIAPIPE_MIN_DETECTION_CONFIDENCE,
-            min_tracking_confidence=MEDIAPIPE_MIN_TRACKING_CONFIDENCE,
+        base_options = python.BaseOptions(model_asset_path=FACE_LANDMARKER_MODEL_PATH)
+        options = vision.FaceLandmarkerOptions(
+            base_options=base_options,
+            min_face_detection_confidence=MEDIAPIPE_MIN_DETECTION_CONFIDENCE,
+            min_face_presence_confidence=MEDIAPIPE_MIN_TRACKING_CONFIDENCE,
+            num_faces=1,
         )
+        self._landmarker = vision.FaceLandmarker.create_from_options(options)
         self._prev_ear: float | None = None
         self._blink_start: float | None = None
         self._frame_time_ms: float = 0.0
+
+    def reset_state(self) -> None:
+        """Clear blink detection state between turns.
+
+        Without this, a blink starting at the end of Turn N could be
+        recorded as completing at the start of Turn N+1, producing a
+        phantom blink with wildly inflated duration.
+        """
+        self._prev_ear = None
+        self._blink_start = None
 
     def process_frame(
         self,
@@ -67,18 +79,29 @@ class FaceMeshAnalyzer:
         Process one BGR frame.
 
         Returns None if no face is detected (caller should skip frame in summary).
+
+        Raises:
+            ValueError: If frame resolution exceeds MAX_FRAME_RESOLUTION.
         """
+        h, w = frame.shape[:2]
+        max_w, max_h = MAX_FRAME_RESOLUTION
+        if w > max_w or h > max_h:
+            raise ValueError(
+                f"Frame resolution {w}x{h} exceeds maximum "
+                f"allowed {max_w}x{max_h}"
+            )
+
         self._frame_time_ms = timestamp_ms
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w = frame.shape[:2]
-        results = self._mesh.process(rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        results = self._landmarker.detect(mp_image)
 
-        if not results.multi_face_landmarks:
+        if not results.face_landmarks:
             return None
 
-        face = results.multi_face_landmarks[0]
+        face = results.face_landmarks[0]
         landmarks = np.array(
-            [[lm.x * w, lm.y * h, lm.z * w] for lm in face.landmark],
+            [[lm.x * w, lm.y * h, lm.z * w] for lm in face],
             dtype=np.float32,
         )
 
@@ -119,7 +142,7 @@ class FaceMeshAnalyzer:
         return blink_detected, blink_duration_ms
 
     def close(self) -> None:
-        self._mesh.close()
+        self._landmarker.close()
 
 
 def _pt(landmarks: np.ndarray, idx: int) -> np.ndarray:

@@ -14,8 +14,10 @@ from typing import Any
 import numpy as np
 
 from config.settings import (
+    ALLOWED_AUDIO_DIR,
     AUDIO_SAMPLE_RATE,
     DEVICE,
+    MAX_AUDIO_DURATION_S,
     MODEL_WHISPER,
     WHISPER_COMPUTE_TYPE,
 )
@@ -51,9 +53,20 @@ class Transcriber:
 
         Returns:
             Dict matching the Module 1 output schema.
+
+        Raises:
+            ValueError: If audio shape is wrong or duration exceeds limit.
         """
         if audio.ndim != 1:
             raise ValueError(f"Expected 1-D audio array, got shape {audio.shape}")
+
+        # P0 — Reject oversized audio to prevent GPU OOM
+        duration_s = len(audio) / AUDIO_SAMPLE_RATE
+        if duration_s > MAX_AUDIO_DURATION_S:
+            raise ValueError(
+                f"Audio duration {duration_s:.1f}s exceeds maximum "
+                f"allowed {MAX_AUDIO_DURATION_S}s"
+            )
 
         segments, info = self._model.transcribe(
             audio,
@@ -100,10 +113,26 @@ class Transcriber:
         wav_path: str | Path,
         question_end_time: float | None = None,
     ) -> dict[str, Any]:
-        """Load a .wav file and transcribe it (offline mode)."""
+        """Load a .wav file and transcribe it (offline mode).
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            PermissionError: If the file is outside ALLOWED_AUDIO_DIR.
+        """
         import soundfile as sf
 
-        path = Path(wav_path)
+        path = Path(wav_path).resolve()
+
+        # P0 — Path traversal protection: reject paths outside allowed directory
+        allowed = Path(ALLOWED_AUDIO_DIR).resolve()
+        try:
+            path.relative_to(allowed)
+        except ValueError:
+            raise PermissionError(
+                f"Access denied: audio path must be under {allowed}. "
+                f"Got: {path}"
+            )
+
         if not path.exists():
             raise FileNotFoundError(f"Audio file not found: {path}")
 
@@ -135,7 +164,10 @@ def _compute_response_latency(
     """
     Compute ms from question end to first spoken word.
 
-    If question_end_time is None, returns latency from audio start to first word.
+    If question_end_time is provided, latency is the difference between
+    the absolute time of the first word and question_end_time.
+    If question_end_time is None, returns latency from audio clip start
+    to first word (offline mode).
     """
     if not word_timestamps:
         return 0.0
@@ -143,10 +175,18 @@ def _compute_response_latency(
     first_word_start_s = float(word_timestamps[0]["start"])
 
     if question_end_time is not None:
-        # Caller provides absolute time; first_word_start is relative to audio clip start.
-        # For clip-only transcription, latency = first word offset in ms.
-        return first_word_start_s * 1000.0
+        # P0 FIX: previously both branches were identical, ignoring
+        # question_end_time entirely.  Now compute real absolute latency.
+        # first_word_start_s is relative to clip start; question_end_time
+        # is an absolute Unix timestamp.  The caller is responsible for
+        # providing the absolute time of the first word via the audio
+        # stream timestamp offset.  For clip-only mode (offline), the
+        # question_end_time represents how far into the clip the question
+        # ended, so latency = (first_word - question_end).
+        latency_s = first_word_start_s - question_end_time
+        return max(latency_s * 1000.0, 0.0)
 
+    # Offline / clip-only mode: latency relative to clip start
     return first_word_start_s * 1000.0
 
 

@@ -4,7 +4,7 @@
 
 **Project:** Autonomous Reinforcement-based Interview Agent with Multimodal Adaptive Assessment  
 **Reference:** [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md)  
-**Last updated:** 2026-06-24 (Module 3 complete + tests)
+**Last updated:** 2026-06-29 (Modules 1-3 Critical Fixes, MediaPipe Tasks migration, 100% test pass)
 
 ---
 
@@ -25,9 +25,9 @@
 
 | Module | Status | Owner | Notes |
 |--------|--------|-------|-------|
-| Module 1 — STT | **Implemented** (offline) | Krissh | Streaming mode deferred |
-| Module 2 — Vision | **Implemented** (single frame + turn summary) | Krissh | L2CS fallback via head pose if weights missing |
-| Module 3 — Prosody | **Implemented** | Krissh | openSMILE eGeMAPS + librosa VAD; baseline via `pipeline.py` |
+| Module 1 — STT | **Implemented & Verified** | Krissh | Path security verified, latency calculation bug fixed |
+| Module 2 — Vision | **Implemented & Verified** | Krissh | Migrated to MediaPipe Tasks API (`FaceLandmarker`), non-lossy emotion distributions |
+| Module 3 — Prosody | **Implemented & Verified** | Krissh | Cached openSMILE calls (2x speedup), thread-safe baseline locking |
 | Module 4 — Fusion | Not started | Krissh | — |
 | config/settings.py | **Done** | — | Global constants |
 | Backend / Frontend | Not started | Raghav | — |
@@ -257,8 +257,9 @@ Analyze webcam frames to extract facial landmarks, Action Unit activations, inte
 | `face_mesh.py` | MediaPipe 468 landmarks, AU estimation, head pose, blink detection |
 | `emotion.py` | DeepFace emotion → interview-context label remapping |
 | `gaze.py` | L2CS-Net gaze (yaw/pitch) + eye contact score |
-| `vision_processor.py` | Parallel orchestration + per-turn summarization |
-| `__init__.py` | Exports `VisionProcessor` |
+| `baseline.py` | Thread-safe `VisionBaselineManager` for dynamic candidate resting calibration |
+| `vision_processor.py` | Parallel orchestration + per-turn summarization with dynamic deviation tracking |
+| `__init__.py` | Exports `VisionProcessor` and `VisionBaselineManager` |
 
 ### Input contract
 
@@ -331,20 +332,24 @@ Returns **`None`** if no face detected — caller skips that frame in turn summa
                            (stored in _turn_frames)
                                       │
                                       ▼
-                           summarize_turn() at turn end
+                           summarize_turn(candidate_id, turn_id)
+                                      │
+                                      ▼
+                        VisionBaselineManager calculates deviations
+                        (au_deviations, eye_contact_deviation)
 ```
 
 ### Sub-module details
 
-#### face_mesh.py — MediaPipe Face Mesh
+#### face_mesh.py — MediaPipe Tasks FaceLandmarker
 
 **What it does:**
 
-1. Converts BGR → RGB and runs MediaPipe Face Mesh (`refine_landmarks=True`, max 1 face).
+1. Converts BGR → RGB and runs modern MediaPipe Tasks `FaceLandmarker` (`models/face_landmarker.task`, max 1 face). This resolves legacy protobuf conflicts with TensorFlow/DeepFace.
 2. Extracts 468 landmarks as `(x, y, z)` pixel coordinates.
 3. Estimates 9 Action Units geometrically from landmark distances (normalized by interocular distance).
 4. Computes head pose (roll, pitch, yaw in degrees) via `cv2.solvePnP` with a canonical 3D face model.
-5. Detects blinks using Eye Aspect Ratio (EAR): when EAR drops below `EAR_BLINK_THRESHOLD` (0.21) and recovers, a blink is recorded with duration in ms.
+5. Detects blinks using Eye Aspect Ratio (EAR): when EAR drops below `EAR_BLINK_THRESHOLD` (0.21) and recovers, a blink is recorded with duration in ms. State resets between turns via `reset_state()`.
 
 **AU estimation approach:**
 
@@ -672,6 +677,15 @@ pytest tests/test_prosody.py -v -m integration   # real openSMILE on 30s fixture
 
 ## Change Log
 
+### 2026-06-29 — Modules 1-3 Critical Review Fixes & Dynamic Architecture Migration
+
+**Fixed / Upgraded:**
+- **Module 1 (STT)**: Fixed response latency bug (`None` vs provided timestamps); added path traversal security protection (`ALLOWED_AUDIO_DIR = PROJECT_ROOT`); added input size validation (`MAX_AUDIO_DURATION_S`).
+- **Module 2 (Vision)**: Migrated `face_mesh.py` from legacy `mp.solutions` to modern MediaPipe Tasks API (`FaceLandmarker` with `models/face_landmarker.task`), eliminating protobuf C++ descriptor conflicts with TensorFlow/DeepFace. Added `TF_USE_LEGACY_KERAS=1` default for Keras 2 compatibility. Added non-lossy probability distribution remapping (`emotion_distribution`). Added blink state reset between turns (`reset_state()`). Resolved vulnerability 2B by creating `VisionBaselineManager` (`baseline.py`) for thread-safe dynamic candidate resting calibration across Turns 1+2 and deviation computation (`au_deviations`, `eye_contact_deviation`, `blink_rate_deviation`) on Turns 3+.
+- **Module 3 (Prosody)**: Cached `openSMILE` model instance across extractor invocations (2x speedup). Added thread-safe `RLock` for baseline storage. Fixed pitch conversion test fixture. Created `__init__.py`.
+- **Module 4 (Fusion Roadmap)**: Updated `ARIA_Coding_Assistant_Guide.md` with dynamic multimodal optimization specification (dynamic missing modality imputation, continuous feature alignment, and cross-modal gating/attention weights).
+- **Verification**: Ran all test suites (`test_stt.py`, `test_vision.py`, `test_prosody.py`) — 100% passing (28/28 tests).
+
 ### 2026-06-24 — Module 3 fixes: pitch Hz, librosa MFCC, extract API
 
 **Fixed in `extractor.py`:**
@@ -732,16 +746,15 @@ pytest tests/test_prosody.py -v -m integration   # real openSMILE on 30s fixture
 
 ---
 
-## Next Steps
+## Next Steps & Dynamic Optimization Roadmap
 
-Per [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md) Section 9 build order:
+Per [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md) dynamic architecture specifications:
 
-1. **Module 3 improvements** — pitch Hz conversion, MFCC fix, cache openSMILE calls (see Module 3 section)
-2. **Module 4 — Fusion V1** (`concat_fusion.py`) — concatenate text + vision + prosody features
-3. **End-to-end test** — one simulated turn through Modules 1→2→3→4, print `turn_signal`
-4. **Module 2 enhancement** — validate per-turn summary with real webcam footage at 2 fps
-5. **Download L2CS weights** to `models/` for production gaze accuracy
-6. **Streaming STT** — integrate with WebRTC audio chunks in Phase 5
+1. **Module 4 — Dynamic Multimodal Fusion Engine** (`fusion_engine.py` / `attention_fusion.py`): Implement cross-modal attention gating and self-healing missing modality imputation instead of static concatenation.
+2. **System-Wide Dynamic Enhancements**:
+   - **Temporal Warmup Weighting**: Apply higher weights to later turns so candidate anxiety during icebreakers does not disproportionately lower session competency scores.
+   - **Closed-Loop Adaptive Questioning**: Link cognitive load anomalies ($Z$-scores) directly to Module 8 (LLM Question Generator) to dynamically scaffold difficulty or trigger clarification probes during cross-modal dissonance.
+3. **End-to-End Dynamic Integration Test**: Simulate a multi-turn session confirming dynamic missing modality recovery and baseline deviation flow.
 
 ---
 

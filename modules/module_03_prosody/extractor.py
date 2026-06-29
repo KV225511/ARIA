@@ -1,17 +1,29 @@
+"""
+Module 3 — Prosody Feature Extraction
+
+Extracts speech prosody features from a candidate's turn audio:
+pitch, energy, MFCCs, pauses, disfluencies, speech rate, jitter,
+shimmer, and personal-baseline deviations.
+
+Uses openSMILE eGeMAPSv02 for acoustic features and librosa for
+VAD / MFCC.  openSMILE is called exactly once for LLD and once for
+Functionals per turn (cached), not per-feature.
+"""
+
 import re
 
 import librosa
 import numpy as np
 import opensmile
 
-# Use your actual settings names here.
-# According to ARIA guide:
-# AUDIO_SAMPLE_RATE = 16000
-# MFCC_COEFFICIENTS = 13
 from config.settings import AUDIO_SAMPLE_RATE, MFCC_COEFFICIENTS
 
 # openSMILE eGeMAPS F0 is semitones relative to this reference frequency
 F0_REFERENCE_HZ = 27.5
+
+# P1 — Cap value for speech_to_silence_ratio when silence is near-zero
+# instead of returning raw speech duration in seconds (wrong unit).
+MAX_SPEECH_SILENCE_RATIO = 1e6
 
 
 def _semitones_to_hz(semitones: np.ndarray) -> np.ndarray:
@@ -32,41 +44,49 @@ class ProsodyExtractor:
         )
 
     def extract(self, audio_clip, word_timestamps=None, response_latency_ms=None):
-        audio_arr=self._validate_audio(audio_clip)
-        
-        duration=self._compute_duration(audio_arr,AUDIO_SAMPLE_RATE)
-        
-        pitch_features=self._compute_pitch_features(audio_arr,AUDIO_SAMPLE_RATE)
-        energy_mean=self._compute_energy(audio_arr,AUDIO_SAMPLE_RATE)
-        mfcc_vector=self._compute_mfcc(audio_arr,AUDIO_SAMPLE_RATE)
-        jitter=self._compute_jitter(audio_arr,AUDIO_SAMPLE_RATE)
-        shimmer=self._compute_shimmer(audio_arr,AUDIO_SAMPLE_RATE)
-        
-        intervals=self._detect_speech_intervals(audio_arr)
-        
-        pause_features=self._compute_pause_features(intervals,AUDIO_SAMPLE_RATE)
-        speech_to_silence_ratio=self._compute_speech_to_silence_ratio(intervals,duration,AUDIO_SAMPLE_RATE)
-        
-        speech_rate=self._compute_speech_rate(word_timestamps)
-        disfluency_features=self._compute_disfluencies(word_timestamps)
-        
-        latency=self._normalize_response_latency(response_latency_ms)
-        
+        audio_arr = self._validate_audio(audio_clip)
+
+        duration = self._compute_duration(audio_arr, AUDIO_SAMPLE_RATE)
+
+        # P1 — Process openSMILE exactly ONCE for each level and cache the
+        # resulting DataFrames.  Previously LLD was called 2× and Functionals
+        # 2× per turn, doubling latency for no reason.
+        lld_df = self._compute_lld(audio_arr, AUDIO_SAMPLE_RATE)
+        func_df = self._compute_functionals(audio_arr, AUDIO_SAMPLE_RATE)
+
+        pitch_features = self._compute_pitch_features(lld_df)
+        energy_mean = self._compute_energy(lld_df)
+        mfcc_vector = self._compute_mfcc(audio_arr, AUDIO_SAMPLE_RATE)
+        jitter = self._compute_jitter(func_df)
+        shimmer = self._compute_shimmer(func_df)
+
+        intervals = self._detect_speech_intervals(audio_arr)
+
+        pause_features = self._compute_pause_features(intervals, AUDIO_SAMPLE_RATE)
+        speech_to_silence_ratio = self._compute_speech_to_silence_ratio(
+            intervals, duration, AUDIO_SAMPLE_RATE
+        )
+
+        speech_rate = self._compute_speech_rate(word_timestamps)
+        disfluency_features = self._compute_disfluencies(word_timestamps)
+
+        latency = self._normalize_response_latency(response_latency_ms)
+
         return {
-    **pitch_features,
-    "speech_rate": speech_rate,
-    **pause_features,
-    "disfluency_count": disfluency_features["disfluency_count"],
-    "disfluency_timestamps": disfluency_features["disfluency_timestamps"],
-    "response_latency_ms": latency,
-    "energy_mean": energy_mean,
-    "jitter": jitter,
-    "shimmer": shimmer,
-    "mfcc_vector": mfcc_vector,
-    "speech_to_silence_ratio": speech_to_silence_ratio,
-}
-        
-        
+            **pitch_features,
+            "speech_rate": speech_rate,
+            **pause_features,
+            "disfluency_count": disfluency_features["disfluency_count"],
+            "disfluency_timestamps": disfluency_features["disfluency_timestamps"],
+            "response_latency_ms": latency,
+            "energy_mean": energy_mean,
+            "jitter": jitter,
+            "shimmer": shimmer,
+            "mfcc_vector": mfcc_vector,
+            "speech_to_silence_ratio": speech_to_silence_ratio,
+        }
+
+    # ── Audio validation ───────────────────────────────────────────────────
 
     def _validate_audio(self, audio_clip) -> np.ndarray:
         audio_arr = np.asarray(audio_clip)
@@ -101,19 +121,41 @@ class ProsodyExtractor:
         duration = total_sample / sample_rate
         return float(duration)
 
-    def _compute_pitch_features(self, audio_arr, sample_rate) -> dict[str, float]:
+    # ── Cached openSMILE calls ─────────────────────────────────────────────
+
+    def _compute_lld(self, audio_arr, sample_rate):
+        """Single LLD extraction — used for pitch and energy."""
         if len(audio_arr) < int(0.1 * sample_rate) or np.max(np.abs(audio_arr)) < 1e-6:
+            return None
+        try:
+            df = self.smile_lld.process_signal(audio_arr, sample_rate)
+            return df if not df.empty else None
+        except Exception:
+            return None
+
+    def _compute_functionals(self, audio_arr, sample_rate):
+        """Single Functionals extraction — used for jitter and shimmer."""
+        if len(audio_arr) < int(0.1 * sample_rate) or np.max(np.abs(audio_arr)) < 1e-6:
+            return None
+        try:
+            df = self.smile_functionals.process_signal(audio_arr, sample_rate)
+            return df if not df.empty else None
+        except Exception:
+            return None
+
+    # ── Pitch ──────────────────────────────────────────────────────────────
+
+    def _compute_pitch_features(self, lld_df) -> dict[str, float]:
+        if lld_df is None:
             return {
                 "pitch_mean": 0.0,
                 "pitch_variance": 0.0,
                 "pitch_range": 0.0,
             }
 
-        lld_df = self.smile_lld.process_signal(audio_arr, sample_rate)
-
         pitch_col = "F0semitoneFrom27.5Hz_sma3nz"
 
-        if lld_df.empty or pitch_col not in lld_df.columns:
+        if pitch_col not in lld_df.columns:
             return {
                 "pitch_mean": 0.0,
                 "pitch_variance": 0.0,
@@ -141,18 +183,15 @@ class ProsodyExtractor:
             "pitch_range": range_val,
         }
 
-    def _compute_energy(self, audio_arr, sample_rate) -> float:
-        if len(audio_arr) == 0:
-            return 0.0
+    # ── Energy ─────────────────────────────────────────────────────────────
 
-        if np.max(np.abs(audio_arr)) < 1e-6:
+    def _compute_energy(self, lld_df) -> float:
+        if lld_df is None:
             return 0.0
-
-        lld_df = self.smile_lld.process_signal(audio_arr, sample_rate)
 
         energy_col = "Loudness_sma3"
 
-        if lld_df.empty or energy_col not in lld_df.columns:
+        if energy_col not in lld_df.columns:
             return 0.0
 
         energy_values = lld_df[energy_col].to_numpy(dtype=np.float32)
@@ -163,6 +202,8 @@ class ProsodyExtractor:
 
         return float(np.mean(valid_energy))
 
+    # ── MFCC ───────────────────────────────────────────────────────────────
+
     def _compute_mfcc(self, audio_arr, sample_rate, n_mfcc=None) -> list[float]:
         """13 MFCC coefficients via librosa (eGeMAPS does not include MFCCs)."""
         n_mfcc = n_mfcc or MFCC_COEFFICIENTS
@@ -171,6 +212,24 @@ class ProsodyExtractor:
 
         mfcc_mat = librosa.feature.mfcc(y=audio_arr, sr=sample_rate, n_mfcc=n_mfcc)
         return np.mean(mfcc_mat, axis=1).astype(float).tolist()
+
+    # ── Jitter / Shimmer (from cached Functionals) ─────────────────────────
+
+    def _compute_jitter(self, func_df) -> float:
+        if func_df is None:
+            return 0.0
+        features = func_df.iloc[0].to_dict()
+        jitter = features.get("jitterLocal_sma3nz_amean", 0.0)
+        return float(jitter)
+
+    def _compute_shimmer(self, func_df) -> float:
+        if func_df is None:
+            return 0.0
+        features = func_df.iloc[0].to_dict()
+        shimmer = features.get("shimmerLocaldB_sma3nz_amean", 0.0)
+        return float(shimmer)
+
+    # ── Speech intervals / pauses ──────────────────────────────────────────
 
     def _detect_speech_intervals(self, audio_arr, top_db=30) -> np.ndarray:
         if len(audio_arr) == 0:
@@ -185,71 +244,50 @@ class ProsodyExtractor:
         )
 
         return intervals
-    def _compute_pause_features(self,intervals,sample_rate,min_pause_ms=250)->dict[str,int |float]:
-        if len(intervals)==0 or len(intervals)==1:
+
+    def _compute_pause_features(self, intervals, sample_rate, min_pause_ms=250) -> dict[str, int | float]:
+        if len(intervals) == 0 or len(intervals) == 1:
             return {
-                "pause_count":0,
-                "pause_total_duration_ms":0.0    
+                "pause_count": 0,
+                "pause_total_duration_ms": 0.0
             }
-        count=0
-        tot_duration=0
-        for i in range(1,len(intervals)):
-            prev=intervals[i-1][1]
-            curr=intervals[i][0]
-            diff=curr-prev
-            gap_ms=diff/sample_rate*1000
-            if gap_ms>min_pause_ms:
-                count+=1
-                tot_duration+=gap_ms
-        
+        count = 0
+        tot_duration = 0
+        for i in range(1, len(intervals)):
+            prev = intervals[i - 1][1]
+            curr = intervals[i][0]
+            diff = curr - prev
+            gap_ms = diff / sample_rate * 1000
+            if gap_ms > min_pause_ms:
+                count += 1
+                tot_duration += gap_ms
+
         return {
-            "pause_count":int(count),
-            "pause_total_duration_ms":float(tot_duration)
+            "pause_count": int(count),
+            "pause_total_duration_ms": float(tot_duration)
         }
-    def _compute_speech_to_silence_ratio(self,intervals,total_duration,sample_rate)->float:
-        if intervals is None or len(intervals)==0:
+
+    def _compute_speech_to_silence_ratio(self, intervals, total_duration, sample_rate) -> float:
+        if intervals is None or len(intervals) == 0:
             return 0.0
-        speech_duration=0.0
+        speech_duration = 0.0
         for interval in intervals:
-            start=interval[0]
-            end=interval[1]
-            interval_duration=(end-start)/sample_rate
-            speech_duration+=interval_duration
-        silence_duration=total_duration-speech_duration
-        silence_duration=max(silence_duration,0.0)
-        if silence_duration<1e-4:
-            return speech_duration
-        ratio=speech_duration/silence_duration
+            start = interval[0]
+            end = interval[1]
+            interval_duration = (end - start) / sample_rate
+            speech_duration += interval_duration
+        silence_duration = total_duration - speech_duration
+        silence_duration = max(silence_duration, 0.0)
+        # P1 FIX: Previously returned raw speech_duration (in seconds)
+        # when silence was near-zero — wrong unit (not a ratio).
+        # Now returns a capped max value to keep it dimensionless.
+        if silence_duration < 1e-4:
+            return float(MAX_SPEECH_SILENCE_RATIO)
+        ratio = speech_duration / silence_duration
         return float(ratio)
-    
-    def _compute_jitter(self,audio_arr,sample_rate)->float:
-        if audio_arr is None or len(audio_arr)==0:
-            return 0.0
-        if np.max(np.abs(audio_arr)) < 1e-6:
-            return 0.0
-        df=self.smile_functionals.process_signal(audio_arr,sample_rate)
-        
-        if df is None or df.empty:
-            return 0.0
-        features=df.iloc[0].to_dict()
-        jitter=features.get("jitterLocal_sma3nz_amean", 0.0)
-            
-        return float(jitter)
-    
-    def _compute_shimmer(self,audio_arr,sample_rate)->float:
-        if audio_arr is None or len(audio_arr)==0:
-            return 0.0
-        if np.max(np.abs(audio_arr)) < 1e-6:
-            return 0.0
-        df=self.smile_functionals.process_signal(audio_arr,sample_rate)
-        
-        if df is None or df.empty:
-            return 0.0
-        features=df.iloc[0].to_dict()
-        shimmer=features.get("shimmerLocaldB_sma3nz_amean", 0.0)
-            
-        return float(shimmer)
-    
+
+    # ── Speech rate / disfluencies ─────────────────────────────────────────
+
     def _estimate_syllables(self, word: str) -> int:
         word = word.lower().strip()
 
@@ -277,7 +315,7 @@ class ProsodyExtractor:
 
         # Every spoken word should count as at least 1 syllable
         return max(syllable_count, 1)
-    
+
     def _compute_speech_rate(self, word_timestamps) -> float:
         if word_timestamps is None or len(word_timestamps) == 0:
             return 0.0
@@ -299,31 +337,30 @@ class ProsodyExtractor:
         speech_rate = total_syllables / speaking_duration
 
         return float(speech_rate)
-    
-    
-    def _compute_disfluencies(self,word_timestamps)->dict[str, int | list[float]]:
-        if word_timestamps is None or len(word_timestamps)==0:
+
+    def _compute_disfluencies(self, word_timestamps) -> dict[str, int | list[float]]:
+        if word_timestamps is None or len(word_timestamps) == 0:
             return {
-            "disfluency_count":0,
-            "disfluency_timestamps":[]
-        }
-        
-        filler={"um","uh","erm","hmm","ah","like"}
-        count=0
-        timestamps=[]
+                "disfluency_count": 0,
+                "disfluency_timestamps": []
+            }
+
+        filler = {"um", "uh", "erm", "hmm", "ah", "like"}
+        count = 0
+        timestamps = []
         for item in word_timestamps:
-            word=item.get("word","")
-            word=word.lower().strip()
+            word = item.get("word", "")
+            word = word.lower().strip()
             word = re.sub(r"[^a-z]", "", word)
             if word in filler:
-                count+=1
-                timestamps.append(float(item.get("start",0.0)))
-        
+                count += 1
+                timestamps.append(float(item.get("start", 0.0)))
+
         return {
-            "disfluency_count":count,
-            "disfluency_timestamps":timestamps
+            "disfluency_count": count,
+            "disfluency_timestamps": timestamps
         }
-        
+
     def _normalize_response_latency(self, response_latency_ms) -> float:
         if response_latency_ms is None:
             return 0.0
