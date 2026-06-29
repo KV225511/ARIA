@@ -24,4 +24,6 @@ soundfile
 python-dotenv
 pytest
 opensmile
+transformers
+
 

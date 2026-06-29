@@ -43,6 +43,9 @@ class ProsodyExtractor:
             feature_level=opensmile.FeatureLevel.LowLevelDescriptors,
         )
 
+        self._wavlm_model = None
+        self._wavlm_extractor = None
+
     def extract(self, audio_clip, word_timestamps=None, response_latency_ms=None):
         audio_arr = self._validate_audio(audio_clip)
 
@@ -57,6 +60,7 @@ class ProsodyExtractor:
         pitch_features = self._compute_pitch_features(lld_df)
         energy_mean = self._compute_energy(lld_df)
         mfcc_vector = self._compute_mfcc(audio_arr, AUDIO_SAMPLE_RATE)
+        wavlm_embedding = self._compute_wavlm_embedding(audio_arr, AUDIO_SAMPLE_RATE)
         jitter = self._compute_jitter(func_df)
         shimmer = self._compute_shimmer(func_df)
 
@@ -83,6 +87,7 @@ class ProsodyExtractor:
             "jitter": jitter,
             "shimmer": shimmer,
             "mfcc_vector": mfcc_vector,
+            "wavlm_embedding": wavlm_embedding,
             "speech_to_silence_ratio": speech_to_silence_ratio,
         }
 
@@ -374,3 +379,34 @@ class ProsodyExtractor:
             return 0.0
 
         return float(response_latency_ms)
+
+    def _compute_wavlm_embedding(self, audio_arr: np.ndarray, sr: int) -> list[float]:
+        """Extracts 768-dim temporal pooled self-supervised embeddings using WavLM."""
+        try:
+            import torch
+            import transformers
+        except ImportError:
+            return [0.0] * 768
+
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if getattr(self, "_wavlm_model", None) is None:
+                model_name = "microsoft/wavlm-base-plus"
+                self._wavlm_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_name)
+                self._wavlm_model = transformers.AutoModel.from_pretrained(model_name, use_safetensors=True).to(device)
+                self._wavlm_model.eval()
+
+            if sr != 16000:
+                audio_arr = librosa.resample(audio_arr, orig_sr=sr, target_sr=16000)
+                target_sr = 16000
+            else:
+                target_sr = sr
+
+            inputs = self._wavlm_extractor(audio_arr, return_tensors="pt", sampling_rate=target_sr).input_values.to(self._wavlm_model.device)
+            with torch.no_grad():
+                out = self._wavlm_model(inputs).last_hidden_state
+                pooled = out.mean(dim=1).squeeze(0).cpu()
+                return [float(x) for x in pooled.tolist()]
+        except Exception as exc:
+            print(f"[!] WavLM embedding extraction failed: {exc}")
+            return [0.0] * 768
