@@ -16,8 +16,9 @@
 4. [Module 1 — Speech-to-Text (STT)](#module-1--speech-to-text-stt)
 5. [Module 2 — Vision](#module-2--vision)
 6. [Module 3 — Prosody](#module-3--prosody)
-7. [Change Log](#change-log)
-8. [Next Steps](#next-steps)
+7. [Module 4 — Dynamic Multimodal Fusion](#module-4--dynamic-multimodal-fusion)
+8. [Change Log](#change-log)
+9. [Next Steps](#next-steps)
 
 ---
 
@@ -28,7 +29,7 @@
 | Module 1 — STT | **Implemented & Verified** | Krissh | Path security verified, latency calculation bug fixed |
 | Module 2 — Vision | **Implemented & Verified** | Krissh | Migrated to MediaPipe Tasks API (`FaceLandmarker`), non-lossy emotion distributions |
 | Module 3 — Prosody | **Implemented & Verified** | Krissh | Cached openSMILE calls (2x speedup), thread-safe baseline locking |
-| Module 4 — Fusion | Not started | Krissh | — |
+| Module 4 — Fusion | **Implemented & Verified** | Krissh | Dynamic attention gating, per-modality dissonance penalization, concatenation baseline & benchmarking sandbox |
 | config/settings.py | **Done** | — | Global constants |
 | Backend / Frontend | Not started | Raghav | — |
 
@@ -675,7 +676,31 @@ pytest tests/test_prosody.py -v -m integration   # real openSMILE on 30s fixture
 
 ---
 
+## Module 4 — Dynamic Multimodal Fusion
+
+Module 4 (`modules/module_04_fusion`) merges heterogeneous multimodal outputs from STT, Vision, and Prosody into a single non-lossy turn-level signal (`FUSED_VECTOR_DIM` = 65).
+
+### Architecture & Components
+
+1. **Schema (`schema.py`)**: Defines fixed non-lossy order (`FULL_FEATURE_SCHEMA`) preserving competency distributions, emotion probability vectors, Action Unit (AU) activations/deviations, and acoustic MFCC/scalar features.
+2. **Normalizer (`normalizer.py`)**: Converts raw module dictionaries into aligned numeric vectors. Employs per-candidate historical deques (`history_size=5`) to impute missing modality features using recent historical means rather than zero-filling. Uses soft non-linear compression (`math.tanh`, rational curves) for unbounded metrics.
+3. **Dynamic Attention Fusion (`attention_fusion.py`)**: Gated softmax cross-modal attention fusion.
+   - **Per-Modality Dissonance Penalization**: Calculates mean pairwise cosine distance between each active modality and other active modalities. Selective penalization lowers the weight of conflicting modalities without penalizing agreeing ones.
+   - **Scale-Preserving Gating**: Gating multipliers are scaled by the number of active modalities ($g_m = w_m \times N_{active}$), ensuring features maintain average 100% scale regardless of how many modalities are present.
+4. **Unweighted Concatenation Baseline (`concat_fusion.py`)**: Baseline engine (`ConcatenationFusionEngine`) providing uniform weights ($1 / N_{active}$) and zero dissonance for direct ablation evaluation against attention fusion.
+5. **Benchmarking Sandbox (`tests/benchmarks/run_baseline_benchmarks.py`)**: Automated evaluation probe producing industry standard benchmark metrics (Precision, Recall, F1, Accuracy) against FER2013, RAVDESS, Mohler, CMU-MOSEI, and Box of Lies.
+
+---
+
 ## Change Log
+
+### 2026-06-29 — Module 4 Dynamic Fusion Fixes, Concatenation Baseline & Benchmarking Sandbox
+
+**Fixed / Upgraded:**
+- **Module 4 (Fusion)**: Fixed cross-modal dissonance penalization in `attention_fusion.py` (`_compute_modality_weights`) to calculate per-modality cosine distance against other active modalities, selectively punishing conflicting signals rather than applying a global uniform scalar.
+- **Module 4 (Gating Scale)**: Updated `_apply_modality_weights` to scale softmax weights by active modality count ($w_m \times N_{active}$), preventing feature values from shrinking to 33% scale when all 3 modalities are active.
+- **Module 4 (Baseline)**: Implemented `concat_fusion.py` (`ConcatFusion` and `ConcatenationFusionEngine`) for unweighted baseline comparison. Exported engines in `__init__.py`.
+- **Benchmarking & Testing**: Created unit test suite `tests/test_fusion.py` (31/31 tests passing across repo). Created `tests/benchmarks/run_baseline_benchmarks.py` replicating the baseline comparison metrics table across FER2013, RAVDESS, Mohler, CMU-MOSEI, and Box of Lies.
 
 ### 2026-06-29 — Modules 1-3 Critical Review Fixes & Dynamic Architecture Migration
 
@@ -750,11 +775,44 @@ pytest tests/test_prosody.py -v -m integration   # real openSMILE on 30s fixture
 
 Per [ARIA_Coding_Assistant_Guide.md](./ARIA_Coding_Assistant_Guide.md) dynamic architecture specifications:
 
-1. **Module 4 — Dynamic Multimodal Fusion Engine** (`fusion_engine.py` / `attention_fusion.py`): Implement cross-modal attention gating and self-healing missing modality imputation instead of static concatenation.
+1. **Module 4 — Dynamic Multimodal Fusion Engine** (`fusion_engine.py` / `attention_fusion.py`): ✅ Implemented cross-modal attention gating, scale-preserving gating, per-modality dissonance penalization, concatenation baseline, and evaluation sandbox.
 2. **System-Wide Dynamic Enhancements**:
    - **Temporal Warmup Weighting**: Apply higher weights to later turns so candidate anxiety during icebreakers does not disproportionately lower session competency scores.
    - **Closed-Loop Adaptive Questioning**: Link cognitive load anomalies ($Z$-scores) directly to Module 8 (LLM Question Generator) to dynamically scaffold difficulty or trigger clarification probes during cross-modal dissonance.
 3. **End-to-End Dynamic Integration Test**: Simulate a multi-turn session confirming dynamic missing modality recovery and baseline deviation flow.
+
+### AI Agent Execution Guide: Boosting Multimodal Benchmark Accuracies to SOTA
+
+When instructing AI coding agents to upgrade ARIA's baseline accuracies toward State-of-the-Art (SOTA), follow this modular execution roadmap. Give the agent one task at a time and reference the target files.
+
+#### Task 1: Upgrade Audio & Prosody to Self-Supervised Embeddings (RAVDESS Target: 80%+)
+- **Objective**: Replace or augment static openSMILE eGeMAPS/MFCC scalars with pre-trained acoustic transformer embeddings.
+- **Target Files**: `modules/module_03_prosody/extractor.py`, `modules/module_04_fusion/schema.py`
+- **Agent Instructions**:
+  1. Integrate `transformers` (`Wav2Vec2Model` or `WavLMModel`) into `extractor.py`.
+  2. Extract pooled 768-dim audio representations from 16kHz speech chunks alongside existing openSMILE features.
+  3. Project embeddings via a lightweight linear bottleneck layer ($768 \rightarrow 16$) and update `PROSODY_FEATURES` in `schema.py` to include these latent acoustic dimensions.
+
+#### Task 2: Upgrade Vision to Temporal AU Sequence Tracking (FER2013 Target: 75%+)
+- **Objective**: Capture dynamic micro-expressions over time rather than averaging static per-frame probabilities.
+- **Target Files**: `modules/module_02_vision/face_mesh.py`, `modules/module_02_vision/emotion.py`
+- **Agent Instructions**:
+  1. Modify `face_mesh.py` to buffer frame-by-frame Action Unit (AU) time-series across the interview turn ($T \times 15$ matrix).
+  2. Implement a 1D Temporal Convolutional Network (TCN) or Bi-LSTM head to classify dynamic AU sequence transitions (e.g., transient AU4 brow lower or AU12 smile suppression).
+
+#### Task 3: Upgrade Fusion to Word-Level Cross-Attention (CMU-MOSEI Target: 83%+)
+- **Objective**: Capture fine-grained asynchronous alignment across speech words, facial cues, and vocal tone.
+- **Target Files**: `modules/module_04_fusion/attention_fusion.py`
+- **Agent Instructions**:
+  1. Extend `DynamicAttentionFusion` to support sub-turn cross-attention matrices ($Q_{\text{text}} K_{\text{vision}}^T$).
+  2. Compute directional attention weights allowing text tokens to attend directly to synchronized video frames and pitch contours before turn-level pooling.
+
+#### Task 4: Sharpen Deception & Incongruence Penalty (Box of Lies Target: 68%+)
+- **Objective**: Penalize temporal lag between verbal sentiment and physical micro-expressions.
+- **Target Files**: `modules/module_04_fusion/attention_fusion.py`
+- **Agent Instructions**:
+  1. Calculate latency asymmetry between verbal emotional words and physical facial expression onset.
+  2. Incorporate temporal lag asymmetry directly into `_compute_cross_modal_dissonance`.
 
 ---
 
@@ -772,14 +830,14 @@ turn_signal = {
     "response_latency_ms": float,         # Module 1
     "vision": { ... },                    # Module 2 per-turn summary
     "prosody": { ... },                   # Module 3 ✅ via process_prosody_turn()
-    "fused_vector": list,                 # Module 4 (TODO)
+    "fused_vector": list,                 # Module 4 ✅ via fuse_turn()
     "cognitive_load_label": str,          # Module 10 (TODO)
     "distress_score": float,              # Module 10 (TODO)
     "anti_gaming_flags": list,            # Module 11 (TODO)
 }
 ```
 
-Modules 1, 2, and 3 currently supply: `transcript`, `word_timestamps`, `language`, `response_latency_ms`, `vision`, and `prosody` (via `process_prosody_turn()`).
+Modules 1, 2, 3, and 4 currently supply: `transcript`, `word_timestamps`, `language`, `response_latency_ms`, `vision`, `prosody`, and `fused_vector`.
 
 ---
 

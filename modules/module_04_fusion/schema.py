@@ -1,127 +1,253 @@
 """
-Module 4 — Fusion Schema
+Module 4 — Dynamic Multimodal Fusion Schema
 
 This file defines the fixed feature order for the ARIA turn-level fused vector.
-Every fused vector must follow this exact order.
 
 Rule:
     len(fused_vector) == len(FULL_FEATURE_SCHEMA)
+
+This schema is non-lossy:
+    - competency is represented as probabilities
+    - emotion is represented as probabilities
+    - AU activations and deviations are preserved
+    - prosody baseline deviations are preserved
 """
 
 
-# ── SEMANTIC / TEXT FEATURES ───────────────────────────────────────────────
+# ── MODALITY NAMES ─────────────────────────────────────────────────────────
 
-SEMANTIC_FEATURES = [
+TEXT_MODALITY = "text"
+VISION_MODALITY = "vision"
+PROSODY_MODALITY = "prosody"
+
+MODALITIES = [
+    TEXT_MODALITY,
+    VISION_MODALITY,
+    PROSODY_MODALITY,
+]
+
+
+# ── LABEL SPACES ───────────────────────────────────────────────────────────
+
+COMPETENCY_LABELS = [
+    "beginner",
+    "mid",
+    "expert",
+]
+
+
+VISION_EMOTION_LABELS = [
+    "blank",
+    "nervous",
+    "confused",
+    "engaged",
+    "confident",
+]
+
+
+# ── TEXT / STT / SEMANTIC FEATURES ─────────────────────────────────────────
+
+STT_FEATURES = [
+    "stt_confidence",
+    "stt_response_latency_ms",
+    "transcript_word_count",
+    "transcript_duration_ms",
+]
+
+
+SEMANTIC_SCALAR_FEATURES = [
     "semantic_similarity",
     "question_relevance",
     "answer_completeness",
     "semantic_confidence",
-    "predicted_competency_score",
 ]
+
+
+SEMANTIC_DISTRIBUTION_FEATURES = [
+    f"competency_{label}_prob"
+    for label in COMPETENCY_LABELS
+]
+
+
+TEXT_FEATURES = (
+    STT_FEATURES
+    + SEMANTIC_SCALAR_FEATURES
+    + SEMANTIC_DISTRIBUTION_FEATURES
+)
 
 
 # ── VISION FEATURES ────────────────────────────────────────────────────────
 
-VISION_FEATURES = [
+VISION_SCALAR_FEATURES = [
+    "vision_confidence",
     "emotion_confidence",
-    "eye_contact_ratio",
+    "eye_contact_score",
     "blink_rate",
-    "head_movement_score",
-    "engagement_score",
-    "dominant_emotion_score",
+    "blink_rate_deviation",
 ]
+
+
+VISION_EMOTION_DISTRIBUTION_FEATURES = [
+    f"vision_emotion_{label}_prob"
+    for label in VISION_EMOTION_LABELS
+]
+
+
+VISION_GAZE_FEATURES = [
+    "gaze_yaw",
+    "gaze_pitch",
+]
+
+
+VISION_HEAD_POSE_FEATURES = [
+    "head_roll",
+    "head_pitch",
+    "head_yaw",
+]
+
+
+AU_FEATURES = [
+    "AU1",
+    "AU2",
+    "AU4",
+    "AU6",
+    "AU12",
+    "AU15",
+    "AU17",
+    "AU23",
+    "AU25",
+]
+
+
+AU_ACTIVATION_FEATURES = [
+    f"au_{au}_activation"
+    for au in AU_FEATURES
+]
+
+
+AU_DEVIATION_FEATURES = [
+    f"au_{au}_deviation"
+    for au in AU_FEATURES
+]
+
+
+VISION_FEATURES = (
+    VISION_SCALAR_FEATURES
+    + VISION_EMOTION_DISTRIBUTION_FEATURES
+    + VISION_GAZE_FEATURES
+    + VISION_HEAD_POSE_FEATURES
+    + AU_ACTIVATION_FEATURES
+    + AU_DEVIATION_FEATURES
+)
 
 
 # ── PROSODY FEATURES ───────────────────────────────────────────────────────
 
-PROSODY_FEATURES = [
+PROSODY_SCALAR_FEATURES = [
     "pitch_mean",
     "pitch_variance",
     "pitch_range",
     "speech_rate",
     "pause_count",
     "pause_total_duration_ms",
+    "disfluency_count",
+    "prosody_response_latency_ms",
     "energy_mean",
     "jitter",
     "shimmer",
-    "pitch_deviation",
-    "rate_deviation",
-    "energy_deviation",
     "speech_to_silence_ratio",
 ]
 
 
-# ── AUDIO EMOTION / COGNITIVE LOAD FEATURES ────────────────────────────────
-
-AUDIO_EMOTION_FEATURES = [
-    "audio_emotion_confidence",
-    "audio_emotion_score",
-    "cognitive_load_score",
-    "audio_stress_score",
+PROSODY_DEVIATION_FEATURES = [
+    "pitch_deviation",
+    "rate_deviation",
+    "energy_deviation",
 ]
 
 
-# ── LABEL TO NUMERIC SCORE MAPPINGS ────────────────────────────────────────
-
-COMPETENCY_SCORE_MAP = {
-    "beginner": 0.0,
-    "mid": 0.5,
-    "intermediate": 0.5,
-    "expert": 1.0,
-}
+MFCC_FEATURES = [
+    f"mfcc_{i + 1}"
+    for i in range(13)
+]
 
 
-VISION_EMOTION_SCORE_MAP = {
-    "blank": 0.0,
-    "neutral": 0.1,
-    "nervous": 0.25,
-    "confused": 0.40,
-    "engaged": 0.75,
-    "confident": 1.0,
-}
-
-
-COGNITIVE_LOAD_SCORE_MAP = {
-    "low_load": 0.0,
-    "medium_load": 0.5,
-    "mid_load": 0.5,
-    "high_load": 1.0,
-}
-
-
-AUDIO_EMOTION_SCORE_MAP = {
-    "calm": 0.1,
-    "neutral": 0.2,
-    "happy": 0.3,
-    "surprised": 0.6,
-    "sad": 0.7,
-    "disgust": 0.8,
-    "fearful": 0.85,
-    "fear": 0.85,
-    "angry": 0.9,
-}
+PROSODY_FEATURES = (
+    PROSODY_SCALAR_FEATURES
+    + PROSODY_DEVIATION_FEATURES
+    + MFCC_FEATURES
+)
 
 
 # ── FINAL FULL FEATURE ORDER ───────────────────────────────────────────────
 
 FULL_FEATURE_SCHEMA = (
-    SEMANTIC_FEATURES
+    TEXT_FEATURES
     + VISION_FEATURES
     + PROSODY_FEATURES
-    + AUDIO_EMOTION_FEATURES
 )
 
 
 # ── MODALITY FEATURE GROUPS ────────────────────────────────────────────────
 
 MODALITY_FEATURES = {
-    "semantic": SEMANTIC_FEATURES,
-    "vision": VISION_FEATURES,
-    "prosody": PROSODY_FEATURES,
-    "audio_emotion": AUDIO_EMOTION_FEATURES,
+    TEXT_MODALITY: TEXT_FEATURES,
+    VISION_MODALITY: VISION_FEATURES,
+    PROSODY_MODALITY: PROSODY_FEATURES,
 }
 
 
-# ── BASIC VALIDATION ───────────────────────────────────────────────────────
+# ── FEATURE INDEX MAP ──────────────────────────────────────────────────────
 
-EXPECTED_FUSED_VECTOR_SIZE = len(FULL_FEATURE_SCHEMA)
+FEATURE_INDEX = {
+    feature_name: index
+    for index, feature_name in enumerate(FULL_FEATURE_SCHEMA)
+}
+
+
+MODALITY_INDEX_RANGES = {}
+
+_start = 0
+
+for modality_name, feature_list in MODALITY_FEATURES.items():
+    _end = _start + len(feature_list)
+
+    MODALITY_INDEX_RANGES[modality_name] = {
+        "start": _start,
+        "end": _end,
+        "size": len(feature_list),
+    }
+
+    _start = _end
+
+
+FUSED_VECTOR_DIM = len(FULL_FEATURE_SCHEMA)
+EXPECTED_FUSED_VECTOR_SIZE = FUSED_VECTOR_DIM
+
+
+# ── VALIDATION ─────────────────────────────────────────────────────────────
+
+def validate_schema() -> None:
+    if len(FULL_FEATURE_SCHEMA) != len(set(FULL_FEATURE_SCHEMA)):
+        seen = set()
+        duplicates = []
+
+        for feature in FULL_FEATURE_SCHEMA:
+            if feature in seen:
+                duplicates.append(feature)
+            seen.add(feature)
+
+        raise ValueError(f"Duplicate features found in schema: {duplicates}")
+
+    expected_size = sum(
+        len(features)
+        for features in MODALITY_FEATURES.values()
+    )
+
+    if expected_size != FUSED_VECTOR_DIM:
+        raise ValueError(
+            f"Schema size mismatch: {expected_size} != {FUSED_VECTOR_DIM}"
+        )
+
+
+validate_schema()
