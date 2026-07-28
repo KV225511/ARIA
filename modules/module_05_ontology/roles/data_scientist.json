@@ -1,0 +1,21 @@
+{
+    "role": "Data Scientist",
+    "nodes": [
+        "Statistics", "Hypothesis Testing", "A/B Testing",
+        "Linear Algebra", "ML Fundamentals", "Supervised Learning", "Ensemble Methods",
+        "Python", "Pandas", "Data Cleaning", "Feature Engineering", "Model Training", "Model Evaluation", "MLOps"
+    ],
+    "edges": [
+        ["Statistics", "Hypothesis Testing"],
+        ["Hypothesis Testing", "A/B Testing"],
+        ["Linear Algebra", "ML Fundamentals"],
+        ["ML Fundamentals", "Supervised Learning"],
+        ["Supervised Learning", "Ensemble Methods"],
+        ["Python", "Pandas"],
+        ["Pandas", "Data Cleaning"],
+        ["Data Cleaning", "Feature Engineering"],
+        ["Feature Engineering", "Model Training"],
+        ["Model Training", "Model Evaluation"],
+        ["Model Evaluation", "MLOps"]
+    ]
+}

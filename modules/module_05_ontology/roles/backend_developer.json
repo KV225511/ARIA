@@ -1,0 +1,24 @@
+{
+    "role": "Backend Developer",
+    "nodes": [
+        "REST API", "Authentication", "JWT", "Session Management", "Security Architecture",
+        "SQL", "Query Optimization", "Indexing", "Database Design",
+        "Functions", "OOP", "Design Patterns", "System Design",
+        "Linux Basics", "Docker", "Kubernetes", "CI/CD"
+    ],
+    "edges": [
+        ["REST API", "Authentication"],
+        ["Authentication", "JWT"],
+        ["JWT", "Session Management"],
+        ["Session Management", "Security Architecture"],
+        ["SQL", "Query Optimization"],
+        ["Query Optimization", "Indexing"],
+        ["Indexing", "Database Design"],
+        ["Functions", "OOP"],
+        ["OOP", "Design Patterns"],
+        ["Design Patterns", "System Design"],
+        ["Linux Basics", "Docker"],
+        ["Docker", "Kubernetes"],
+        ["Docker", "CI/CD"]
+    ]
+}
