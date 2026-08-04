@@ -10,7 +10,10 @@ class BeliefStateUpdater:
         self.beliefs = {skill: np.array([0.333, 0.333, 0.334]) for skill in skill_nodes}
         
     def _normalize(self, dist):
-        return dist / np.sum(dist)
+        total = np.sum(dist)
+        if total == 0:
+            return np.ones_like(dist) / len(dist)
+        return dist / total
         
     def _calculate_entropy(self, dist):
         # Shannon entropy for a distribution

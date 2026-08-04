@@ -31,3 +31,13 @@ sounddevice
 
 # WavLM CUDA acceleration
 accelerate
+
+# RL Environment
+gymnasium
+
+# Environment Management
+python-dotenv
+
+# Final Pipeline Dependencies (Modules 8, 9, 14, 15)
+pyttsx3
+requests

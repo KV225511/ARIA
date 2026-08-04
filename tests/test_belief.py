@@ -1,0 +1,69 @@
+import pytest
+import numpy as np
+from modules.module_06_belief.belief_state import BeliefStateUpdater
+
+@pytest.fixture
+def nodes():
+    return ["REST API", "SQL", "Docker"]
+
+@pytest.fixture
+def updater(nodes):
+    return BeliefStateUpdater(nodes)
+
+def test_initial_belief_uniform(updater, nodes):
+    """Test that all nodes start with uniform distributions."""
+    for node in nodes:
+        belief = updater.get_belief(node)
+        assert np.allclose(belief, [0.333, 0.333, 0.334], atol=1e-3)
+        assert np.isclose(np.sum(belief), 1.0)
+
+def test_initial_global_entropy(updater):
+    """Test that global entropy starts around 1.0986 (ln 3)."""
+    entropy = updater.get_global_entropy()
+    assert np.isclose(entropy, 1.0986, atol=1e-3)
+
+def test_get_belief_unknown_node(updater):
+    """Test getting belief for a node not in the graph."""
+    belief = updater.get_belief("Unknown Node")
+    assert np.allclose(belief, [0.333, 0.333, 0.334], atol=1e-3)
+
+def test_update_belief_unknown_node(updater):
+    """Test updating belief for an unknown node (should not crash or modify others)."""
+    updater.update_belief("Unknown Node", semantic_score=0.9, cognitive_load="low", behavior_score=0.9)
+    assert np.allclose(updater.get_belief("Unknown Node"), [0.333, 0.333, 0.334], atol=1e-3)
+
+def test_update_belief_strong_performance(updater):
+    """Test that strong semantic + strong behavior + low load shifts belief towards expert."""
+    updater.update_belief("SQL", semantic_score=0.9, cognitive_load="low", behavior_score=0.9)
+    belief = updater.get_belief("SQL")
+    assert belief[2] > belief[0] # Expert > Beginner
+    assert belief[2] > 0.5 # Should have high confidence in expert
+
+def test_update_belief_anxiety_overrides_poor_behavior(updater):
+    """Test that anxiety load weighs semantic score higher than behavior score."""
+    updater.update_belief("REST API", semantic_score=0.9, cognitive_load="anxiety", behavior_score=0.1)
+    belief = updater.get_belief("REST API")
+    # Even though behavior was bad, they knew the answer and were anxious.
+    # Evidence score should be (0.9*0.9) + (0.1*0.1) = 0.82 -> Expert likelihood
+    assert belief[2] > belief[0]
+    assert belief[2] > 0.5
+
+def test_update_belief_ignorance_penalizes(updater):
+    """Test that ignorance load with poor semantics shifts belief towards beginner."""
+    updater.update_belief("Docker", semantic_score=0.1, cognitive_load="ignorance", behavior_score=0.1)
+    belief = updater.get_belief("Docker")
+    assert belief[0] > belief[2] # Beginner > Expert
+    assert belief[0] > 0.5
+
+def test_entropy_decreases_with_certainty(updater):
+    """Test that entropy drops as belief shifts strongly to one side."""
+    initial_entropy = updater.get_global_entropy()
+    updater.update_belief("SQL", semantic_score=0.9, cognitive_load="low", behavior_score=0.9)
+    new_entropy = updater.get_global_entropy()
+    assert new_entropy < initial_entropy
+
+def test_zero_vector_normalization(updater):
+    """Test that passing a zero vector to _normalize returns uniform."""
+    dist = np.array([0.0, 0.0, 0.0])
+    norm = updater._normalize(dist)
+    assert np.allclose(norm, [1/3, 1/3, 1/3], atol=1e-3)
