@@ -41,3 +41,10 @@ python-dotenv
 # Final Pipeline Dependencies (Modules 8, 9, 14, 15)
 pyttsx3
 requests
+
+# Orchestrator & API
+fastapi
+uvicorn
+websockets
+python-multipart
+pymupdf

@@ -75,7 +75,7 @@ Do not include any markdown formatting (like ```json), just the raw JSON object.
                 }
             }
             
-            response = requests.post(api_endpoint, json=payload, timeout=20)
+            response = requests.post(api_endpoint, json=payload, timeout=120)
             response.raise_for_status()
             response_text = response.json().get("response", "").strip()
             
@@ -89,6 +89,11 @@ Do not include any markdown formatting (like ```json), just the raw JSON object.
             response_text = response_text.strip()
             
             adapted_data = json.loads(response_text)
+            
+            # Save the adapted graph for inspection
+            debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_adapted_ontology.json")
+            with open(debug_path, "w") as f:
+                json.dump(adapted_data, f, indent=4)
             
             # Validate structure before applying
             if "nodes" not in adapted_data or "edges" not in adapted_data:

@@ -77,7 +77,7 @@ Do not include any pleasantries or robotic phrasing like "Here is the summary".
 """
         try:
             payload = {"model": self.model, "prompt": prompt, "stream": False}
-            response = requests.post(self.api_endpoint, json=payload, timeout=20)
+            response = requests.post(self.api_endpoint, json=payload, timeout=120)
             response.raise_for_status()
             return response.json().get("response", "").strip()
         except Exception as e:
