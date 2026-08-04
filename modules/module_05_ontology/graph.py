@@ -75,19 +75,23 @@ Do not include any markdown formatting (like ```json), just the raw JSON object.
                 }
             }
             
-            response = requests.post(api_endpoint, json=payload, timeout=120)
+            response = requests.post(api_endpoint, json=payload, timeout=300)
             response.raise_for_status()
             response_text = response.json().get("response", "").strip()
             
-            # Clean up potential markdown formatting from the response
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-            
+            # Save raw output to see what the LLM is actually returning
+            raw_debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raw_ollama_output.txt")
+            with open(raw_debug_path, "w", encoding="utf-8") as f:
+                f.write(response_text)
+                
+            import re
+            # Extract JSON from potential conversational text
+            match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if match:
+                response_text = match.group(0)
+            else:
+                raise ValueError(f"No JSON object found in response. Raw output saved to {raw_debug_path}")
+                
             adapted_data = json.loads(response_text)
             
             # Save the adapted graph for inspection

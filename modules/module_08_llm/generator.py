@@ -43,7 +43,7 @@ class LLMQuestionGenerator:
         }
         
         try:
-            response = requests.post(self.api_endpoint, json=payload, timeout=120)
+            response = requests.post(self.api_endpoint, json=payload, timeout=300)
             response.raise_for_status()
             data = response.json()
             return data.get("response", "").strip()
@@ -52,6 +52,37 @@ class LLMQuestionGenerator:
             logger.error(f"Failed to connect to Ollama at {self.ollama_host}: {e}")
             # Fallback for testing/offline gracefully
             return f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
+
+    def generate_question_stream(self, action: str, belief_state: dict, resume: str, history: list):
+        """
+        Generates a natural language question and yields it word-by-word (streaming).
+        """
+        prompt = self._build_prompt(action, belief_state, resume, history)
+        
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": True,
+            "options": {
+                "temperature": 0.7
+            }
+        }
+        
+        try:
+            # We use a 300s read timeout because the first chunk takes a while to generate
+            response = requests.post(self.api_endpoint, json=payload, stream=True, timeout=(60, 300))
+            response.raise_for_status()
+            
+            for line in response.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    chunk = data.get("response", "")
+                    if chunk:
+                        yield chunk
+                        
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to stream from Ollama at {self.ollama_host}: {e}")
+            yield f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
 
     def _build_prompt(self, action: str, belief_state: dict, resume: str, history: list) -> str:
         history_text = "\n".join([f"Q: {t['q']}\nA: {t['a']}" for t in history[-3:]]) if history else "No previous questions."

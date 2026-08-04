@@ -117,15 +117,21 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         # convert numpy arrays to lists for JSON serialization
         current_belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
         
-        # Module 8: Generate Question
-        question_text = llm_gen.generate_question(
+        # Module 8: Generate Question (Streaming)
+        question_text = ""
+        for chunk in llm_gen.generate_question_stream(
             action=first_action,
             belief_state=current_belief,
             resume=session["resume"],
             history=session["history"]
-        )
-        
-        # Send question to UI
+        ):
+            question_text += chunk
+            await websocket.send_json({
+                "type": "aria_chunk",
+                "text": chunk
+            })
+            
+        # Send final completion event
         await websocket.send_json({
             "type": "aria_question",
             "text": question_text,
@@ -136,14 +142,59 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         # tts_engine.speak(question_text) # Uncomment if you want actual computer audio
         
         # The main interview loop
+        import base64
+        import tempfile
+        import os
+        import subprocess
+        from modules.module_01_stt.transcriber import transcribe_file
+        
         while True:
             # Wait for candidate's answer from the UI
             data = await websocket.receive_text()
             payload = json.loads(data)
             
+            candidate_text = ""
+            
             if payload.get("type") == "candidate_answer":
                 candidate_text = payload.get("text", "")
                 
+            elif payload.get("type") == "candidate_audio":
+                audio_b64 = payload.get("audio_base64", "")
+                if audio_b64.startswith("data:audio/webm;base64,"):
+                    audio_b64 = audio_b64.split(",")[1]
+                    
+                audio_bytes = base64.b64decode(audio_b64)
+                
+                # Save webm
+                webm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"temp_{session_id}.webm")
+                wav_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"temp_{session_id}.wav")
+                
+                with open(webm_path, "wb") as f:
+                    f.write(audio_bytes)
+                
+                # Convert webm to wav using ffmpeg
+                subprocess.run(["ffmpeg", "-i", webm_path, "-ar", "16000", "-ac", "1", wav_path, "-y"], 
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                # Transcribe
+                try:
+                    stt_result = await transcribe_file(wav_path)
+                    candidate_text = stt_result.get("transcript", "")
+                except Exception as e:
+                    logger.error(f"Whisper transcription failed: {e}")
+                    candidate_text = ""
+                    
+                # Cleanup
+                if os.path.exists(webm_path): os.remove(webm_path)
+                if os.path.exists(wav_path): os.remove(wav_path)
+                
+                # Inform UI of transcription
+                await websocket.send_json({
+                    "type": "transcription_result",
+                    "text": candidate_text
+                })
+            
+            if candidate_text:
                 # Save to history
                 session["history"].append({
                     "q": question_text,
@@ -161,16 +212,22 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 session["turn"] += 1
                 next_action = "increase_difficulty" if session["turn"] % 2 == 0 else "probe_foundation"
                 
-                # Generate next question (Module 8)
+                # Generate next question (Module 8) Streaming
                 new_belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
-                question_text = llm_gen.generate_question(
+                question_text = ""
+                for chunk in llm_gen.generate_question_stream(
                     action=next_action,
                     belief_state=new_belief,
                     resume=session["resume"],
                     history=session["history"]
-                )
+                ):
+                    question_text += chunk
+                    await websocket.send_json({
+                        "type": "aria_chunk",
+                        "text": chunk
+                    })
                 
-                # Send back to UI
+                # Send back to UI final state
                 await websocket.send_json({
                     "type": "aria_question",
                     "text": question_text,
