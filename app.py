@@ -85,13 +85,17 @@ async def start_session(
         "belief": belief_updater,
         "history": [],
         "resume": resume_text, # Save text for Module 8 context
+        "role": getattr(ontology, "inferred_role", role_name),
+        "experience": getattr(ontology, "inferred_experience", "Mid-Level"),
         "turn": 0
     }
     
     return {
         "session_id": session_id,
         "adaptation_success": adaptation_success,
-        "skills_loaded": len(all_skills)
+        "skills_loaded": len(all_skills),
+        "inferred_role": sessions[session_id]["role"],
+        "inferred_experience": sessions[session_id]["experience"]
     }
 
 @app.websocket("/ws/interview/{session_id}")
@@ -123,7 +127,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             action=first_action,
             belief_state=current_belief,
             resume=session["resume"],
-            history=session["history"]
+            history=session["history"],
+            role=session["role"],
+            experience=session["experience"]
         ):
             question_text += chunk
             await websocket.send_json({
@@ -219,7 +225,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     action=next_action,
                     belief_state=new_belief,
                     resume=session["resume"],
-                    history=session["history"]
+                    history=session["history"],
+                    role=session["role"],
+                    experience=session["experience"]
                 ):
                     question_text += chunk
                     await websocket.send_json({

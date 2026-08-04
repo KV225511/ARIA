@@ -49,69 +49,104 @@ class SkillOntologyGraph:
             
             prompt = f"""
 You are an expert technical interviewer and ontologist.
+    def adapt_to_candidate(self, jd_text: str, resume_text: str) -> bool:
+        """
+        Takes JD and Resume text, uses local LLM to dynamically add missing skills.
+        Also infers the target role and experience level.
+        Returns True if successful, False if fell back to baseline.
+        """
+        import requests
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        self.model = os.getenv("OLLAMA_MODEL", "llama3.1")
+        self.api_endpoint = f"{os.getenv('OLLAMA_HOST', 'http://localhost:11434')}/api/generate"
+        
+        logger.info("Starting dynamic ontology adaptation via local Ollama...")
+        
+        prompt = f"""
+You are an expert technical interviewer and ontologist.
 Below is the baseline skill ontology graph for the role of {self.role_name} in JSON format:
 {json.dumps(self.base_data)}
 
 Here is the Job Description:
-{job_description}
+{jd_text[:1500]}
 
 Here is the Candidate's Resume:
-{resume}
+{resume_text[:1500]}
 
 Modify the baseline ontology graph to perfectly adapt to the candidate's resume and the job description.
 - Add highly relevant new skills mentioned in the resume/JD as new nodes.
 - Remove baseline skills that are completely irrelevant to the JD or resume.
 - Update the edges to reflect prerequisite -> advanced relationships correctly.
-Return ONLY valid JSON with the format: {{"nodes": [...], "edges": [["prereq", "advanced"], ...]}}
-Do not include any markdown formatting (like ```json), just the raw JSON object.
+ALSO, infer the specific Role Name and the Experience Level (Fresher, Mid-Level, or Senior).
+
+Return ONLY valid JSON with this exact schema:
+{{
+    "inferred_role": "string",
+    "inferred_experience": "string",
+    "nodes": ["skill1", "skill2"], 
+    "edges": [["prereq", "advanced"]]
+}}
+Do not include any markdown formatting. Output ONLY JSON.
 """
-            
-            payload = {
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.2
-                }
+        
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_ctx": 16384
             }
-            
-            response = requests.post(api_endpoint, json=payload, timeout=300)
+        }
+        
+        try:
+            # Huge timeout for local generation (300s)
+            response = requests.post(self.api_endpoint, json=payload, timeout=300)
             response.raise_for_status()
-            response_text = response.json().get("response", "").strip()
             
-            # Save raw output to see what the LLM is actually returning
-            raw_debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raw_ollama_output.txt")
-            with open(raw_debug_path, "w", encoding="utf-8") as f:
-                f.write(response_text)
+            data = response.json()
+            raw_text = data.get("response", "").strip()
+            
+            # Save raw output for debugging
+            debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raw_ollama_output.txt")
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(raw_text)
                 
+            # Use Regex to extract just the JSON block in case the LLM was chatty
             import re
-            # Extract JSON from potential conversational text
-            match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if match:
-                response_text = match.group(0)
+            json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if json_match:
+                clean_json_str = json_match.group(0)
             else:
-                raise ValueError(f"No JSON object found in response. Raw output saved to {raw_debug_path}")
+                clean_json_str = raw_text
                 
-            adapted_data = json.loads(response_text)
+            parsed = json.loads(clean_json_str)
             
-            # Save the adapted graph for inspection
-            debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_adapted_ontology.json")
-            with open(debug_path, "w") as f:
-                json.dump(adapted_data, f, indent=4)
+            self.inferred_role = parsed.get("inferred_role", self.role_name)
+            self.inferred_experience = parsed.get("inferred_experience", "Mid-Level")
             
-            # Validate structure before applying
-            if "nodes" not in adapted_data or "edges" not in adapted_data:
+            if "nodes" not in parsed or "edges" not in parsed:
                 raise ValueError("LLM returned JSON without 'nodes' or 'edges' keys.")
                 
             self.graph.clear()
-            self.graph.add_nodes_from(adapted_data.get("nodes", []))
-            self.graph.add_edges_from(adapted_data.get("edges", []))
-            logger.info(f"Successfully adapted ontology graph dynamically via {model}.")
-            return True
+            self.graph.add_nodes_from(parsed.get("nodes", []))
+            self.graph.add_edges_from(parsed.get("edges", []))
             
+            # Save the adapted ontology for debugging
+            out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_adapted_ontology.json")
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(parsed, f, indent=4)
+                
+            logger.info(f"Successfully adapted ontology dynamically. Role: {self.inferred_role}, Exp: {self.inferred_experience}.")
+            return True
+                
         except Exception as e:
             logger.error(f"Dynamic adaptation failed via Ollama: {e}. Falling back to static graph.")
             self._load_graph() # Reset to baseline
+            self.inferred_role = self.role_name
+            self.inferred_experience = "Mid-Level"
             return False
         
     def get_prerequisites(self, skill):
