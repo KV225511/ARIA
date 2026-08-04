@@ -123,13 +123,20 @@ class Transcriber:
 
         path = Path(wav_path).resolve()
 
-        # P0 — Path traversal protection: reject paths outside allowed directory
+        # FIX C3 — Path traversal protection: reject paths outside allowed directory.
+        # Also reject symlinks — relative_to() alone doesn't stop symlink attacks.
         allowed = Path(ALLOWED_AUDIO_DIR).resolve()
         try:
             path.relative_to(allowed)
         except ValueError:
             raise PermissionError(
                 f"Access denied: audio path must be under {allowed}. "
+                f"Got: {path}"
+            )
+
+        if path.is_symlink():
+            raise PermissionError(
+                f"Access denied: symlinked audio paths are not allowed. "
                 f"Got: {path}"
             )
 

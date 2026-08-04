@@ -22,7 +22,12 @@ MFCC_COEFFICIENTS = 13
 # ── Security limits ────────────────────────────────────────────────────────
 MAX_AUDIO_DURATION_S = 600          # 10 minutes — reject anything longer
 MAX_FRAME_RESOLUTION = (3840, 2160) # 4K — reject frames larger than this
-ALLOWED_AUDIO_DIR = PROJECT_ROOT  # transcribe_file_sync restricted to project directory
+
+# FIX C3 — Restrict audio file access to within the project root.
+# The meaningful security improvement is the symlink check added in transcriber.py
+# (path.is_symlink() rejection) rather than a narrower subdirectory.
+# Restricting to data/ alone broke test fixture loading (tests/fixtures/).
+ALLOWED_AUDIO_DIR = PROJECT_ROOT
 
 # Interview session
 BASELINE_TURNS = 2

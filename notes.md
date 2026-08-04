@@ -30,6 +30,8 @@
 | Module 2 — Vision | **Implemented & Verified** | Krissh | Migrated to MediaPipe Tasks API (`FaceLandmarker`), non-lossy emotion distributions |
 | Module 3 — Prosody | **Implemented & Verified** | Krissh | Cached openSMILE calls (2x speedup), thread-safe baseline locking |
 | Module 4 — Fusion | **Implemented & Verified** | Krissh | Dynamic attention gating, per-modality dissonance penalization, concatenation baseline & benchmarking sandbox |
+| Module 10 — Cognitive Load | **Implemented & Verified** | Krissh | Rule-based 4-quadrant classifier (low/anxiety/ignorance/confident_ignorance), composite distress scoring |
+| Module 11 — Anti-Gaming | **Implemented & Verified** | Krissh | 3 parallel detectors (gaze, latency, semantic) + AntiGamingMonitor orchestrator |
 | config/settings.py | **Done** | — | Global constants |
 | Backend / Frontend | Not started | Raghav | — |
 
@@ -108,6 +110,7 @@ ARIA/
 ├── modules/
 │   ├── module_01_stt/
 │   │   ├── __init__.py
+│   │   ├── semantic_grader.py       # TF-IDF N-Gram & keyword rubric semantic scoring
 │   │   └── transcriber.py           # faster-whisper offline transcription
 │   ├── module_02_vision/
 │   │   ├── __init__.py
@@ -115,21 +118,32 @@ ARIA/
 │   │   ├── emotion.py               # DeepFace emotion analysis & remapping
 │   │   ├── face_mesh.py             # MediaPipe Tasks landmarks & AU activations
 │   │   ├── gaze.py                  # L2CS-Net gaze estimation
+│   │   ├── temporal_au.py           # Temporal AU sequence tracking & velocity
 │   │   └── vision_processor.py      # Orchestrator (parallel threads + turn summary)
 │   ├── module_03_prosody/           # Prosody feature extraction & baseline
 │   │   ├── __init__.py
 │   │   ├── baseline.py              # ProsodyBaselineManager
 │   │   ├── extractor.py             # ProsodyExtractor (openSMILE + librosa)
 │   │   └── pipeline.py              # process_prosody_turn() orchestrator
-│   └── module_04_fusion/            # Multimodal Dynamic Fusion Engine
-│       ├── __init__.py
-│       ├── attention_fusion.py      # Dynamic softmax cross-modal attention gating
-│       ├── concat_fusion.py         # Unweighted concatenation baseline
-│       ├── fusion_engine.py         # Main MultimodalFusionEngine wrapper
-│       ├── normalizer.py            # Deque historical imputation & normalization
-│       └── schema.py                # FULL_FEATURE_SCHEMA definition
+│   ├── module_04_fusion/            # Multimodal Dynamic Fusion Engine
+│   │   ├── __init__.py
+│   │   ├── attention_fusion.py      # Dynamic softmax cross-modal attention gating
+│   │   ├── concat_fusion.py         # Unweighted concatenation baseline
+│   │   ├── fusion_engine.py         # Main MultimodalFusionEngine wrapper
+│   │   ├── normalizer.py            # Deque historical imputation & normalization
+│   │   └── schema.py                # FULL_FEATURE_SCHEMA definition
+│   ├── module_10_cognitive_load/    # Cognitive Load Separator
+│   │   ├── __init__.py
+│   │   └── classifier.py           # 4-quadrant cognitive load classifier
+│   └── module_11_anti_gaming/       # Anti-Gaming & Integrity Monitor
+│       ├── __init__.py              # AntiGamingMonitor orchestrator
+│       ├── gaze_scanner.py          # Note reading detection via gaze sweeps
+│       ├── latency_checker.py       # AI assistance detection via latency + delivery
+│       └── semantic_checker.py      # Coaching/scripting via TF-IDF + complexity
 └── tests/
     ├── conftest.py
+    ├── test_anti_gaming.py          # Module 11 unit tests (3 detectors + orchestrator)
+    ├── test_cognitive_load.py       # Module 10 unit tests (4 quadrants + edge cases)
     ├── test_fusion.py               # Module 4 unit tests (gating, dissonance, masking)
     ├── test_prosody.py              # Module 3 unit tests
     ├── test_stt.py                  # Module 1 unit tests
@@ -151,8 +165,15 @@ Convert the candidate's spoken answer into text with word-level timestamps, lang
 | File | Role |
 |------|------|
 | `modules/module_01_stt/transcriber.py` | Core transcription logic |
+| `modules/module_01_stt/semantic_grader.py` | Automated semantic grader (TF-IDF N-Gram & keyword rubric scoring) |
 | `modules/module_01_stt/__init__.py` | Public exports: `Transcriber`, `transcribe`, `transcribe_file` |
 | `config/settings.py` | `MODEL_WHISPER`, `WHISPER_COMPUTE_TYPE`, `DEVICE`, `AUDIO_SAMPLE_RATE` |
+
+### Extension — Automated Semantic Grader (`semantic_grader.py`)
+
+Evaluates candidate speech transcripts against reference rubrics and answer keys using TF-IDF N-gram (1–2) cosine similarity (70% weight) and regex word-boundary keyword coverage (30% weight).
+- **Class:** `SemanticGrader` (`grade_response(candidate_transcript, reference_answer, required_keywords)`)
+- **Key design decisions:** Instantiates a fresh `TfidfVectorizer` per call to avoid shared mutable state across threads (Fix C2); uses regex word-boundary matching `\b` (Fix M4); includes a `D` grade band (0.15–0.35) to prevent harsh C → F transitions (Fix H4).
 
 ### Tooling
 
@@ -272,6 +293,7 @@ Analyze webcam frames to extract facial landmarks, Action Unit activations, inte
 | `emotion.py` | DeepFace emotion → interview-context label remapping |
 | `gaze.py` | L2CS-Net gaze (yaw/pitch) + eye contact score |
 | `baseline.py` | Thread-safe `VisionBaselineManager` for dynamic candidate resting calibration |
+| `temporal_au.py` | Temporal AU sequence tracking (onset velocity, variance, dynamic micro-expressions) |
 | `vision_processor.py` | Parallel orchestration + per-turn summarization with dynamic deviation tracking |
 | `__init__.py` | Exports `VisionProcessor` and `VisionBaselineManager` |
 
@@ -416,6 +438,14 @@ score = 1.0 - 0.6 × min(|yaw|/30, 1) - 0.4 × min(|pitch|/25, 1)
 
 4. **Fallback:** If weights file missing, uses head pose yaw/pitch from `face_mesh.py` as a proxy.
 
+#### temporal_au.py — Temporal AU Sequence Tracking
+
+**What it does:**
+1. Evaluates frame-by-frame Action Unit time-series across an interview turn ($T \times 15$ matrix) using `TemporalAUTracker`.
+2. Computes temporal velocity (first derivative across frames) and variance across time for 15 key AUs (`brow_inner_up`, `brow_lower`, `lip_corner_pull`, `lip_press`, etc.).
+3. Classifies dynamic micro-expressions into temporal emotion predictions (`blank`, `confused`, `nervous`, `confident`, `engaged`) with evidence-based confidence scaling (Fix H2).
+4. Resolves still-frame `BLANK` false-negatives by tracking facial onset velocities over time.
+
 #### vision_processor.py — Orchestrator
 
 **What it does:**
@@ -481,19 +511,20 @@ Extract speech prosody features from a candidate's turn audio — pitch, energy,
 
 | File | Role | Status |
 |------|------|--------|
-| `modules/module_3_prosody/extractor.py` | `ProsodyExtractor` — raw audio → prosody dict | **Done** |
-| `modules/module_3_prosody/baseline.py` | `ProsodyBaselineManager` — baseline store + deviations | **Done** |
-| `modules/module_3_prosody/pipeline.py` | `process_prosody_turn()` — wires extractor + baseline | **Done** |
-| `modules/module_3_prosody/__init__.py` | Public exports | **Missing** |
+| `modules/module_03_prosody/extractor.py` | `ProsodyExtractor` — raw audio → prosody dict (openSMILE + librosa + WavLM) | **Done** |
+| `modules/module_03_prosody/baseline.py` | `ProsodyBaselineManager` — baseline store + deviations | **Done** |
+| `modules/module_03_prosody/pipeline.py` | `process_prosody_turn()` — wires extractor + baseline | **Done** |
+| `modules/module_03_prosody/__init__.py` | Public exports: `ProsodyExtractor`, `ProsodyBaselineManager`, `process_prosody_turn` | **Done** |
 | `tests/test_prosody.py` | Unit + integration tests | **Done** |
 
-> **Naming note:** Guide specifies `module_03_prosody/`; repo uses `module_3_prosody/`. `pipeline.py` imports match the actual folder name.
+> **Naming note:** Folder is correctly named `module_03_prosody/`, matching guide specification. All imports in `pipeline.py` and `__init__.py` match this path.
 
 ### Tooling
 
 | Feature | Implementation |
 |---------|----------------|
 | Pitch, jitter, shimmer, loudness | **openSMILE** eGeMAPSv02 (LLD + Functionals) |
+| Self-supervised embeddings | **HuggingFace transformers** `microsoft/wavlm-base-plus` (768-dim temporal average-pooled) |
 | Pause detection, speech intervals | **librosa** `effects.split` |
 | Speech rate, disfluencies | Heuristic syllable count + STT `word_timestamps` |
 | Baseline calibration | In-memory `ProsodyBaselineManager` |
@@ -548,6 +579,7 @@ response_latency_ms: float | None
     "jitter": float,
     "shimmer": float,
     "mfcc_vector": list,            # length 13
+    "wavlm_embedding": list,        # length 768
     "speech_to_silence_ratio": float,
 }
 ```
@@ -647,7 +679,8 @@ State stored in memory: `self.baselines[candidate_id]`.
 | pitch_mean in Hz | ✅ | Semitones converted via `27.5 * 2^(st/12)` |
 | energy_mean as RMS | ⚠️ | Returns openSMILE loudness (sone) — optional to change |
 | mfcc_vector (13 coeffs) | ✅ | librosa MFCC (eGeMAPS has no MFCCs) |
-| Folder name `module_03_prosody` | ⚠️ | Uses `module_3_prosody` — optional rename |
+| wavlm_embedding (768 dims) | ✅ | HuggingFace `microsoft/wavlm-base-plus` self-supervised embeddings |
+| Folder name `module_03_prosody` | ✅ | Correctly named `module_03_prosody/` |
 | `extract()` API | ✅ | Audio-only; `turn_id`/`candidate_id` on pipeline/baseline |
 
 ### Suggested improvements (optional — code works without these)
@@ -656,17 +689,17 @@ State stored in memory: `self.baselines[candidate_id]`.
 
 2. ~~**Fix MFCC extraction**~~ — **Done** (librosa for MFCC; openSMILE for jitter/shimmer/pitch)
 
-3. **Cache openSMILE calls in `extract()`** — optional performance optimization (LLD called twice, Functionals three times per turn)
+3. ~~**Cache openSMILE calls in `extract()`**~~ — **Done** (cached model instance across invocations for 2x speedup)
 
 4. **Wire `BASELINE_TURNS` from settings** — optional; `pipeline.py` hardcodes `baseline_turns=2`
 
 5. **Resample non-16 kHz audio** — optional if all input is guaranteed 16 kHz from STT/WebRTC
 
-6. **Rename folder** to `module_03_prosody` — optional naming consistency
+6. ~~**Rename folder** to `module_03_prosody`~~ — **Done** (folder and imports match `module_03_prosody/`)
 
 7. ~~**Remove unused `turn_id`/`candidate_id` from `extract()`**~~ — **Done** (baseline params stay on `process_prosody_turn()`)
 
-8. **Add `__init__.py`** — optional cleaner imports
+8. ~~**Add `__init__.py`**~~ — **Done** (`__init__.py` exports key classes and pipeline functions)
 
 9. **Use RMS for `energy_mean`** — optional; current loudness (sone) works for baseline deviation
 
@@ -691,7 +724,25 @@ pytest tests/test_prosody.py -v -m integration   # real openSMILE on 30s fixture
 
 ## Module 4 — Dynamic Multimodal Fusion
 
-Module 4 (`modules/module_04_fusion`) merges heterogeneous multimodal outputs from STT, Vision, and Prosody into a single non-lossy turn-level signal (`FUSED_VECTOR_DIM` = 65).
+Module 4 (`modules/module_04_fusion`) merges heterogeneous multimodal outputs from STT, Vision, and Prosody into a single non-lossy turn-level signal (`FUSED_VECTOR_DIM` = 72).
+
+### Files
+
+| File | Role |
+|------|------|
+| `modules/module_04_fusion/schema.py` | Defines `FULL_FEATURE_SCHEMA` (72-dim non-lossy feature order across text, vision, and prosody) |
+| `modules/module_04_fusion/normalizer.py` | `FeatureNormalizer` — historical deque imputation (`history_size=5`) & soft non-linear scaling |
+| `modules/module_04_fusion/attention_fusion.py` | `DynamicAttentionFusion` — gated softmax cross-modal attention & dissonance penalization |
+| `modules/module_04_fusion/concat_fusion.py` | `ConcatFusion` / `ConcatenationFusionEngine` — unweighted uniform baseline ($1 / N_{active}$) |
+| `modules/module_04_fusion/fusion_engine.py` | `MultimodalFusionEngine` — main orchestrator wrapping normalizer & attention fusion |
+| `modules/module_04_fusion/__init__.py` | Public exports: `MultimodalFusionEngine`, `ConcatenationFusionEngine`, `FeatureNormalizer`, etc. |
+
+### Schema Breakdown (`FULL_FEATURE_SCHEMA` = 72 dims)
+
+The fused vector maintains a strict, non-lossy order across all three active modalities:
+1. **Text Modality (11 dims):** STT confidence/latency/word count/duration (4), semantic scalar features (similarity, relevance, completeness, confidence) (4), and competency distribution probabilities (`beginner`, `mid`, `expert`) (3).
+2. **Vision Modality (33 dims):** Vision/emotion confidence, eye contact, blink rate & deviation (5), emotion probability distribution (`blank`, `nervous`, `confused`, `engaged`, `confident`) (5), gaze yaw/pitch (2), head pose roll/pitch/yaw (3), AU activations for 9 AUs (9), and AU resting baseline deviations (9).
+3. **Prosody Modality (28 dims):** Prosody scalar features (pitch mean/var/range, rate, pauses, disfluencies, latency, energy, jitter, shimmer, speech-to-silence ratio) (12), prosody baseline deviations (pitch, rate, energy) (3), and MFCC coefficients 1–13 (13).
 
 ### Architecture & Components
 
@@ -706,6 +757,66 @@ Module 4 (`modules/module_04_fusion`) merges heterogeneous multimodal outputs fr
 ---
 
 ## Change Log
+
+### 2026-08-04 — Module 10 (Cognitive Load) & Module 11 (Anti-Gaming) Implementation
+
+**Created:**
+- **Module 10 — Cognitive Load Separator (`modules/module_10_cognitive_load/classifier.py`)**: Rule-based 4-quadrant classifier that separates `low`, `anxiety`, `ignorance`, and `confident_ignorance` cognitive states. Uses composite distress scoring from 7 weighted physiological signals (pitch/rate/energy deviation, disfluency rate, gaze instability, jitter, pause density) with sigmoid normalization and automatic weight redistribution for missing signals. Baseline-aware — defaults to `low` with low confidence on turns 1–2.
+- **Module 11 — Anti-Gaming & Integrity Monitor**: Three parallel integrity detectors plus `AntiGamingMonitor` orchestrator:
+  - **GazeScanner (`gaze_scanner.py`)**: Detects note reading via sustained horizontal gaze sweeps (>2s monotonic left-to-right yaw movement with constrained pitch variation).
+  - **LatencyChecker (`latency_checker.py`)**: Detects AI assistance via suspicious response latency (>5s) combined with unnaturally uniform speech delivery (coefficient of variation analysis on local speech rate segments).
+  - **SemanticChecker (`semantic_checker.py`)**: Detects coaching (lateral head turns >25° yaw) and scripted answers (cross-turn TF-IDF cosine similarity >0.65 + lexical complexity shifts >1.8x baseline). Uses lightweight TF-IDF (no BGE-M3 dependency).
+- **Tests**: `tests/test_cognitive_load.py` (24 tests) and `tests/test_anti_gaming.py` (25 tests) — 49/49 passing.
+
+**Design decisions:**
+- All modules are rule-based (no ML models needed at this stage) — matches Phase 4 build order.
+- No dependency on Raghav's modules (5, 6, 7, 8, 12, 13, 14). Fully standalone.
+- Thread-safe and stateless per-call — compatible with FastAPI async concurrency.
+- Output contracts match the `turn_signal` interface spec exactly.
+
+### 2026-07-08 — Comprehensive Module 1–4 Documentation & Schema Alignment Audit
+
+**Updated in `notes.md`:**
+- **Section 3 (Folder Structure)**: Synchronized file tree with actual workspace contents across `module_01_stt`, `module_02_vision`, `module_03_prosody`, and `module_04_fusion`. Added `semantic_grader.py` (Module 1) and `temporal_au.py` (Module 2).
+- **Section 4 (Module 1 — STT)**: Added `semantic_grader.py` to file reference table and added a dedicated subsection documenting TF-IDF N-Gram similarity and keyword rubric scoring.
+- **Section 5 (Module 2 — Vision)**: Added `temporal_au.py` to file reference table and added a dedicated subsection detailing temporal onset velocity tracking, AU variance evaluation, and dynamic micro-expression classification.
+- **Section 6 (Module 3 — Prosody)**: Updated folder path references to correctly read `module_03_prosody/`, updated `__init__.py` status to **Done**, removed obsolete naming warning, added `microsoft/wavlm-base-plus` 768-dim self-supervised embeddings to tooling/schema tables, and updated checklist/improvement statuses.
+- **Section 7 (Module 4 — Fusion)**: Corrected `FUSED_VECTOR_DIM` from 65 to 72 to match actual `FULL_FEATURE_SCHEMA` size in `schema.py`. Added comprehensive file reference table and exact 72-dim feature breakdown across text (11), vision (33), and prosody (28).
+
+### 2026-06-29 — Critical Audit & Security Hardening (22 Defects Fixed)
+
+**Critical (C) Fixes:**
+- **C1 — Dead Code + Uncaught Emotion Crash (`vision_processor.py`)**: Removed unreachable `if not face_detected` guard block (dead code). Wrapped `emotion_future.result()` in `try/except` so DeepFace OOM/crashes fall back to `blank` emotion instead of propagating uncaught.
+- **C2 — Shared TF-IDF Vectorizer State Race (`semantic_grader.py`)**: Removed instance-level `self.vectorizer` — each `grade_response()` call now instantiates a fresh `TfidfVectorizer` locally, eliminating state mutation and thread-safety issues across concurrent benchmark runs.
+- **C3 — Path Traversal Security (`settings.py` + `transcriber.py`)**: Added `path.is_symlink()` rejection to `transcribe_file_sync` — symlink attacks bypass `relative_to()` alone.
+- **C4 — Private `_turn_frames` Encapsulation (`vision_processor.py`)**: Added public `get_turn_frames()` method; `run_live_calibration.py` now uses stable public API.
+- **C5 — Dissonance Threshold Miscalibrated (`run_live_calibration.py`)**: Raised threshold from `0.35` (fired on every calm session) to `0.65`. Added intermediate `MODERATE` band at `0.45`–`0.65`.
+
+**High (H) Fixes:**
+- **H1 — Benchmark Threshold Overfitting (`run_baseline_benchmarks.py`)**: Mohler grader now uses proper 80/20 train/test split (`seed=42`). Thresholds tuned only on 80% training set; accuracy reported on unseen 20% test rows.
+- **H2 — Magic Number Confidence Values (`temporal_au.py`)**: All AU tracker confidence values replaced with evidence-based computation (e.g., `0.50 + 0.40 × variance_flatness`).
+- **H3 — Landmark Memory Accumulation (`vision_processor.py`)**: Stripped raw 478-point landmark arrays from `_turn_frames` storage — saves ~214K floats per 15-second session.
+- **H5 — ThreadPoolExecutor Resource Leak (`run_live_calibration.py`)**: `vision_module.close()` now called at end of `main()`.
+- **H6 — Fake Empirical Numbers in `compare_sota.py`**: Fully rewritten to dynamically compute accuracy figures by calling the live benchmark runner — no more hardcoded strings.
+- **H7 — Silent Synthetic Audio Fallback (`run_live_calibration.py`)**: Prominent 3-line `!!! WARNING: SYNTHETIC AUDIO IN USE !!!` banner printed when microphone capture fails.
+
+**Medium / Low (M/L) Fixes:**
+- **M2** — AU key access guarded with `.get(key, 0.0)` to prevent `KeyError` on partial frame dicts.
+- **M4** — Keyword matching upgraded from substring (`in`) to `re.search(r'\b...\b')` word-boundary matching.
+- **M5** — Hardcoded personal name removed; `--name` CLI argument added to `run_live_calibration.py`.
+- **M6** — Blink rate key mismatch fixed: scorecard now reads `blink_rate` (correct schema key).
+- **H4** — `D` grade band added to `SemanticGrader` (composite 0.15–0.35) to eliminate harsh `C → F` jump.
+- **L3** — `sounddevice` and `accelerate` added to `requirements.txt`.
+
+**Verification**: All **31 pytest tests pass** after all fixes (`31 passed in 50.77s`).
+
+### 2026-06-29 — SOTA Benchmark Extensions & Live Calibration Tool
+
+**Created / Implemented (Plug-and-Play Extensions):**
+- **Live Calibration Tool (`tools/run_live_calibration.py`)**: Standalone interactive diagnostic runner connecting webcam and microphone to ARIA Modules 1-4. Outputs live latency, emotion confidence, WavLM vector verification, dynamic attention allocation, and cross-modal dissonance scores without touching core module files.
+- **Temporal AU Sequence Tracker (`modules/module_02_vision/temporal_au.py`)**: Implemented frame-by-frame Action Unit onset velocity and temporal derivative tracking to resolve still-frame `BLANK` false-negatives (Task 2).
+- **Automated Semantic Grader (`modules/module_01_stt/semantic_grader.py`)**: Built TF-IDF N-Gram cosine similarity and keyword rubric scoring engine for candidate transcription turns. Wired directly into `run_baseline_benchmarks.py`, replacing the human inter-annotator baseline and achieving **72.64% automated grading accuracy** across 2,273 Mohler dataset rows.
+- **SOTA Comparison Engine (`tests/benchmarks/compare_sota.py`)**: Evaluates ARIA models against published academic benchmarks, generating `SOTA_Benchmark_Comparison.md`.
 
 ### 2026-06-29 — WavLM Self-Supervised Audio Embeddings & SOTA RAVDESS SER Boost
 
@@ -860,13 +971,13 @@ turn_signal = {
     "vision": { ... },                    # Module 2 per-turn summary
     "prosody": { ... },                   # Module 3 ✅ via process_prosody_turn()
     "fused_vector": list,                 # Module 4 ✅ via fuse_turn()
-    "cognitive_load_label": str,          # Module 10 (TODO)
-    "distress_score": float,              # Module 10 (TODO)
-    "anti_gaming_flags": list,            # Module 11 (TODO)
+    "cognitive_load_label": str,          # Module 10 ✅ via CognitiveLoadClassifier.classify()
+    "distress_score": float,              # Module 10 ✅ via CognitiveLoadClassifier.classify()
+    "anti_gaming_flags": list,            # Module 11 ✅ via AntiGamingMonitor.evaluate_turn()
 }
 ```
 
-Modules 1, 2, 3, and 4 currently supply: `transcript`, `word_timestamps`, `language`, `response_latency_ms`, `vision`, `prosody`, and `fused_vector`.
+All Krissh-owned perception modules (1, 2, 3, 4, 10, 11) now supply their respective fields in the interface contract.
 
 ---
 

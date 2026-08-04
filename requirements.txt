@@ -26,4 +26,8 @@ pytest
 opensmile
 transformers
 
+# Live calibration tool — audio capture
+sounddevice
 
+# WavLM CUDA acceleration
+accelerate

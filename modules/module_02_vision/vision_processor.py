@@ -86,15 +86,21 @@ class VisionProcessor:
         face_detected = mesh_result is not None
 
         if not face_detected:
-            # P2 — Discard speculative emotion result (DeepFace would
+            # Discard speculative emotion result (DeepFace would
             # have analysed background noise) and return None.
-            emotion_future.result()  # consume to avoid dangling future
+            try:
+                emotion_future.result()  # consume to avoid dangling future
+            except Exception:
+                pass
             return None
 
-        emotion_result = emotion_future.result()
-
-        # P2 — If mesh found a face but emotion somehow failed, guard it.
-        if not face_detected:
+        # FIX C1 — Wrap emotion result in try/except. Previously the second
+        # `if not face_detected` block (dead code) was the intended fallback
+        # but was unreachable. Now if DeepFace raises (OOM, crash, timeout),
+        # we safely fall back to a blank emotion result instead of propagating.
+        try:
+            emotion_result = emotion_future.result()
+        except Exception:
             emotion_result = {
                 "emotion_label": "blank",
                 "emotion_confidence": 0.0,
@@ -108,7 +114,9 @@ class VisionProcessor:
         gaze_result = gaze_future.result()
 
         frame_output = {
-            "landmarks": mesh_result["landmarks"],
+            # FIX H3 — Strip raw landmarks from stored frames to prevent unbounded
+            # memory accumulation (478 × 3 floats per frame × N frames per session).
+            # Landmarks are only needed by FaceMeshAnalyzer internally per frame.
             "au_activations": mesh_result["au_activations"],
             "emotion_label": emotion_result["emotion_label"],
             "emotion_confidence": emotion_result["emotion_confidence"],
@@ -147,8 +155,10 @@ class VisionProcessor:
 
         au_means = {}
         for key in AU_KEYS:
+            # FIX M2 — Guard against missing AU key in any frame dict.
+            # A partially populated au_activations dict would raise KeyError here.
             au_means[key] = float(
-                np.mean([f["au_activations"][key] for f in self._turn_frames])
+                np.mean([f["au_activations"].get(key, 0.0) for f in self._turn_frames])
             )
 
         # Average emotion distribution across all frames in the turn
@@ -203,6 +213,15 @@ class VisionProcessor:
             )
 
         return summary
+
+    def get_turn_frames(self) -> list[dict]:
+        """FIX C4 — Public accessor for the current turn's processed frame list.
+
+        Use this instead of accessing the private `_turn_frames` attribute directly,
+        so external tools remain stable if the internal attribute is ever refactored.
+        Returns a copy to prevent external mutation of internal state.
+        """
+        return list(self._turn_frames)
 
     def close(self) -> None:
         """Shut down the thread pool executor."""
