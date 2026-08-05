@@ -8,6 +8,7 @@ Offline mode: transcribe a complete audio buffer or .wav file.
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -24,19 +25,23 @@ from config.settings import (
 
 # Lazy-loaded singleton — models must NOT reload per call
 _transcriber_instance: "Transcriber | None" = None
-
+_transcriber_lock = threading.Lock()
 
 class Transcriber:
     """Whisper large-v3 transcriber with GPU int8 quantization."""
 
     def __init__(self) -> None:
-        from faster_whisper import WhisperModel
+        self._model = None
 
-        self._model = WhisperModel(
-            MODEL_WHISPER,
-            device=DEVICE,
-            compute_type=WHISPER_COMPUTE_TYPE,
-        )
+    def _get_model(self):
+        if self._model is None:
+            from faster_whisper import WhisperModel
+            self._model = WhisperModel(
+                MODEL_WHISPER,
+                device=DEVICE,
+                compute_type=WHISPER_COMPUTE_TYPE,
+            )
+        return self._model
 
     def transcribe_sync(
         self,
@@ -68,7 +73,8 @@ class Transcriber:
                 f"allowed {MAX_AUDIO_DURATION_S}s"
             )
 
-        segments, info = self._model.transcribe(
+        model = self._get_model()
+        segments, info = model.transcribe(
             audio,
             vad_filter=True,
             word_timestamps=True,
@@ -160,14 +166,16 @@ class Transcriber:
 def _get_transcriber() -> Transcriber:
     global _transcriber_instance
     if _transcriber_instance is None:
-        _transcriber_instance = Transcriber()
+        with _transcriber_lock:
+            if _transcriber_instance is None:
+                _transcriber_instance = Transcriber()
     return _transcriber_instance
 
 
 def _compute_response_latency(
     word_timestamps: list[dict[str, float | str]],
     question_end_time: float | None,
-) -> float:
+) -> float | None:
     """
     Compute ms from question end to first spoken word.
 
@@ -177,7 +185,7 @@ def _compute_response_latency(
     to first word (offline mode).
     """
     if not word_timestamps:
-        return 0.0
+        return None
 
     first_word_start_s = float(word_timestamps[0]["start"])
 

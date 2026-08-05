@@ -45,12 +45,12 @@ class SemanticGrader:
 
         if not reference_answer or not reference_answer.strip():
             return {
-                "similarity_score": 1.0,
-                "keyword_coverage": 1.0,
-                "missing_keywords": [],
-                "composite_score": 1.0,
-                "final_grade": "A",
-                "feedback": "No reference answer required.",
+                "similarity_score": 0.0,
+                "keyword_coverage": 0.0,
+                "missing_keywords": list(required_keywords or []),
+                "composite_score": 0.0,
+                "final_grade": "F",
+                "feedback": "Missing reference rubric.",
             }
 
         # FIX C2 — Instantiate a fresh TfidfVectorizer per call (no shared mutable state,
@@ -83,10 +83,10 @@ class SemanticGrader:
         composite = (0.7 * sim_score) + (0.3 * kw_coverage)
 
         # FIX H4 — Added D grade band (0.15 – 0.35) to avoid harsh F jump from C
-        if composite >= 0.75 or sim_score >= 0.80:
+        if composite >= 0.75:
             grade = "A"
             feedback = "Excellent response covering core semantic concepts."
-        elif composite >= 0.55 or sim_score >= 0.60:
+        elif composite >= 0.55:
             grade = "B"
             feedback = "Good response, though some technical nuances or keywords were missed."
         elif composite >= 0.35:

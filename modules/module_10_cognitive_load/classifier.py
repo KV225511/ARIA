@@ -54,11 +54,6 @@ COGNITIVE_LOAD_LABELS = frozenset({
 
 
 # ── THRESHOLDS ─────────────────────────────────────────────────────────────
-# Tuned conservatively — all thresholds are interpretable and adjustable.
-
-# Semantic quality threshold: above = "knows the material", below = "doesn't"
-SEMANTIC_HIGH_THRESHOLD = 0.50
-
 # Composite distress score threshold: above = "high stress"
 DISTRESS_HIGH_THRESHOLD = 0.45
 
@@ -74,6 +69,7 @@ DISTRESS_WEIGHTS = {
     "energy_deviation":  0.10,  # Vocal energy shift from baseline
 }
 
+_NUM_DISTRESS_SIGNALS = len(DISTRESS_WEIGHTS)
 
 class CognitiveLoadClassifier:
     """
@@ -112,6 +108,7 @@ class CognitiveLoadClassifier:
         semantic_score: float,
         turn_id: int,
         candidate_id: str,
+        word_count: int = 1,
     ) -> dict[str, Any]:
         """
         Classify the cognitive load state for a single interview turn.
@@ -123,6 +120,7 @@ class CognitiveLoadClassifier:
                             SemanticGrader or external evaluation.
             turn_id: 1-indexed turn number in the session.
             candidate_id: Candidate identifier (for logging context).
+            word_count: Number of words spoken in the turn.
 
         Returns:
             Dict matching Module 10 output contract.
@@ -131,12 +129,13 @@ class CognitiveLoadClassifier:
         prosody = prosody or {}
         vision = vision or {}
         semantic_score = _clamp(float(semantic_score), 0.0, 1.0)
+        word_count = max(1, word_count)
 
         # For baseline turns (1–2), deviation fields are None — we have
         # insufficient signal to separate anxiety from ignorance.
         if turn_id <= self.baseline_turns:
             return {
-                "cognitive_load_label": "low",
+                "cognitive_load_label": None,
                 "distress_score": 0.0,
                 "confidence": 0.3,  # Low confidence — no baseline yet
                 "signals_used": ["baseline_turn_default"],
@@ -144,7 +143,7 @@ class CognitiveLoadClassifier:
 
         # ── Compute composite distress score ───────────────────────────────
         distress_score, signals_used = self._compute_distress_score(
-            prosody, vision
+            prosody, vision, word_count
         )
 
         # ── 4-quadrant classification ──────────────────────────────────────
@@ -179,6 +178,7 @@ class CognitiveLoadClassifier:
         self,
         prosody: dict[str, Any],
         vision: dict[str, Any],
+        word_count: int,
     ) -> tuple[float, list[str]]:
         """
         Compute a composite distress score from available physiological signals.
@@ -217,7 +217,6 @@ class CognitiveLoadClassifier:
         if speech_rate > 0:
             # Disfluencies per second of speaking time
             # Estimate speaking duration from word count / speech rate
-            word_count = max(1, disfluency_count + 1)  # avoid division by zero
             speaking_duration = word_count / max(speech_rate, 0.1)
             disfluency_rate = disfluency_count / max(speaking_duration, 1.0)
             raw_signals["disfluency_rate"] = _sigmoid_normalize(
@@ -309,7 +308,7 @@ class CognitiveLoadClassifier:
         clarity_score = (distress_clarity + semantic_clarity) / 2.0
 
         # Signal coverage factor: more signals = more reliable
-        max_signals = len(DISTRESS_WEIGHTS)
+        max_signals = _NUM_DISTRESS_SIGNALS
         # Exclude meta-signals like "baseline_turn_default", "no_signals_available"
         actual_signals = len([
             s for s in signals_used

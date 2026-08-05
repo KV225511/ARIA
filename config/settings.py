@@ -3,16 +3,13 @@
 import os
 from pathlib import Path
 
-# DeepFace / TensorFlow compatibility: use legacy Keras 2 so LocallyConnected2D exists
-os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
-
 # Project root (ARIA/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Device and model settings
-MODEL_WHISPER = "large-v3"
+MODEL_WHISPER = "distil-large-v3"
 WHISPER_COMPUTE_TYPE = "int8"
-DEVICE = "cuda"
+DEVICE = os.getenv("ARIA_DEVICE", "cuda")
 
 # Audio / video capture
 VIDEO_FRAME_INTERVAL_MS = 500
@@ -23,11 +20,11 @@ MFCC_COEFFICIENTS = 13
 MAX_AUDIO_DURATION_S = 600          # 10 minutes — reject anything longer
 MAX_FRAME_RESOLUTION = (3840, 2160) # 4K — reject frames larger than this
 
-# FIX C3 — Restrict audio file access to within the project root.
-# The meaningful security improvement is the symlink check added in transcriber.py
-# (path.is_symlink() rejection) rather than a narrower subdirectory.
-# Restricting to data/ alone broke test fixture loading (tests/fixtures/).
-ALLOWED_AUDIO_DIR = PROJECT_ROOT
+# Data directories
+DATA_DIR = PROJECT_ROOT / "data"
+
+# FIX C3 — Restrict audio file access to data directory
+ALLOWED_AUDIO_DIR = DATA_DIR
 
 # Interview session
 BASELINE_TURNS = 2

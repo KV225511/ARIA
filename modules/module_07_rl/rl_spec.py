@@ -39,4 +39,7 @@ REWARD_COEFFICIENTS = {
     "omega": 5.0    # outcome alignment reward weight
 }
 
-TERMINATION_ENTROPY_THRESHOLD = 0.3
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from config.settings import TERMINATION_ENTROPY_THRESHOLD

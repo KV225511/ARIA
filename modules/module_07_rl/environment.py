@@ -17,11 +17,11 @@ class ARIAInterviewEnv(gym.Env):
     Integrates the Skill Ontology Graph and the Competency Belief Updater.
     """
     
-    def __init__(self, role_name="backend_developer"):
+    def __init__(self, role_name="backend_developer", ontology=None):
         super(ARIAInterviewEnv, self).__init__()
         
         # Load Ontology
-        self.ontology = SkillOntologyGraph(role_name)
+        self.ontology = ontology if ontology is not None else SkillOntologyGraph(role_name)
         self.nodes = self.ontology.get_all_skills()
         self.num_nodes = len(self.nodes)
         
@@ -46,8 +46,8 @@ class ARIAInterviewEnv(gym.Env):
     def _get_obs(self):
         belief_flat = np.concatenate([self.belief_updater.get_belief(n) for n in self.nodes])
         entropy = np.array([self.belief_updater.get_global_entropy()])
-        # Normalize turn_id to [0, 1] assuming max ~ 20 turns
-        turn = np.array([min(self.turn_id / 20.0, 1.0)]) 
+        # Normalize turn_id to [0, 1] assuming max ~ 30 turns
+        turn = np.array([min(self.turn_id / 30.0, 1.0)]) 
         
         return np.concatenate([belief_flat, entropy, turn], dtype=np.float32)
         
@@ -64,6 +64,13 @@ class ARIAInterviewEnv(gym.Env):
         behavior_score = np.random.uniform(0.3, 0.9)
         cog_load = np.random.choice(['low', 'anxiety', 'ignorance'])
         
+        return self.step_with_scores(action_idx, semantic_score, behavior_score, cog_load)
+        
+    def step_with_scores(self, action_idx, semantic_score, behavior_score, cog_load):
+        self.turn_id += 1
+        action_name = RL_ACTION_SPACE[action_idx]
+        current_node = self.nodes[self.current_node_idx]
+        
         # If agent probes foundation, candidate might do better
         if action_name == "probe_foundation":
             semantic_score += 0.2
@@ -76,9 +83,17 @@ class ARIAInterviewEnv(gym.Env):
         self.belief_updater.update_belief(current_node, semantic_score, cog_load, behavior_score)
         new_entropy = self.belief_updater.get_global_entropy()
         
-        # Calculate Reward (Information Gain - Duration Penalty)
+        # Calculate Reward (Information Gain - Duration Penalty + other factors)
         info_gain = max(0, old_entropy - new_entropy)
         reward = (REWARD_COEFFICIENTS["alpha"] * info_gain) - REWARD_COEFFICIENTS["beta"]
+        
+        # Use full reward spec
+        if cog_load in ['anxiety', 'ignorance']:
+            reward -= REWARD_COEFFICIENTS.get("delta", 0.0) # Distress penalty
+            
+        # Add basic outcome alignment (omega) if concluding with high certainty
+        if action_name == "conclude_interview" and new_entropy < TERMINATION_ENTROPY_THRESHOLD:
+            reward += REWARD_COEFFICIENTS.get("omega", 0.0)
         
         # Check termination
         terminated = False

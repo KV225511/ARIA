@@ -106,6 +106,7 @@ class SemanticChecker:
         vision: dict[str, Any],
         word_timestamps: list[dict[str, Any]],
         session_history: list[dict[str, Any]],
+        gaze_frames: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """
         Analyze current turn for coaching and scripting signals.
@@ -139,8 +140,8 @@ class SemanticChecker:
         if len(words) < MIN_WORDS_FOR_ANALYSIS:
             return {"flags": flags, "confidences": confidences, "evidence": evidence}
 
-        # ── Coaching Detection: Lateral Head Turns ─────────────────────────
-        coaching_confidence, head_evidence = self._detect_coaching(vision)
+        # ── Detect lateral coaching (head turns) ───────────────────────────
+        coaching_confidence, head_evidence = self._detect_coaching(vision, gaze_frames)
         evidence.update(head_evidence)
         confidences["coaching"] = coaching_confidence
         if coaching_confidence > 0:
@@ -166,6 +167,7 @@ class SemanticChecker:
     def _detect_coaching(
         self,
         vision: dict[str, Any],
+        gaze_frames: list[dict[str, Any]] | None = None,
     ) -> tuple[float, dict[str, Any]]:
         """
         Detect lateral head turns indicating off-camera coaching.
@@ -173,15 +175,35 @@ class SemanticChecker:
         Returns:
             (confidence, evidence_dict)
         """
-        head_pose = vision.get("head_pose", {})
-        head_yaw = abs(float(head_pose.get("yaw", 0.0)))
-
         evidence = {
             "lateral_head_turns": 0,
-            "max_head_yaw": head_yaw,
+            "max_head_yaw": 0.0,
         }
-
-        if head_yaw < self.lateral_yaw_threshold:
+        
+        # Determine sequence of yaw values
+        yaw_sequence = []
+        if gaze_frames:
+            for frame in gaze_frames:
+                yaw = abs(float(frame.get("head_pose", {}).get("yaw", 0.0)))
+                yaw_sequence.append(yaw)
+        else:
+            head_pose = vision.get("head_pose", {})
+            yaw_sequence.append(abs(float(head_pose.get("yaw", 0.0))))
+            
+        if not yaw_sequence:
+            return 0.0, evidence
+            
+        # Detect sustained turns (more than a single frame glitch)
+        max_yaw = max(yaw_sequence)
+        evidence["max_head_yaw"] = max_yaw
+        
+        # Count frames above threshold
+        frames_above_thresh = sum(1 for y in yaw_sequence if y >= self.lateral_yaw_threshold)
+        
+        # Need at least a minimal sequence (e.g., 2 frames) to trigger coaching reliably if gaze_frames are provided
+        if gaze_frames and frames_above_thresh < 2:
+            return 0.0, evidence
+        elif not gaze_frames and max_yaw < self.lateral_yaw_threshold:
             return 0.0, evidence
 
         # Head turn detected — confidence scales with severity
@@ -189,7 +211,7 @@ class SemanticChecker:
 
         # Linear scale from threshold to 2x threshold
         severity = min(
-            (head_yaw - self.lateral_yaw_threshold) / self.lateral_yaw_threshold,
+            (max_yaw - self.lateral_yaw_threshold) / self.lateral_yaw_threshold,
             1.0,
         )
         confidence = 0.3 + 0.4 * severity
@@ -239,15 +261,21 @@ class SemanticChecker:
         evidence["complexity_current"] = current_complexity
 
         if history_transcripts:
-            baseline_complexities = [
-                _compute_lexical_complexity(t) for t in history_transcripts
-            ]
-            baseline_avg = sum(baseline_complexities) / len(baseline_complexities)
-            evidence["complexity_baseline"] = baseline_avg
+            baseline_complexities = []
+            for h in session_history:
+                if h.get("transcript", "").strip():
+                    if "complexity" in h:
+                        baseline_complexities.append(float(h["complexity"]))
+                    else:
+                        baseline_complexities.append(_compute_lexical_complexity(h["transcript"]))
+                        
+            if baseline_complexities:
+                baseline_avg = sum(baseline_complexities) / len(baseline_complexities)
+                evidence["complexity_baseline"] = baseline_avg
 
-            if baseline_avg > 0.01:
-                shift_ratio = current_complexity / baseline_avg
-                evidence["complexity_shift"] = shift_ratio
+                if baseline_avg > 0.01:
+                    shift_ratio = current_complexity / baseline_avg
+                    evidence["complexity_shift"] = shift_ratio
             else:
                 shift_ratio = 1.0
                 evidence["complexity_shift"] = 1.0

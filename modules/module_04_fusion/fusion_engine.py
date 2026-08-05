@@ -171,5 +171,4 @@ class MultimodalFusionEngine:
         previous turns to affect imputation.
         """
 
-        if candidate_id in self.normalizer._history:
-            del self.normalizer._history[candidate_id]
+        self.normalizer.reset(candidate_id)

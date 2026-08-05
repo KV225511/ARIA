@@ -18,14 +18,26 @@ class FeedbackLogger:
         self._init_db()
 
     def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
             cursor = conn.cursor()
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY,
                     timestamp TEXT,
-                    trajectory_json TEXT,
                     human_feedback_reward INTEGER DEFAULT NULL
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS turns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    turn_index INTEGER,
+                    action TEXT,
+                    reward REAL,
+                    is_done BOOLEAN,
+                    info_gain REAL,
+                    FOREIGN KEY(session_id) REFERENCES sessions(session_id)
                 )
             ''')
             conn.commit()
@@ -36,15 +48,31 @@ class FeedbackLogger:
         
         Args:
             session_id: Unique identifier for the interview.
-            trajectory: List of turn dictionaries containing (state, action, reward, next_state).
+            trajectory: List of turn dictionaries.
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT OR REPLACE INTO sessions (session_id, timestamp, trajectory_json)
-                    VALUES (?, ?, ?)
-                ''', (session_id, datetime.now().isoformat(), json.dumps(trajectory)))
+                    INSERT OR REPLACE INTO sessions (session_id, timestamp)
+                    VALUES (?, ?)
+                ''', (session_id, datetime.now().isoformat()))
+                
+                # Insert normalized turns
+                for i, turn in enumerate(trajectory):
+                    action = turn.get("action")
+                    if isinstance(action, dict):
+                        action = json.dumps(action)
+                        
+                    reward = float(turn.get("reward", 0.0))
+                    is_done = bool(turn.get("done", False))
+                    info_gain = float(turn.get("info", {}).get("info_gain", 0.0))
+                    
+                    cursor.execute('''
+                        INSERT INTO turns (session_id, turn_index, action, reward, is_done, info_gain)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (session_id, i, str(action), reward, is_done, info_gain))
+                    
                 conn.commit()
             logger.info(f"Successfully logged trajectory for session {session_id}")
         except Exception as e:
@@ -58,7 +86,7 @@ class FeedbackLogger:
         """
         reward = 1 if hired else -1
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     UPDATE sessions 

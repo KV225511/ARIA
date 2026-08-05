@@ -1,5 +1,11 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_INCONGRUENCE_THRESHOLD = 0.4
+
 class CrossModalIncongruenceDetector:
-    def __init__(self, incongruence_threshold=0.4):
+    def __init__(self, incongruence_threshold=DEFAULT_INCONGRUENCE_THRESHOLD):
         """
         Detects bluffing by finding incongruence between semantic depth and prosodic confidence.
         """
@@ -25,10 +31,12 @@ class CrossModalIncongruenceDetector:
         is_bluffing = False
         if delta > self.threshold:
             is_bluffing = True
+            logger.info(f"Bluffing detected: delta={delta:.3f} (confidence={prosody_confidence:.2f}, semantic={semantic_score:.2f})")
             
         return {
             "incongruence_flag": is_bluffing,
-            "magnitude": round(delta, 3) if delta > 0 else 0.0,
+            "magnitude": round(abs(delta), 3),
+            "is_negative": delta < 0,
             "prosody_confidence": prosody_confidence,
             "semantic_score": semantic_score
         }

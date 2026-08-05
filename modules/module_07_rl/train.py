@@ -20,14 +20,6 @@ import copy
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from modules.module_07_rl.environment import ARIAInterviewEnv
 
-# Hyperparameters
-TAU = 0.005          # Target network update rate
-GAMMA = 0.99         # Discount factor
-EXPECTILE = 0.8      # Expectile for value network (IQL hyperparam)
-BETA = 3.0           # Temperature for advantage weighted regression
-LR = 3e-4            # Learning rate
-BATCH_SIZE = 64      # Batch size
-
 class IQLNetworks(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
@@ -92,7 +84,17 @@ def expectile_loss(diff, expectile=0.8):
     weight = torch.where(diff > 0, expectile, (1 - expectile))
     return weight * (diff ** 2)
 
-def train_iql_policy(role_name="backend_developer", total_epochs=20):
+def train_iql_policy(
+    role_name="backend_developer", 
+    total_epochs=20,
+    num_transitions=5000,
+    batch_size=64,
+    lr=3e-4,
+    gamma=0.99,
+    tau=0.005,
+    expectile=0.8,
+    beta=3.0
+):
     env = ARIAInterviewEnv(role_name)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
@@ -105,41 +107,59 @@ def train_iql_policy(role_name="backend_developer", total_epochs=20):
     q1_target = copy.deepcopy(nets.q1_net).to(device)
     q2_target = copy.deepcopy(nets.q2_net).to(device)
     
-    optimizer_v = optim.Adam(nets.v_net.parameters(), lr=LR)
-    optimizer_q = optim.Adam(list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), lr=LR)
-    optimizer_policy = optim.Adam(nets.policy_net.parameters(), lr=LR)
+    optimizer_v = optim.Adam(nets.v_net.parameters(), lr=lr)
+    optimizer_q = optim.Adam(list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), lr=lr)
+    optimizer_policy = optim.Adam(nets.policy_net.parameters(), lr=lr)
     
     # 1. Collect Data
-    dataset = collect_offline_trajectories(env, num_transitions=5000)
+    dataset_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'synthetic', 'qwen_rl_dataset.json')
+    if os.path.exists(dataset_file):
+        print(f"Loading high-fidelity LLM dataset from {dataset_file}...")
+        import json
+        with open(dataset_file, "r") as f:
+            dataset = json.load(f)
+    else:
+        dataset = collect_offline_trajectories(env, num_transitions=num_transitions)
+    
+    # Pre-convert dataset to numpy arrays for much faster batch slicing
+    obs_arr = np.array([b["obs"] for b in dataset], dtype=np.float32)
+    action_onehot_arr = np.array([b["action"] for b in dataset], dtype=np.float32)
+    action_idx_arr = np.array([b["action_idx"] for b in dataset], dtype=np.int64)
+    reward_arr = np.array([b["reward"] for b in dataset], dtype=np.float32).reshape(-1, 1)
+    next_obs_arr = np.array([b["next_obs"] for b in dataset], dtype=np.float32)
+    done_arr = np.array([b["done"] for b in dataset], dtype=np.float32).reshape(-1, 1)
     
     # 2. Offline Training Loop
     print(f"Starting IQL Offline Training for {total_epochs} epochs...")
-    num_batches = len(dataset) // BATCH_SIZE
+    num_samples = len(dataset)
+    num_batches = num_samples // batch_size
     
     for epoch in range(total_epochs):
-        np.random.shuffle(dataset)
+        rng = np.random.default_rng()
+        indices = rng.permutation(num_samples)
+        
         epoch_v_loss = 0
         epoch_q_loss = 0
         epoch_pi_loss = 0
         
         for i in range(num_batches):
-            batch = dataset[i*BATCH_SIZE : (i+1)*BATCH_SIZE]
+            batch_idx = indices[i*batch_size : (i+1)*batch_size]
             
-            s = torch.tensor(np.array([b["obs"] for b in batch])).to(device)
-            a_onehot = torch.tensor(np.array([b["action"] for b in batch])).to(device)
-            a_idx = torch.tensor(np.array([b["action_idx"] for b in batch], dtype=np.int64)).to(device)
-            r = torch.tensor(np.array([b["reward"] for b in batch], dtype=np.float32)).unsqueeze(1).to(device)
-            s_next = torch.tensor(np.array([b["next_obs"] for b in batch])).to(device)
-            d = torch.tensor(np.array([b["done"] for b in batch], dtype=np.float32)).unsqueeze(1).to(device)
+            s = torch.tensor(obs_arr[batch_idx]).to(device)
+            a_onehot = torch.tensor(action_onehot_arr[batch_idx]).to(device)
+            a_idx = torch.tensor(action_idx_arr[batch_idx]).to(device)
+            r = torch.tensor(reward_arr[batch_idx]).to(device)
+            s_next = torch.tensor(next_obs_arr[batch_idx]).to(device)
+            d = torch.tensor(done_arr[batch_idx]).to(device)
             
             # --- Update Value Network (Expectile Regression) ---
             with torch.no_grad():
                 q1 = q1_target(torch.cat([s, a_onehot], dim=1))
                 q2 = q2_target(torch.cat([s, a_onehot], dim=1))
-                q_target = torch.min(q1, q2)
+                q_target_val_policy = torch.min(q1, q2)
                 
             v = nets.v_net(s)
-            v_loss = expectile_loss(q_target - v, EXPECTILE).mean()
+            v_loss = expectile_loss(q_target_val_policy - v, expectile).mean()
             
             optimizer_v.zero_grad()
             v_loss.backward()
@@ -148,7 +168,7 @@ def train_iql_policy(role_name="backend_developer", total_epochs=20):
             # --- Update Q Networks ---
             with torch.no_grad():
                 v_next = nets.v_net(s_next)
-                q_target_val = r + (1 - d) * GAMMA * v_next
+                q_target_val = r + (1 - d) * gamma * v_next
                 
             q1 = nets.q1_net(torch.cat([s, a_onehot], dim=1))
             q2 = nets.q2_net(torch.cat([s, a_onehot], dim=1))
@@ -160,8 +180,10 @@ def train_iql_policy(role_name="backend_developer", total_epochs=20):
             
             # --- Update Policy Network (Advantage Weighted Regression) ---
             with torch.no_grad():
-                adv = q_target - v
-                weight = torch.exp(BETA * adv).clamp(max=100.0)
+                # Re-evaluate V using the UPDATED value network to prevent using a stale value
+                v_updated = nets.v_net(s)
+                adv = q_target_val_policy - v_updated
+                weight = torch.exp(beta * adv).clamp(max=100.0)
                 
             logits = nets.policy_net(s)
             log_probs = F.log_softmax(logits, dim=-1)
@@ -174,10 +196,11 @@ def train_iql_policy(role_name="backend_developer", total_epochs=20):
             optimizer_policy.step()
             
             # Soft update target networks
-            for param, target_param in zip(nets.q1_net.parameters(), q1_target.parameters()):
-                target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
-            for param, target_param in zip(nets.q2_net.parameters(), q2_target.parameters()):
-                target_param.data.copy_(TAU * param.data + (1 - TAU) * target_param.data)
+            with torch.no_grad():
+                for param, target_param in zip(nets.q1_net.parameters(), q1_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+                for param, target_param in zip(nets.q2_net.parameters(), q2_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
                 
             epoch_v_loss += v_loss.item()
             epoch_q_loss += q_loss.item()
@@ -185,9 +208,10 @@ def train_iql_policy(role_name="backend_developer", total_epochs=20):
             
         print(f"Epoch {epoch+1}/{total_epochs} | V Loss: {epoch_v_loss/num_batches:.4f} | Q Loss: {epoch_q_loss/num_batches:.4f} | Pi Loss: {epoch_pi_loss/num_batches:.4f}")
         
-    # Save the native PyTorch model
-    model_path = os.path.join(os.path.dirname(__file__), f"aria_iql_policy_{role_name}.pth")
-    torch.save(nets.state_dict(), model_path)
+        # Save a checkpoint per epoch
+        model_path = os.path.join(os.path.dirname(__file__), f"aria_iql_policy_{role_name}.pth")
+        torch.save(nets.state_dict(), model_path)
+        
     print(f"IQL Model successfully saved to {model_path}")
 
 if __name__ == "__main__":

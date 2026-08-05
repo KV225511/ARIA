@@ -2,12 +2,15 @@ import math
 import numpy as np
 
 class BeliefStateUpdater:
+    DEFAULT_BELIEF = np.array([0.333, 0.333, 0.334])
+
     def __init__(self, skill_nodes):
         """
         Initializes the belief state for all skills in the ontology.
         Each skill starts with a uniform distribution: [P(beginner), P(mid), P(expert)] = [0.33, 0.33, 0.33]
         """
-        self.beliefs = {skill: np.array([0.333, 0.333, 0.334]) for skill in skill_nodes}
+        self.beliefs = {skill: self.DEFAULT_BELIEF.copy() for skill in skill_nodes}
+        self.global_entropy_sum = sum(self._calculate_entropy(dist) for dist in self.beliefs.values())
         
     def _normalize(self, dist):
         total = np.sum(dist)
@@ -24,13 +27,12 @@ class BeliefStateUpdater:
         Returns average entropy across all node beliefs.
         Used as the termination signal.
         """
-        entropies = [self._calculate_entropy(dist) for dist in self.beliefs.values()]
-        if not entropies:
+        if not self.beliefs:
             return 0.0
-        return np.mean(entropies)
+        return self.global_entropy_sum / len(self.beliefs)
         
     def get_belief(self, skill):
-        return self.beliefs.get(skill, np.array([0.333, 0.333, 0.334]))
+        return self.beliefs.get(skill, None)
         
     def update_belief(self, skill, semantic_score, cognitive_load, behavior_score):
         """
@@ -66,17 +68,26 @@ class BeliefStateUpdater:
         evidence_score = (semantic_score * weight_semantic) + (behavior_score * weight_behavior)
         
         # Convert evidence into likelihood distribution for [beginner, mid, expert]
-        # High evidence points to expert, low evidence points to beginner
-        if evidence_score > 0.7:
-            likelihood = np.array([0.1, 0.3, 0.6])
-        elif evidence_score > 0.4:
-            likelihood = np.array([0.2, 0.6, 0.2])
-        else:
-            likelihood = np.array([0.6, 0.3, 0.1])
+        # Continuous interpolation instead of hard thresholds
+        # Evidence near 0 -> beginner, near 0.5 -> mid, near 1.0 -> expert
+        
+        beginner = max(0.1, 1.0 - 2 * evidence_score)
+        mid = max(0.1, 1.0 - 2 * abs(evidence_score - 0.5))
+        expert = max(0.1, 2 * evidence_score - 1.0)
+        
+        likelihood = np.array([beginner, mid, expert])
+        likelihood = self._normalize(likelihood)
             
         # Bayesian update: Posterior propto Prior * Likelihood
         unnormalized_posterior = current_belief * likelihood
-        self.beliefs[skill] = self._normalize(unnormalized_posterior)
+        new_belief = self._normalize(unnormalized_posterior)
+        
+        # Update running entropy sum
+        old_entropy = self._calculate_entropy(current_belief)
+        new_entropy = self._calculate_entropy(new_belief)
+        self.global_entropy_sum += (new_entropy - old_entropy)
+        
+        self.beliefs[skill] = new_belief
         
         return self.beliefs[skill]
 

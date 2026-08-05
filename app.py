@@ -4,6 +4,11 @@ import json
 import logging
 from typing import Dict, Any
 import fitz  # PyMuPDF
+import base64
+import tempfile
+import os
+import asyncio
+from fastapi.middleware.cors import CORSMiddleware
 
 # Import ARIA Modules
 from modules.module_05_ontology.graph import SkillOntologyGraph
@@ -11,17 +16,16 @@ from modules.module_06_belief.belief_state import BeliefStateUpdater
 from modules.module_07_rl.environment import ARIAInterviewEnv
 from modules.module_08_llm.generator import LLMQuestionGenerator
 from modules.module_09_tts.engine import TTSAvatarBaseline
+from modules.module_01_stt.transcriber import transcribe_file
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="ARIA Orchestrator API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # For MVP frontend
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,6 +33,9 @@ app.add_middleware(
 
 # Global state to hold active sessions
 sessions: Dict[str, Dict[str, Any]] = {}
+
+llm_gen = None
+tts_engine = None
 
 # Pre-load heavy singletons
 try:
@@ -65,8 +72,9 @@ async def start_session(
     jd_bytes = await job_description.read()
     resume_bytes = await resume.read()
     
-    jd_text = extract_text_from_pdf(jd_bytes)
-    resume_text = extract_text_from_pdf(resume_bytes)
+    # Offload PDF extraction to thread pool
+    jd_text = await asyncio.to_thread(extract_text_from_pdf, jd_bytes)
+    resume_text = await asyncio.to_thread(extract_text_from_pdf, resume_bytes)
     
     if not jd_text or not resume_text:
         raise HTTPException(status_code=400, detail="Failed to extract text from the provided PDFs.")
@@ -111,19 +119,20 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
         
+    if not llm_gen:
+        await websocket.send_json({"type": "error", "message": "LLM Generator is offline"})
+        await websocket.close()
+        return
+
     session = sessions[session_id]
     
-    # Start the interview loop by choosing the first action
-    # For MVP, we hardcode the first action to 'probe_foundation'
-    # In full production, this comes from Module 7 RL agent.
     try:
         first_action = "probe_foundation"
-        # convert numpy arrays to lists for JSON serialization
         current_belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
         
         # Module 8: Generate Question (Streaming)
         question_text = ""
-        for chunk in llm_gen.generate_question_stream(
+        async for chunk in llm_gen.generate_question_stream(
             action=first_action,
             belief_state=current_belief,
             resume=session["resume"],
@@ -131,31 +140,25 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             role=session["role"],
             experience=session["experience"]
         ):
+            if isinstance(chunk, dict) and chunk.get("type") == "prompt_debug":
+                await websocket.send_json(chunk)
+                continue
+                
             question_text += chunk
             await websocket.send_json({
                 "type": "aria_chunk",
                 "text": chunk
             })
             
-        # Send final completion event
         await websocket.send_json({
             "type": "aria_question",
             "text": question_text,
             "action": first_action
         })
         
-        # Module 9: Speak it
-        # tts_engine.speak(question_text) # Uncomment if you want actual computer audio
-        
-        # The main interview loop
-        import base64
-        import tempfile
-        import os
-        import subprocess
-        from modules.module_01_stt.transcriber import transcribe_file
+        # if tts_engine: tts_engine.speak(question_text)
         
         while True:
-            # Wait for candidate's answer from the UI
             data = await websocket.receive_text()
             payload = json.loads(data)
             
@@ -166,21 +169,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 
             elif payload.get("type") == "candidate_audio":
                 audio_b64 = payload.get("audio_base64", "")
-                if audio_b64.startswith("data:audio/webm;base64,"):
-                    audio_b64 = audio_b64.split(",")[1]
+                if "base64," in audio_b64:
+                    audio_b64 = audio_b64.split("base64,")[1]
                     
                 audio_bytes = base64.b64decode(audio_b64)
                 
-                # Save webm
-                webm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"temp_{session_id}.webm")
-                wav_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"temp_{session_id}.wav")
+                # Use a dedicated temp directory for audio files
+                temp_dir = tempfile.gettempdir()
+                webm_path = os.path.join(temp_dir, f"temp_{session_id}.webm")
+                wav_path = os.path.join(temp_dir, f"temp_{session_id}.wav")
                 
                 with open(webm_path, "wb") as f:
                     f.write(audio_bytes)
                 
-                # Convert webm to wav using ffmpeg
-                subprocess.run(["ffmpeg", "-i", webm_path, "-ar", "16000", "-ac", "1", wav_path, "-y"], 
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Convert webm to wav using ffmpeg asynchronously
+                process = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-i", webm_path, "-ar", "16000", "-ac", "1", wav_path, "-y",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                await process.communicate()
                 
                 # Transcribe
                 try:
@@ -194,34 +202,27 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if os.path.exists(webm_path): os.remove(webm_path)
                 if os.path.exists(wav_path): os.remove(wav_path)
                 
-                # Inform UI of transcription
                 await websocket.send_json({
                     "type": "transcription_result",
                     "text": candidate_text
                 })
             
             if candidate_text:
-                # Save to history
                 session["history"].append({
                     "q": question_text,
                     "a": candidate_text
                 })
                 
-                # Fake Perception Processing (Normally Modules 1-4)
-                # Fake Belief Update (Module 6)
-                # We'll just randomly update a skill to show progress
                 skills = session["ontology"].get_all_skills()
                 if skills:
                     session["belief"].update_belief(skills[0], semantic_score=0.9, cognitive_load="low", behavior_score=0.9)
                 
-                # Next Action (Module 7 Fake)
                 session["turn"] += 1
                 next_action = "increase_difficulty" if session["turn"] % 2 == 0 else "probe_foundation"
                 
-                # Generate next question (Module 8) Streaming
                 new_belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
                 question_text = ""
-                for chunk in llm_gen.generate_question_stream(
+                async for chunk in llm_gen.generate_question_stream(
                     action=next_action,
                     belief_state=new_belief,
                     resume=session["resume"],
@@ -229,13 +230,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     role=session["role"],
                     experience=session["experience"]
                 ):
+                    if isinstance(chunk, dict) and chunk.get("type") == "prompt_debug":
+                        await websocket.send_json(chunk)
+                        continue
+                        
                     question_text += chunk
                     await websocket.send_json({
                         "type": "aria_chunk",
                         "text": chunk
                     })
                 
-                # Send back to UI final state
                 await websocket.send_json({
                     "type": "aria_question",
                     "text": question_text,
@@ -251,3 +255,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await websocket.close()
         except:
             pass
+    finally:
+        # Clean up session on disconnect to prevent memory leaks
+        if session_id in sessions:
+            logger.info(f"Cleaning up session: {session_id}")
+            del sessions[session_id]

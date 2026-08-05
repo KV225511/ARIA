@@ -1,10 +1,14 @@
 import json
 import os
-import networkx as nx
 import logging
+import re
+import requests
+from dotenv import load_dotenv
 
 # Configure logger
 logger = logging.getLogger(__name__)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class SkillOntologyGraph:
     def __init__(self, role_name="backend_developer"):
@@ -12,12 +16,40 @@ class SkillOntologyGraph:
         Initializes the skill ontology graph by loading the given role JSON.
         """
         self.role_name = role_name
-        self.graph = nx.DiGraph()
+        # Internal adjacency list: skill -> set of advanced skills
+        self.successors = {}
+        # Internal adjacency list: skill -> set of prerequisite skills
+        self.predecessors = {}
+        self.nodes = set()
+        
+        load_dotenv()
+        self.model = os.getenv("OLLAMA_MODEL", "llama3.1")
+        self.api_endpoint = f"{os.getenv('OLLAMA_HOST', 'http://localhost:11434')}/api/generate"
+        
+        self.inferred_role = role_name
+        self.inferred_experience = "Mid-Level"
+        
         self._load_graph()
         
+    def _add_node(self, node):
+        if node not in self.nodes:
+            self.nodes.add(node)
+            self.successors[node] = set()
+            self.predecessors[node] = set()
+            
+    def _add_edge(self, src, dst):
+        self._add_node(src)
+        self._add_node(dst)
+        self.successors[src].add(dst)
+        self.predecessors[dst].add(src)
+        
+    def _clear_graph(self):
+        self.nodes.clear()
+        self.successors.clear()
+        self.predecessors.clear()
+
     def _load_graph(self):
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        json_path = os.path.join(current_dir, "roles", f"{self.role_name}.json")
+        json_path = os.path.join(BASE_DIR, "roles", f"{self.role_name}.json")
         
         if not os.path.exists(json_path):
             raise FileNotFoundError(f"Role file not found: {json_path}")
@@ -25,49 +57,29 @@ class SkillOntologyGraph:
         with open(json_path, 'r') as f:
             data = json.load(f)
             
-        self.graph.clear()
-        self.graph.add_nodes_from(data.get("nodes", []))
-        self.graph.add_edges_from(data.get("edges", []))
+        self._clear_graph()
+        for node in data.get("nodes", []):
+            self._add_node(node)
+        for edge in data.get("edges", []):
+            if len(edge) == 2:
+                self._add_edge(edge[0], edge[1])
+                
         self.base_data = data # Store base data for dynamic adaptation
         
-    def adapt_to_candidate(self, job_description: str, resume: str) -> bool:
-        """
-        Dynamically adapts the ontology graph to the specific candidate and JD
-        using a local Ollama model. If it fails, falls back to the static base graph.
-        
-        Returns:
-            bool: True if dynamic adaptation succeeded, False if it fell back to static.
-        """
-        try:
-            import requests
-            from dotenv import load_dotenv
-            load_dotenv()
-            
-            ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-            model = os.getenv("OLLAMA_MODEL", "llama3.1")
-            api_endpoint = f"{ollama_host}/api/generate"
-            
-            prompt = f"""
-You are an expert technical interviewer and ontologist.
     def adapt_to_candidate(self, jd_text: str, resume_text: str) -> bool:
         """
         Takes JD and Resume text, uses local LLM to dynamically add missing skills.
         Also infers the target role and experience level.
         Returns True if successful, False if fell back to baseline.
         """
-        import requests
-        from dotenv import load_dotenv
-        load_dotenv()
-        
-        self.model = os.getenv("OLLAMA_MODEL", "llama3.1")
-        self.api_endpoint = f"{os.getenv('OLLAMA_HOST', 'http://localhost:11434')}/api/generate"
-        
         logger.info("Starting dynamic ontology adaptation via local Ollama...")
+        
+        base_nodes = self.base_data.get("nodes", [])
         
         prompt = f"""
 You are an expert technical interviewer and ontologist.
-Below is the baseline skill ontology graph for the role of {self.role_name} in JSON format:
-{json.dumps(self.base_data)}
+Below are the baseline skills for the role of {self.role_name}:
+{json.dumps(base_nodes)}
 
 Here is the Job Description:
 {jd_text[:1500]}
@@ -108,15 +120,9 @@ Do not include any markdown formatting. Output ONLY JSON.
             
             data = response.json()
             raw_text = data.get("response", "").strip()
-            
-            # Save raw output for debugging
-            debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raw_ollama_output.txt")
-            with open(debug_path, "w", encoding="utf-8") as f:
-                f.write(raw_text)
                 
             # Use Regex to extract just the JSON block in case the LLM was chatty
-            import re
-            json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            json_match = re.search(r'\{.*?\}', raw_text, re.DOTALL)
             if json_match:
                 clean_json_str = json_match.group(0)
             else:
@@ -130,21 +136,22 @@ Do not include any markdown formatting. Output ONLY JSON.
             if "nodes" not in parsed or "edges" not in parsed:
                 raise ValueError("LLM returned JSON without 'nodes' or 'edges' keys.")
                 
-            self.graph.clear()
-            self.graph.add_nodes_from(parsed.get("nodes", []))
-            self.graph.add_edges_from(parsed.get("edges", []))
+            self._clear_graph()
+            for node in parsed.get("nodes", []):
+                self._add_node(node)
+            for edge in parsed.get("edges", []):
+                if len(edge) == 2:
+                    self._add_edge(edge[0], edge[1])
             
-            # Save the adapted ontology for debugging
-            out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "last_adapted_ontology.json")
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(parsed, f, indent=4)
-                
             logger.info(f"Successfully adapted ontology dynamically. Role: {self.inferred_role}, Exp: {self.inferred_experience}.")
             return True
                 
         except Exception as e:
             logger.error(f"Dynamic adaptation failed via Ollama: {e}. Falling back to static graph.")
-            self._load_graph() # Reset to baseline
+            try:
+                self._load_graph() # Reset to baseline
+            except Exception as load_e:
+                logger.error(f"Fallback load also failed: {load_e}")
             self.inferred_role = self.role_name
             self.inferred_experience = "Mid-Level"
             return False
@@ -154,21 +161,21 @@ Do not include any markdown formatting. Output ONLY JSON.
         Returns immediate prerequisite skills (incoming edges).
         Useful for 'probe_foundation' action.
         """
-        if skill not in self.graph:
+        if skill not in self.nodes:
             return []
-        return list(self.graph.predecessors(skill))
+        return list(self.predecessors.get(skill, []))
     
     def get_advanced(self, skill):
         """
         Returns immediate advanced skills (outgoing edges).
         Useful for 'increase_difficulty' action.
         """
-        if skill not in self.graph:
+        if skill not in self.nodes:
             return []
-        return list(self.graph.successors(skill))
+        return list(self.successors.get(skill, []))
         
     def get_all_skills(self):
-        return list(self.graph.nodes)
+        return list(self.nodes)
 
 if __name__ == "__main__":
     # Test execution

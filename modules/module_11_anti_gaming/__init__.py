@@ -11,9 +11,9 @@ Plus AntiGamingMonitor orchestrator wrapping all three.
 Owner: Krissh
 """
 
-from modules.module_11_anti_gaming.gaze_scanner import GazeScanner
-from modules.module_11_anti_gaming.latency_checker import LatencyChecker
-from modules.module_11_anti_gaming.semantic_checker import SemanticChecker
+from .gaze_scanner import GazeScanner
+from .latency_checker import LatencyChecker
+from .semantic_checker import SemanticChecker
 
 __all__ = [
     "GazeScanner",

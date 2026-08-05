@@ -18,6 +18,10 @@ import opensmile
 
 from config.settings import AUDIO_SAMPLE_RATE, MFCC_COEFFICIENTS
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # openSMILE eGeMAPS F0 is semitones relative to this reference frequency
 F0_REFERENCE_HZ = 27.5
 
@@ -29,6 +33,10 @@ MAX_SPEECH_SILENCE_RATIO = 1e6
 def _semitones_to_hz(semitones: np.ndarray) -> np.ndarray:
     """Convert openSMILE semitone F0 values to Hz."""
     return F0_REFERENCE_HZ * (2 ** (semitones / 12.0))
+
+# WavLM singleton cache
+_wavlm_extractor = None
+_wavlm_model = None
 
 
 class ProsodyExtractor:
@@ -42,9 +50,6 @@ class ProsodyExtractor:
             feature_set=opensmile.FeatureSet.eGeMAPSv02,
             feature_level=opensmile.FeatureLevel.LowLevelDescriptors,
         )
-
-        self._wavlm_model = None
-        self._wavlm_extractor = None
 
     def extract(self, audio_clip, word_timestamps=None, response_latency_ms=None):
         audio_arr = self._validate_audio(audio_clip)
@@ -119,9 +124,6 @@ class ProsodyExtractor:
 
         if sample_rate <= 0:
             raise ValueError("Invalid sample rate")
-
-        if len(audio_arr) == 0:
-            raise ValueError("The Audio file is empty")
 
         duration = total_sample / sample_rate
         return float(duration)
@@ -257,7 +259,7 @@ class ProsodyExtractor:
                 "pause_total_duration_ms": 0.0
             }
         count = 0
-        tot_duration = 0
+        tot_duration = 0.0
         for i in range(1, len(intervals)):
             prev = intervals[i - 1][1]
             curr = intervals[i][0]
@@ -350,7 +352,7 @@ class ProsodyExtractor:
                 "disfluency_timestamps": []
             }
 
-        filler = {"um", "uh", "erm", "hmm", "ah", "like"}
+        filler = {"um", "uh", "erm", "hmm", "ah"}
         count = 0
         timestamps = []
         for item in word_timestamps:
@@ -382,6 +384,7 @@ class ProsodyExtractor:
 
     def _compute_wavlm_embedding(self, audio_arr: np.ndarray, sr: int) -> list[float]:
         """Extracts 768-dim temporal pooled self-supervised embeddings using WavLM."""
+        global _wavlm_extractor, _wavlm_model
         try:
             import torch
             import transformers
@@ -390,23 +393,20 @@ class ProsodyExtractor:
 
         try:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            if getattr(self, "_wavlm_model", None) is None:
+            if _wavlm_model is None:
                 model_name = "microsoft/wavlm-base-plus"
-                self._wavlm_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_name)
-                self._wavlm_model = transformers.AutoModel.from_pretrained(model_name, use_safetensors=True).to(device)
-                self._wavlm_model.eval()
+                _wavlm_extractor = transformers.AutoFeatureExtractor.from_pretrained(model_name)
+                _wavlm_model = transformers.AutoModel.from_pretrained(model_name, use_safetensors=True).to(device)
+                _wavlm_model.eval()
 
-            if sr != 16000:
-                audio_arr = librosa.resample(audio_arr, orig_sr=sr, target_sr=16000)
-                target_sr = 16000
-            else:
-                target_sr = sr
+            # Upstream audio is always 16kHz from transcriber
+            target_sr = 16000
 
-            inputs = self._wavlm_extractor(audio_arr, return_tensors="pt", sampling_rate=target_sr).input_values.to(self._wavlm_model.device)
+            inputs = _wavlm_extractor(audio_arr, return_tensors="pt", sampling_rate=target_sr).input_values.to(_wavlm_model.device)
             with torch.no_grad():
-                out = self._wavlm_model(inputs).last_hidden_state
+                out = _wavlm_model(inputs).last_hidden_state
                 pooled = out.mean(dim=1).squeeze(0).cpu()
                 return [float(x) for x in pooled.tolist()]
         except Exception as exc:
-            print(f"[!] WavLM embedding extraction failed: {exc}")
+            logger.error(f"WavLM embedding extraction failed: {exc}")
             return [0.0] * 768

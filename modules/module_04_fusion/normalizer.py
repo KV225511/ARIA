@@ -57,6 +57,11 @@ class DynamicFeatureNormalizer:
             )
         )
 
+    def reset(self, candidate_id: str) -> None:
+        """Clear stored normalization history for one candidate."""
+        if candidate_id in self._history:
+            del self._history[candidate_id]
+
     # ── BASIC HELPERS ──────────────────────────────────────────────────────
 
     def safe_float(self, val: Any) -> float | None:
@@ -271,7 +276,7 @@ class DynamicFeatureNormalizer:
         values: list[float],
         mask: float,
     ) -> None:
-        if mask != 1.0:
+        if math.isclose(mask, 0.0, abs_tol=1e-9):
             return
 
         self._history[candidate_id][modality].append(values)
@@ -623,13 +628,16 @@ class DynamicFeatureNormalizer:
             PROSODY_MODALITY: prosody,
         }
 
-        normalized_vector = []
+        normalized_vector = [0.0] * len(FULL_FEATURE_SCHEMA)
+        idx = 0
         modality_mask = {}
         modality_confidences = {}
         imputed_features = {}
 
         for modality_name, result in modality_results.items():
-            normalized_vector.extend(result.values)
+            length = len(result.values)
+            normalized_vector[idx:idx+length] = result.values
+            idx += length
             modality_mask[modality_name] = result.mask
             modality_confidences[modality_name] = result.confidence
             imputed_features[modality_name] = result.imputed_features
