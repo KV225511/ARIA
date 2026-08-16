@@ -13,3 +13,5 @@ models/
 *.mp4
 *.pkl
 *.safetensors
+data/jds/
+data/resumes/

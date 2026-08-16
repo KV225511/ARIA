@@ -25,7 +25,7 @@ class ReportGenerator:
         technical_score = self._calculate_technical_score(belief_state)
         
         # 2. Rule-based Recommendation
-        if anti_gaming_report.get("flags_detected", 0) >= MAX_FLAGS:
+        if anti_gaming_report.get("is_flagged", False) or len(anti_gaming_report.get("flags", [])) >= MAX_FLAGS:
             recommendation = "Reject (Integrity Flags)"
         elif technical_score <= 40.0:
             recommendation = "Reject (Technical Incompetency)"

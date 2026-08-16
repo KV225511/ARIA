@@ -57,6 +57,9 @@ COGNITIVE_LOAD_LABELS = frozenset({
 # Composite distress score threshold: above = "high stress"
 DISTRESS_HIGH_THRESHOLD = 0.45
 
+# Semantic score threshold: above = "high semantic" (candidate knows the answer)
+SEMANTIC_HIGH_THRESHOLD = 0.55
+
 # Individual signal weights for composite distress scoring.
 # Weights sum to 1.0 — each captures a distinct physiological stress channel.
 DISTRESS_WEIGHTS = {

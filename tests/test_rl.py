@@ -10,7 +10,7 @@ def env():
 def test_env_initialization(env):
     """Test that the environment initializes correctly."""
     assert env.num_nodes == 17  # Backend developer ontology has 17 nodes
-    assert env.observation_space.shape[0] == (17 * 3) + 2  # Beliefs + entropy + turn
+    assert env.observation_space.shape[0] == (50 * 3) + 2  # Padded beliefs (MAX_NODES=50) + entropy + turn = 152
     assert env.action_space.n == 8
 
 def test_env_reset(env):

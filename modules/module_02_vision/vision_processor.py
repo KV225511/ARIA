@@ -246,7 +246,6 @@ def _empty_turn_summary() -> dict[str, Any]:
 # Expected keys in per-frame output (for tests and downstream validation)
 FRAME_OUTPUT_KEYS = frozenset(
     {
-        "landmarks",
         "au_activations",
         "emotion_label",
         "emotion_confidence",

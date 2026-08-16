@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import CosineAnnealingLR
 import numpy as np
 import copy
 
@@ -25,27 +26,27 @@ class IQLNetworks(nn.Module):
         super().__init__()
         # Value Network (V)
         self.v_net = nn.Sequential(
-            nn.Linear(state_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(state_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
+            nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(256, 1)
         )
         
         # Q-Networks (Double Q-learning)
         self.q1_net = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(state_dim + action_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
+            nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(256, 1)
         )
         self.q2_net = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(state_dim + action_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
+            nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(256, 1)
         )
         
         # Policy Network (Actor) - outputs logits for categorical distribution
         self.policy_net = nn.Sequential(
-            nn.Linear(state_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
+            nn.Linear(state_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
+            nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(256, action_dim)
         )
 
@@ -86,16 +87,31 @@ def expectile_loss(diff, expectile=0.8):
 
 def train_iql_policy(
     role_name="backend_developer", 
-    total_epochs=20,
+    total_epochs=100,
     num_transitions=5000,
-    batch_size=64,
-    lr=3e-4,
+    batch_size=256,
+    lr=1e-4,
     gamma=0.99,
     tau=0.005,
     expectile=0.8,
-    beta=3.0
+    beta=3.0,
+    resume_file=None,
+    jd_file=None
 ):
+    from modules.module_07_rl.data_loader import get_random_pair, get_specific_pair
+    from modules.module_07_rl.metrics import run_benchmark
+    import re
+    
+    if resume_file and jd_file:
+        resume_text, jd_text, r_name, j_name = get_specific_pair(resume_file, jd_file)
+    else:
+        resume_text, jd_text, r_name, j_name = get_random_pair()
+        
+    print(f"Training on Resume: {r_name} | JD: {j_name}")
+    
     env = ARIAInterviewEnv(role_name)
+    env.ontology.adapt_to_candidate(jd_text, resume_text)
+    
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     
@@ -111,6 +127,10 @@ def train_iql_policy(
     optimizer_q = optim.Adam(list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), lr=lr)
     optimizer_policy = optim.Adam(nets.policy_net.parameters(), lr=lr)
     
+    scheduler_v = CosineAnnealingLR(optimizer_v, T_max=total_epochs, eta_min=1e-5)
+    scheduler_q = CosineAnnealingLR(optimizer_q, T_max=total_epochs, eta_min=1e-5)
+    scheduler_pi = CosineAnnealingLR(optimizer_policy, T_max=total_epochs, eta_min=1e-5)
+    
     # 1. Collect Data
     dataset_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'synthetic', 'qwen_rl_dataset.json')
     if os.path.exists(dataset_file):
@@ -121,6 +141,43 @@ def train_iql_policy(
     else:
         dataset = collect_offline_trajectories(env, num_transitions=num_transitions)
     
+    # 2. Validate dataset dimensions to catch stale pre-padding data (Bug #5 fix)
+    if dataset:
+        sample_obs_len = len(dataset[0]["obs"])
+        expected_obs_dim = env.observation_space.shape[0]
+        if sample_obs_len != expected_obs_dim:
+            print(
+                f"\n[ERROR] Dataset dimension mismatch!\n"
+                f"  Dataset obs length : {sample_obs_len}\n"
+                f"  Expected obs length: {expected_obs_dim}\n"
+                f"  Your dataset was generated before the padding fix.\n"
+                f"  Please delete '{dataset_file}' and re-run llm_simulator.py to regenerate it."
+            )
+            return
+    
+    # 2.5 Soft outcome alignment and per-turn belief alignment reward shaping
+    from modules.module_07_rl.rl_spec import REWARD_COEFFICIENTS
+    omega = REWARD_COEFFICIENTS.get("omega", 5.0)
+    zeta = REWARD_COEFFICIENTS.get("zeta", 0.5)
+    
+    mismatches = 0
+    for b in dataset:
+        if "true_label" in b and "aria_label" in b:
+            distance = abs(b["true_label"] - b["aria_label"])
+            # Dense per-turn alignment bonus
+            alignment_bonus = zeta * (1.0 - distance / 2.0)
+            b["reward"] = float(b.get("reward", 0.0)) + alignment_bonus
+            
+            # Graded outcome alignment on terminal transitions (prevents -5.0 crash)
+            if b.get("done"):
+                soft_terminal = omega * (1.0 - distance / 2.0)
+                b["reward"] += soft_terminal
+                if distance > 0:
+                    mismatches += 1
+                
+    if dataset:
+        print(f"Dataset fix applied: Soft reward alignment active. (Found {mismatches} imperfect belief conclusions in dataset)")
+
     # Pre-convert dataset to numpy arrays for much faster batch slicing
     obs_arr = np.array([b["obs"] for b in dataset], dtype=np.float32)
     action_onehot_arr = np.array([b["action"] for b in dataset], dtype=np.float32)
@@ -131,11 +188,16 @@ def train_iql_policy(
     
     # 2. Offline Training Loop
     print(f"Starting IQL Offline Training for {total_epochs} epochs...")
+    import math
     num_samples = len(dataset)
-    num_batches = num_samples // batch_size
+    if num_samples < batch_size:
+        batch_size = num_samples
+    # Use ceil to ensure all samples are included (avoids dropping the last partial batch)
+    num_batches = max(1, math.ceil(num_samples / batch_size)) if num_samples > 0 else 0
     
     for epoch in range(total_epochs):
-        rng = np.random.default_rng()
+        # Seed per epoch for reproducibility: shuffle is deterministic but different per epoch
+        rng = np.random.default_rng(seed=epoch)
         indices = rng.permutation(num_samples)
         
         epoch_v_loss = 0
@@ -163,6 +225,7 @@ def train_iql_policy(
             
             optimizer_v.zero_grad()
             v_loss.backward()
+            torch.nn.utils.clip_grad_norm_(nets.v_net.parameters(), max_norm=1.0)
             optimizer_v.step()
             
             # --- Update Q Networks ---
@@ -176,6 +239,7 @@ def train_iql_policy(
             
             optimizer_q.zero_grad()
             q_loss.backward()
+            torch.nn.utils.clip_grad_norm_(list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), max_norm=1.0)
             optimizer_q.step()
             
             # --- Update Policy Network (Advantage Weighted Regression) ---
@@ -193,6 +257,7 @@ def train_iql_policy(
             
             optimizer_policy.zero_grad()
             pi_loss.backward()
+            torch.nn.utils.clip_grad_norm_(nets.policy_net.parameters(), max_norm=1.0)
             optimizer_policy.step()
             
             # Soft update target networks
@@ -206,13 +271,25 @@ def train_iql_policy(
             epoch_q_loss += q_loss.item()
             epoch_pi_loss += pi_loss.item()
             
-        print(f"Epoch {epoch+1}/{total_epochs} | V Loss: {epoch_v_loss/num_batches:.4f} | Q Loss: {epoch_q_loss/num_batches:.4f} | Pi Loss: {epoch_pi_loss/num_batches:.4f}")
+        if num_batches > 0:
+            print(f"Epoch {epoch+1}/{total_epochs} | V Loss: {epoch_v_loss/num_batches:.4f} | Q Loss: {epoch_q_loss/num_batches:.4f} | Pi Loss: {epoch_pi_loss/num_batches:.4f}")
+        else:
+            print(f"Epoch {epoch+1}/{total_epochs} | No batches to train on.")
+        
+        scheduler_v.step()
+        scheduler_q.step()
+        scheduler_pi.step()
         
         # Save a checkpoint per epoch
-        model_path = os.path.join(os.path.dirname(__file__), f"aria_iql_policy_{role_name}.pth")
+        model_path = os.path.join(os.path.dirname(__file__), "aria_iql_universal.pth")
         torch.save(nets.state_dict(), model_path)
         
     print(f"IQL Model successfully saved to {model_path}")
+    
+    # 3. Run Benchmark Metrics
+    if os.path.exists(dataset_file):
+        print("Evaluating policy and running benchmark metrics...")
+        run_benchmark(dataset_file)
 
 if __name__ == "__main__":
     train_iql_policy()

@@ -32,7 +32,7 @@ class BeliefStateUpdater:
         return self.global_entropy_sum / len(self.beliefs)
         
     def get_belief(self, skill):
-        return self.beliefs.get(skill, None)
+        return self.beliefs.get(skill, self.DEFAULT_BELIEF.copy())
         
     def update_belief(self, skill, semantic_score, cognitive_load, behavior_score):
         """
@@ -45,7 +45,7 @@ class BeliefStateUpdater:
             behavior_score: 0.0 to 1.0 (confidence, gaze, prosody)
         """
         if skill not in self.beliefs:
-            return
+            return self.DEFAULT_BELIEF.copy()
             
         current_belief = self.beliefs[skill]
         
@@ -68,12 +68,12 @@ class BeliefStateUpdater:
         evidence_score = (semantic_score * weight_semantic) + (behavior_score * weight_behavior)
         
         # Convert evidence into likelihood distribution for [beginner, mid, expert]
-        # Continuous interpolation instead of hard thresholds
-        # Evidence near 0 -> beginner, near 0.5 -> mid, near 1.0 -> expert
+        # Smooth Gaussian likelihoods (variance = 0.25) to prevent extreme single-turn collapse
+        # Beginner centered around 0.2, Mid around 0.5, Expert around 0.8
         
-        beginner = max(0.1, 1.0 - 2 * evidence_score)
-        mid = max(0.1, 1.0 - 2 * abs(evidence_score - 0.5))
-        expert = max(0.1, 2 * evidence_score - 1.0)
+        beginner = math.exp(-((evidence_score - 0.2) ** 2) / 0.25)
+        mid = math.exp(-((evidence_score - 0.5) ** 2) / 0.25)
+        expert = math.exp(-((evidence_score - 0.8) ** 2) / 0.25)
         
         likelihood = np.array([beginner, mid, expert])
         likelihood = self._normalize(likelihood)

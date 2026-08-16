@@ -1,6 +1,7 @@
 import httpx
 import json
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ class LLMQuestionGenerator:
         self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1")
         self.api_endpoint = f"{self.ollama_host}/api/generate"
 
-    async def generate_question(self, action: str, belief_state: dict, resume: str, history: list) -> str:
+    async def generate_question(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level") -> str:
         """
         Generates a natural language question based on the RL agent's action and the candidate's state.
         
@@ -26,11 +27,13 @@ class LLMQuestionGenerator:
             belief_state: The current Bayesian belief probabilities for skill nodes.
             resume: The candidate's resume text.
             history: The list of previous Q&A turns.
+            role: The target role being interviewed for (default: 'Developer').
+            experience: Candidate experience tier ('Entry-Level', 'Mid-Level', 'Senior').
             
         Returns:
             str: The generated question text.
         """
-        prompt = self._build_prompt(action, belief_state, resume, history)
+        prompt = self._build_prompt(action, belief_state, resume, history, role, experience)
         
         payload = {
             "model": self.model,
@@ -97,30 +100,55 @@ class LLMQuestionGenerator:
             yield f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
 
     def _build_prompt(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level") -> str:
-        history_text = "\n".join([f"Q: {t['q']}\nA: {t['a']}" for t in history[-2:]]) if history else "No previous questions."
+        history_text = "\n".join([f"Q: {t['q']}\nA: {t['a']}" for t in history[-5:]]) if history else "No previous questions."
         
         # Calculate entropy to find top 5 uncertain skills
         def calc_entropy(dist):
-            return -sum(p * (0 if p == 0 else __import__('math').log(p)) for p in dist)
+            return -sum(p * (0 if p <= 0 else __import__('math').log(p)) for p in dist)
             
         entropies = {skill: calc_entropy(dist) for skill, dist in belief_state.items()}
         top_skills = sorted(entropies.keys(), key=lambda k: entropies[k], reverse=True)[:5]
         filtered_belief_state = {k: belief_state[k] for k in top_skills}
         
-        return f"""
-You are ARIA, an expert technical interviewer interviewing a candidate for a {experience} {role} position.
-CRITICAL INSTRUCTION: Adjust the tone, expectations, and complexity of your questions to perfectly match this {experience} level. For example, do not ask a fresher deep system design questions, and do not ask a senior developer basic syntax questions.
+        action_guide = {
+            "increase_difficulty": "Ask a challenging, advanced architectural or edge-case question on the current topic. Assume solid basics.",
+            "decrease_difficulty": "Ask a simpler, foundational question focusing on core concepts and basic syntax/principles.",
+            "ask_follow_up_same_topic": "Ask a deep follow-up or require a concrete real-world example on the exact same topic just discussed.",
+            "switch_topic": "Transition cleanly to a new topic from the most uncertain skills list.",
+            "probe_foundation": "Ask about the fundamental internal mechanisms or mathematical/computational theory behind the concept.",
+            "ask_behavioral": "Ask a STAR-method behavioral question: 'Tell me about a time you handled...'",
+            "ask_situational": "Present a realistic workplace engineering challenge: 'Suppose our system experiences... how would you diagnose and fix it?'",
+            "conclude_interview": "Ask a final concluding question inviting them to summarize their key strengths or discuss engineering trade-offs."
+        }
+        
+        belief_summary = []
+        for skill, dist in filtered_belief_state.items():
+            dist_list = list(dist)
+            max_idx = int(np.argmax(dist_list))
+            level = ["Beginner", "Mid", "Expert"][max_idx]
+            conf = round(float(dist_list[max_idx]), 2)
+            belief_summary.append(f"- {skill}: Currently assessed as {level} (confidence: {conf})")
+            
+        belief_summary_str = "\n".join(belief_summary) if belief_summary else "No skill beliefs recorded yet."
+        
+        return f"""You are ARIA, an expert, objective technical interviewer conducting an assessment for a {experience} {role} position.
 
-Candidate Resume Context:
-{resume[:500]}...
+CANDIDATE RESUME CONTEXT:
+{resume[:1000]}
 
-Recent Conversation History:
+RECENT CONVERSATION HISTORY (Last turns):
 {history_text}
 
-Top 5 Most Uncertain Skills in Current Belief State:
-{json.dumps(filtered_belief_state)}
+CURRENT SKILL BELIEF STATE (Most uncertain skills):
+{belief_summary_str}
 
-The RL Agent has decided the next action is: {action}
+RL AGENT DIRECTIVE:
+- Selected Action: {action}
+- Action Guidance: {action_guide.get(action, 'Ask a relevant technical question matching the target skill level.')}
 
-Write a natural, conversational question that executes this action. Do not include any pleasantries or introductory text, just the question itself.
+CRITICAL RULES:
+1. Generate exactly ONE clear, concise, direct question executing the RL action directive above.
+2. STRICTLY do NOT repeat or rephrase any question from the conversation history.
+3. Tone and complexity MUST align with a {experience} {role}.
+4. Output ONLY the question text. Do not include introductory filler, greetings, or conversational remarks.
 """

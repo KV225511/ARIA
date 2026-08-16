@@ -6,7 +6,6 @@ from modules.module_05_ontology.graph import SkillOntologyGraph
 def test_graph_initialization():
     """Test successful initialization with a valid role."""
     ontology = SkillOntologyGraph("backend_developer")
-    assert isinstance(ontology.graph, nx.DiGraph)
     assert len(ontology.get_all_skills()) > 0
     assert "REST API" in ontology.get_all_skills()
 

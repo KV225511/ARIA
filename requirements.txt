@@ -48,3 +48,5 @@ uvicorn
 websockets
 python-multipart
 pymupdf
+pdfplumber
+rouge-score
