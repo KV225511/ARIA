@@ -19,8 +19,10 @@ from modules.module_07_rl.rl_spec import RL_ACTION_SPACE
 
 # Settings
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-CANDIDATE_MODEL = "qwen2.5:7b"
-EVALUATOR_MODEL = "qwen2.5:7b"
+CANDIDATE_MODEL = os.getenv("ARIA_CANDIDATE_MODEL", "qwen2.5:7b")
+# Keep candidate generation and evaluation independent by default. Operators can
+# override either model explicitly, but should not point both at the same model.
+EVALUATOR_MODEL = os.getenv("ARIA_EVALUATOR_MODEL", "llama3.1")
 DATASET_FILE = Path(__file__).parent.parent.parent / "data" / "synthetic" / "qwen_rl_dataset.json"
 
 async def generate_llm_response(prompt: str, model: str, system: str = "") -> str:
@@ -42,7 +44,7 @@ async def generate_llm_response(prompt: str, model: str, system: str = "") -> st
             return ""
 
 async def evaluate_answer(question: str, answer: str) -> tuple:
-    """Uses LLM to evaluate the answer and return calibrated (semantic_score, behavior_score, cog_load)"""
+    """Return scores plus a validity flag without consulting persona labels."""
     prompt = f"""Evaluate the following interview answer strictly and objectively against standard technical hiring rubrics.
 
 Question: {question}
@@ -71,10 +73,12 @@ Return ONLY a valid JSON object without markdown fences, comments, or extra text
     
     eval_text = await generate_llm_response(prompt, EVALUATOR_MODEL)
     
-    # Fallbacks — default to mid-range; caller overrides with tier if needed
-    semantic_score = np.random.uniform(0.3, 0.7)
-    behavior_score = np.random.uniform(0.3, 0.7)
+    # A deterministic neutral fallback makes evaluator failures auditable and
+    # reproducible. Invalid turns are tagged in the generated dataset.
+    semantic_score = 0.5
+    behavior_score = 0.5
     cog_load = "low"
+    evaluation_valid = False
     
     try:
         if "```json" in eval_text:
@@ -86,10 +90,15 @@ Return ONLY a valid JSON object without markdown fences, comments, or extra text
         semantic_score = float(data.get("semantic_score", semantic_score))
         behavior_score = float(data.get("behavior_score", behavior_score))
         cog_load = data.get("cog_load", cog_load)
-    except Exception as e:
+        if cog_load not in {"low", "anxiety", "ignorance"}:
+            raise ValueError(f"Invalid cognitive-load label: {cog_load}")
+        if not (0.0 <= semantic_score <= 1.0 and 0.0 <= behavior_score <= 1.0):
+            raise ValueError("Evaluator scores must be in [0, 1]")
+        evaluation_valid = True
+    except (TypeError, ValueError, json.JSONDecodeError):
         pass
         
-    return semantic_score, behavior_score, cog_load
+    return semantic_score, behavior_score, cog_load, evaluation_valid
 
 def get_action_one_hot(action, action_dim):
     one_hot = np.zeros(action_dim, dtype=np.float32)
@@ -153,25 +162,17 @@ Keep your answers conversational and concise (2-4 sentences max).
         # Map persona tier to role/experience for question generator
         experience_map = {"BEGINNER": "Entry-Level", "MID": "Mid-Level", "EXPERT": "Senior"}
         candidate_experience = experience_map[persona_tier]
-        # Tier-aware fallback scores for when LLM evaluation fails
-        fallback_score_ranges = {
-            "BEGINNER": (0.05, 0.30),
-            "MID":      (0.35, 0.60),
-            "EXPERT":   (0.65, 0.95),
-        }
-        
-        # Minimum turns before conclude_interview is allowed to fire
-        MIN_TURNS_BEFORE_CONCLUDE = 4
-
         while not done:
             action_idx = env.action_space.sample()
             action_name = RL_ACTION_SPACE[action_idx]
 
-            # Guard: prevent early termination — conclude_interview must not fire before MIN_TURNS
-            if action_name == "conclude_interview" and len(episode_transitions) < MIN_TURNS_BEFORE_CONCLUDE:
+            # Coverage-aware mask: the environment owns the conclusion contract.
+            if action_name == "conclude_interview" and not env.can_conclude():
                 non_conclude = [i for i in range(env.action_space.n) if RL_ACTION_SPACE[i] != "conclude_interview"]
                 action_idx = random.choice(non_conclude)
                 action_name = RL_ACTION_SPACE[action_idx]
+
+            target_skill = env.select_target_skill(action_idx)
             
             belief_state = {k: v.tolist() for k, v in env.belief_updater.beliefs.items()}
             
@@ -181,7 +182,8 @@ Keep your answers conversational and concise (2-4 sentences max).
                 belief_state=belief_state,
                 resume=resume_text[:1500],
                 history=history,
-                experience=candidate_experience
+                experience=candidate_experience,
+                target_skill=target_skill,
             )
             
             # Guard: skip turn if question is empty (Ollama timeout / model hiccup)
@@ -196,22 +198,16 @@ Keep your answers conversational and concise (2-4 sentences max).
             history.append({"q": question, "a": answer})
             
             # 3. Evaluate
-            sem_score, beh_score, cog_load = await evaluate_answer(question, answer)
-            
-            # Guard: apply tier-aware fallback if LLM evaluator gave an out-of-range or default mid score
-            low, high = fallback_score_ranges[persona_tier]
-            # If the LLM returned a suspiciously mid-range score during an obvious tier (sanity check):
-            # We trust the LLM — only apply fallback on actual parse failure (score == default 0.3-0.7 AND answer is empty)
-            if not answer.strip() or answer == "I'm not sure about that.":
-                sem_score = float(np.random.uniform(low, high))
-                beh_score = float(np.random.uniform(max(0.0, low - 0.1), min(1.0, high - 0.1)))
-            
-            # --- BUG FIX: Capture aria_label from the CURRENT node BEFORE step() may advance node index ---
-            pre_step_node = env.nodes[env.current_node_idx]
+            sem_score, beh_score, cog_load, evaluation_valid = await evaluate_answer(
+                question, answer
+            )
+            if answer == "I'm not sure about that.":
+                sem_score, beh_score, cog_load = 0.1, 0.2, "ignorance"
             
             # 4. Environment Step
             next_obs, reward, terminated, truncated, info = env.step_with_scores(
-                action_idx, sem_score, beh_score, cog_load
+                action_idx, sem_score, beh_score, cog_load,
+                target_skill=target_skill,
             )
             
             done = terminated or truncated
@@ -219,9 +215,10 @@ Keep your answers conversational and concise (2-4 sentences max).
             # Use episode-level persona as ground truth (not noisy per-turn sem_score)
             true_label = episode_true_label
                 
-            # ARIA label: read from belief of the node that WAS just updated (pre-step node)
-            current_belief = env.belief_updater.get_belief(pre_step_node)
-            aria_label = int(np.argmax(current_belief))
+            # Global verdict uses only skills with evidence; untouched ontology
+            # nodes cannot dominate the terminal class.
+            assessment = env.belief_updater.get_aggregate_assessment()
+            aria_label = assessment["label"]
             
             # 5. Save Transition
             transition = {
@@ -235,6 +232,15 @@ Keep your answers conversational and concise (2-4 sentences max).
                 "jd_file": jd_name,
                 "true_label": true_label,
                 "aria_label": aria_label,
+                "aggregate_belief": assessment["belief"].tolist(),
+                "aggregate_confidence": assessment["confidence"],
+                "skills_covered": len(assessment["visited_skills"]),
+                "target_skill": target_skill,
+                "semantic_score": float(sem_score),
+                "behavior_score": float(beh_score),
+                "cognitive_load": cog_load,
+                "evaluation_valid": evaluation_valid,
+                "episode_id": f"episode_{ep}",
                 "question": question,
                 "jd_text": jd_text[:2000]
             }

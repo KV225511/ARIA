@@ -111,6 +111,10 @@ def train_iql_policy(
     
     env = ARIAInterviewEnv(role_name)
     env.ontology.adapt_to_candidate(jd_text, resume_text)
+    # The adapted ontology can change both skill identities and node count.
+    # Rebuild environment state before deriving dimensions or collecting data.
+    env.sync_ontology_nodes()
+    env.reset()
     
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n

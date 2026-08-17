@@ -19,6 +19,7 @@ def test_env_reset(env):
     assert obs.shape == env.observation_space.shape
     assert isinstance(info, dict)
     assert env.turn_id == 0
+    assert env.observation_space.contains(obs)
 
 def test_env_step_random_action(env):
     """Test taking a random step."""
@@ -34,15 +35,34 @@ def test_env_step_random_action(env):
     assert "action" in info
     assert env.turn_id == 1
 
-def test_env_termination_condition(env):
-    """Test that the environment terminates when entropy is low or conclude action is taken."""
+def test_env_blocks_premature_conclusion(env):
+    """Conclusion is invalid until minimum turns and skill coverage are met."""
     env.reset()
-    
-    # Force the conclude action (index 7 based on RL_ACTION_SPACE)
-    # Action space: 0: increase_difficulty, ... 7: conclude_interview
     obs, reward, terminated, truncated, info = env.step(7)
-    assert terminated is True
+    assert terminated is False
+    assert info["conclude_blocked"] is True
     assert info["action"] == "conclude_interview"
+
+
+def test_env_terminates_after_coverage_contract(env):
+    env.reset()
+    for skill in env.nodes[:5]:
+        env.belief_updater.update_belief(skill, 0.8, "low", 0.8)
+    env.turn_id = 9
+    target = env.nodes[0]
+    _, _, terminated, _, info = env.step_with_scores(
+        7, 0.8, 0.8, "low", target_skill=target
+    )
+    assert terminated is True
+    assert info["conclusion_allowed"] is True
+
+
+def test_step_updates_explicit_target_skill(env):
+    env.reset()
+    target = env.nodes[-1]
+    env.step_with_scores(2, 0.9, 0.9, "low", target_skill=target)
+    assert env.belief_updater.get_evidence_count(target) == 1
+    assert env.belief_updater.get_visited_skills() == [target]
 
 def test_env_truncation_condition(env):
     """Test that the environment truncates at 30 turns."""
