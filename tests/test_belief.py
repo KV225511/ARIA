@@ -90,3 +90,16 @@ def test_aggregate_assessment_tracks_evidence_counts(updater):
     assert assessment["evidence_counts"]["Docker"] == 1
     assert set(assessment["visited_skills"]) == {"SQL", "Docker"}
     assert np.isclose(np.sum(assessment["belief"]), 1.0)
+
+
+def test_low_confidence_evidence_moves_belief_less(updater):
+    low_confidence = BeliefStateUpdater(["SQL"])
+    high_confidence = BeliefStateUpdater(["SQL"])
+    low_confidence.update_belief(
+        "SQL", 0.9, "low", 0.9, evidence_confidence=0.2
+    )
+    high_confidence.update_belief(
+        "SQL", 0.9, "low", 0.9, evidence_confidence=1.0
+    )
+    assert high_confidence.get_belief("SQL")[2] > low_confidence.get_belief("SQL")[2]
+    assert low_confidence.evidence_strengths["SQL"] == pytest.approx(0.2)

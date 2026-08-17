@@ -1,7 +1,9 @@
 import pytest
 import numpy as np
+import random
 from modules.module_07_rl.environment import ARIAInterviewEnv
 from modules.module_07_rl.rl_spec import TERMINATION_ENTROPY_THRESHOLD
+from modules.module_07_rl.llm_simulator import ACTION_TO_INDEX, select_behavior_action
 
 @pytest.fixture
 def env():
@@ -63,6 +65,13 @@ def test_step_updates_explicit_target_skill(env):
     env.step_with_scores(2, 0.9, 0.9, "low", target_skill=target)
     assert env.belief_updater.get_evidence_count(target) == 1
     assert env.belief_updater.get_visited_skills() == [target]
+
+
+def test_behavior_policy_prioritizes_coverage(env):
+    env.reset()
+    action_idx, policy_name = select_behavior_action(env, random.Random(0))
+    assert action_idx == ACTION_TO_INDEX["switch_topic"]
+    assert policy_name == "coverage_heuristic"
 
 def test_env_truncation_condition(env):
     """Test that the environment truncates at 30 turns."""

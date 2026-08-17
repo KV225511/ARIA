@@ -150,6 +150,7 @@ class ARIAInterviewEnv(gym.Env):
         behavior_score,
         cog_load,
         target_skill=None,
+        evaluator_confidence=1.0,
     ):
         self.turn_id += 1
         action_name = RL_ACTION_SPACE[action_idx]
@@ -165,7 +166,11 @@ class ARIAInterviewEnv(gym.Env):
         
         # Update Belief
         self.belief_updater.update_belief(
-            target_skill, semantic_score, cog_load, behavior_score
+            target_skill,
+            semantic_score,
+            cog_load,
+            behavior_score,
+            evidence_confidence=evaluator_confidence,
         )
         new_entropy = self.belief_updater.get_global_entropy()
         

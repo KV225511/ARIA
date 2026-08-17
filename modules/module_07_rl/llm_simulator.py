@@ -9,7 +9,7 @@ from pathlib import Path
 
 # Adjust imports to local module structure
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from modules.module_07_rl.environment import ARIAInterviewEnv
+from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_SKILLS_COVERED
 from modules.module_08_llm.generator import LLMQuestionGenerator
 from modules.module_07_rl.data_loader import (
     get_random_pair, get_all_pdfs, RESUMES_DIR, JDS_DIR,
@@ -24,6 +24,8 @@ CANDIDATE_MODEL = os.getenv("ARIA_CANDIDATE_MODEL", "qwen2.5:7b")
 # override either model explicitly, but should not point both at the same model.
 EVALUATOR_MODEL = os.getenv("ARIA_EVALUATOR_MODEL", "llama3.1")
 DATASET_FILE = Path(__file__).parent.parent.parent / "data" / "synthetic" / "qwen_rl_dataset.json"
+PERSONA_TIERS = ("BEGINNER", "MID", "EXPERT")
+ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
 
 async def generate_llm_response(prompt: str, model: str, system: str = "") -> str:
     """Helper to call Ollama directly"""
@@ -68,44 +70,102 @@ Score calibration guide:
 
 Output format requirement:
 Return ONLY a valid JSON object without markdown fences, comments, or extra text:
-{{"semantic_score": 0.0, "behavior_score": 0.0, "cog_load": "low"}}
+{{"semantic_score": 0.0, "behavior_score": 0.0, "cog_load": "low", "confidence": 0.0, "rubric_evidence": ["brief reason"]}}
 """
-    
-    eval_text = await generate_llm_response(prompt, EVALUATOR_MODEL)
-    
-    # A deterministic neutral fallback makes evaluator failures auditable and
-    # reproducible. Invalid turns are tagged in the generated dataset.
+
+    # Invalid evaluations are never converted into label-dependent fallback
+    # scores. Retry once, then let the simulator reject the turn.
     semantic_score = 0.5
     behavior_score = 0.5
     cog_load = "low"
+    confidence = 0.0
+    rubric_evidence = []
     evaluation_valid = False
-    
-    try:
-        if "```json" in eval_text:
-            eval_text = eval_text.split("```json")[1].split("```")[0]
-        elif "```" in eval_text:
-            eval_text = eval_text.split("```")[1].split("```")[0]
-            
-        data = json.loads(eval_text.strip())
-        semantic_score = float(data.get("semantic_score", semantic_score))
-        behavior_score = float(data.get("behavior_score", behavior_score))
-        cog_load = data.get("cog_load", cog_load)
-        if cog_load not in {"low", "anxiety", "ignorance"}:
-            raise ValueError(f"Invalid cognitive-load label: {cog_load}")
-        if not (0.0 <= semantic_score <= 1.0 and 0.0 <= behavior_score <= 1.0):
-            raise ValueError("Evaluator scores must be in [0, 1]")
-        evaluation_valid = True
-    except (TypeError, ValueError, json.JSONDecodeError):
-        pass
-        
-    return semantic_score, behavior_score, cog_load, evaluation_valid
+
+    for _ in range(2):
+        eval_text = await generate_llm_response(prompt, EVALUATOR_MODEL)
+        try:
+            if "```json" in eval_text:
+                eval_text = eval_text.split("```json")[1].split("```")[0]
+            elif "```" in eval_text:
+                eval_text = eval_text.split("```")[1].split("```")[0]
+
+            data = json.loads(eval_text.strip())
+            semantic_score = float(data["semantic_score"])
+            behavior_score = float(data["behavior_score"])
+            cog_load = data["cog_load"]
+            confidence = float(data.get("confidence", 0.5))
+            rubric_evidence = data.get("rubric_evidence", [])
+            if cog_load not in {"low", "anxiety", "ignorance"}:
+                raise ValueError(f"Invalid cognitive-load label: {cog_load}")
+            if not all(
+                0.0 <= value <= 1.0
+                for value in (semantic_score, behavior_score, confidence)
+            ):
+                raise ValueError("Evaluator scores and confidence must be in [0, 1]")
+            if not isinstance(rubric_evidence, list):
+                raise ValueError("rubric_evidence must be a list")
+            evaluation_valid = True
+            break
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+
+    return (
+        semantic_score,
+        behavior_score,
+        cog_load,
+        confidence,
+        rubric_evidence,
+        evaluation_valid,
+    )
 
 def get_action_one_hot(action, action_dim):
     one_hot = np.zeros(action_dim, dtype=np.float32)
     one_hot[action] = 1.0
     return one_hot.tolist()
 
-async def simulate_episode(ep: int, pair: tuple | None, total_eps: int, semaphore: asyncio.Semaphore) -> list:
+
+def select_behavior_action(env: ARIAInterviewEnv, rng: random.Random) -> tuple[int, str]:
+    """Select actions from a reproducible heuristic/exploration mixture."""
+    exploration_roll = rng.random()
+
+    # Twenty percent uniform exploration preserves broad offline-RL support.
+    if exploration_roll < 0.20:
+        allowed = list(range(env.action_space.n))
+        if not env.can_conclude():
+            allowed.remove(ACTION_TO_INDEX["conclude_interview"])
+        return rng.choice(allowed), "uniform_exploration"
+
+    assessment = env.belief_updater.get_aggregate_assessment()
+    coverage = len(assessment["visited_skills"])
+    required_coverage = min(MIN_SKILLS_COVERED, env.num_nodes)
+
+    # Prioritize coverage before repeatedly probing already-observed skills.
+    if coverage < required_coverage:
+        return ACTION_TO_INDEX["switch_topic"], "coverage_heuristic"
+
+    # Conclude only when the environment contract is met and the evidence is
+    # reasonably decisive; otherwise seek class-appropriate information.
+    if env.can_conclude() and assessment["confidence"] >= 0.72 and rng.random() < 0.35:
+        return ACTION_TO_INDEX["conclude_interview"], "confidence_heuristic"
+
+    label = assessment["label"]
+    candidates_by_label = {
+        0: ("probe_foundation", "decrease_difficulty", "switch_topic"),
+        1: ("ask_follow_up_same_topic", "ask_situational", "switch_topic"),
+        2: ("increase_difficulty", "ask_situational", "switch_topic"),
+    }
+    action_name = rng.choice(candidates_by_label[label])
+    return ACTION_TO_INDEX[action_name], "belief_heuristic"
+
+async def simulate_episode(
+    ep: int,
+    pair: tuple | None,
+    total_eps: int,
+    semaphore: asyncio.Semaphore,
+    persona_tier: str | None = None,
+    seed: int = 42,
+) -> list:
     """Simulates a single episode, isolated to its own environment to avoid state conflicts."""
     async with semaphore:
         if pair is not None:
@@ -124,8 +184,11 @@ async def simulate_episode(ep: int, pair: tuple | None, total_eps: int, semaphor
         env.sync_ontology_nodes()
         obs, _ = env.reset()
         
-        # Randomly assign skill tier per episode to ensure balanced class distribution
-        persona_tier = random.choice(["BEGINNER", "MID", "EXPERT"])
+        # Cycle tiers to guarantee balance without leaking the label into scoring.
+        persona_tier = persona_tier or PERSONA_TIERS[ep % len(PERSONA_TIERS)]
+        if persona_tier not in PERSONA_TIERS:
+            raise ValueError(f"Unknown persona tier: {persona_tier}")
+        rng = random.Random(seed + ep)
         personas = {
             "BEGINNER": (
                 "You are a fresh CS graduate with very limited experience. "
@@ -159,18 +222,14 @@ Keep your answers conversational and concise (2-4 sentences max).
         persona_label_map = {"BEGINNER": 0, "MID": 1, "EXPERT": 2}
         episode_true_label = persona_label_map[persona_tier]
         
-        # Map persona tier to role/experience for question generator
-        experience_map = {"BEGINNER": "Entry-Level", "MID": "Mid-Level", "EXPERT": "Senior"}
-        candidate_experience = experience_map[persona_tier]
+        # Question difficulty must not receive the ground-truth persona label.
+        interviewer_experience = getattr(
+            env.ontology, "inferred_experience", "Mid-Level"
+        )
+        consecutive_evaluation_failures = 0
         while not done:
-            action_idx = env.action_space.sample()
+            action_idx, behavior_policy = select_behavior_action(env, rng)
             action_name = RL_ACTION_SPACE[action_idx]
-
-            # Coverage-aware mask: the environment owns the conclusion contract.
-            if action_name == "conclude_interview" and not env.can_conclude():
-                non_conclude = [i for i in range(env.action_space.n) if RL_ACTION_SPACE[i] != "conclude_interview"]
-                action_idx = random.choice(non_conclude)
-                action_name = RL_ACTION_SPACE[action_idx]
 
             target_skill = env.select_target_skill(action_idx)
             
@@ -182,7 +241,7 @@ Keep your answers conversational and concise (2-4 sentences max).
                 belief_state=belief_state,
                 resume=resume_text[:1500],
                 history=history,
-                experience=candidate_experience,
+                experience=interviewer_experience,
                 target_skill=target_skill,
             )
             
@@ -198,16 +257,37 @@ Keep your answers conversational and concise (2-4 sentences max).
             history.append({"q": question, "a": answer})
             
             # 3. Evaluate
-            sem_score, beh_score, cog_load, evaluation_valid = await evaluate_answer(
-                question, answer
-            )
+            (
+                sem_score,
+                beh_score,
+                cog_load,
+                evaluator_confidence,
+                rubric_evidence,
+                evaluation_valid,
+            ) = await evaluate_answer(question, answer)
             if answer == "I'm not sure about that.":
                 sem_score, beh_score, cog_load = 0.1, 0.2, "ignorance"
+                evaluator_confidence = max(evaluator_confidence, 0.8)
+                rubric_evidence = rubric_evidence or ["Candidate explicitly did not know"]
+                evaluation_valid = True
+            if not evaluation_valid:
+                consecutive_evaluation_failures += 1
+                history.pop()
+                print(
+                    f"  [WARN] Episode {ep+1}: invalid evaluator output; "
+                    "rejecting turn."
+                )
+                if consecutive_evaluation_failures >= 3:
+                    print(f"  [ERROR] Episode {ep+1}: evaluator repeatedly failed.")
+                    return []
+                continue
+            consecutive_evaluation_failures = 0
             
             # 4. Environment Step
             next_obs, reward, terminated, truncated, info = env.step_with_scores(
                 action_idx, sem_score, beh_score, cog_load,
                 target_skill=target_skill,
+                evaluator_confidence=evaluator_confidence,
             )
             
             done = terminated or truncated
@@ -240,6 +320,12 @@ Keep your answers conversational and concise (2-4 sentences max).
                 "behavior_score": float(beh_score),
                 "cognitive_load": cog_load,
                 "evaluation_valid": evaluation_valid,
+                "evaluator_confidence": float(evaluator_confidence),
+                "rubric_evidence": rubric_evidence,
+                "behavior_policy": behavior_policy,
+                "candidate_model": CANDIDATE_MODEL,
+                "evaluator_model": EVALUATOR_MODEL,
+                "simulation_seed": seed + ep,
                 "episode_id": f"episode_{ep}",
                 "question": question,
                 "jd_text": jd_text[:2000]
@@ -250,7 +336,12 @@ Keep your answers conversational and concise (2-4 sentences max).
         print(f"--- Finished Episode {ep+1}/{total_eps} | Transitions: {len(episode_transitions)} ---")
         return episode_transitions
 
-async def run_simulation(sweep: bool = False, max_episodes: int = 1000, max_concurrent: int = 5):
+async def run_simulation(
+    sweep: bool = False,
+    max_episodes: int = 1000,
+    max_concurrent: int = 5,
+    seed: int = 42,
+):
     os.makedirs(DATASET_FILE.parent, exist_ok=True)
     
     dataset = []
@@ -279,7 +370,7 @@ async def run_simulation(sweep: bool = False, max_episodes: int = 1000, max_conc
             for r in resumes:
                 episodes_to_run.append((r.name, j.name))
 
-        random.shuffle(episodes_to_run)
+        random.Random(seed).shuffle(episodes_to_run)
 
         if len(episodes_to_run) > max_episodes:
             print(f"Sweep generated {len(episodes_to_run)} pairs. Capping at {max_episodes} for performance.")
@@ -297,7 +388,14 @@ async def run_simulation(sweep: bool = False, max_episodes: int = 1000, max_conc
     
     # Run episodes concurrently
     tasks = [
-        simulate_episode(ep, pair, total_eps, semaphore) 
+        simulate_episode(
+            ep,
+            pair,
+            total_eps,
+            semaphore,
+            persona_tier=PERSONA_TIERS[ep % len(PERSONA_TIERS)],
+            seed=seed,
+        )
         for ep, pair in enumerate(episodes_to_run)
     ]
     
@@ -318,10 +416,12 @@ if __name__ == "__main__":
     parser.add_argument("--sweep", action="store_true", help="Run 1 episode for every JD-Resume permutation")
     parser.add_argument("--max_episodes", type=int, default=1000, help="Maximum number of episodes to run (caps the sweep)")
     parser.add_argument("--max_concurrent", type=int, default=5, help="Number of concurrent LLM requests to make")
+    parser.add_argument("--seed", type=int, default=42, help="Simulation seed")
     args = parser.parse_args()
     
     asyncio.run(run_simulation(
         sweep=args.sweep, 
         max_episodes=args.max_episodes,
-        max_concurrent=args.max_concurrent
+        max_concurrent=args.max_concurrent,
+        seed=args.seed,
     ))

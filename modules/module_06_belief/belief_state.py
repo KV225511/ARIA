@@ -15,6 +15,7 @@ class BeliefStateUpdater:
         self.likelihood_sigma = float(likelihood_sigma)
         self.beliefs = {skill: self.DEFAULT_BELIEF.copy() for skill in skill_nodes}
         self.evidence_counts = {skill: 0 for skill in skill_nodes}
+        self.evidence_strengths = {skill: 0.0 for skill in skill_nodes}
         self.global_entropy_sum = sum(self._calculate_entropy(dist) for dist in self.beliefs.values())
         
     def _normalize(self, dist):
@@ -64,7 +65,7 @@ class BeliefStateUpdater:
 
         skill_weights = skill_weights or {}
         weights = np.array([
-            math.sqrt(self.evidence_counts[skill])
+            math.sqrt(max(self.evidence_strengths[skill], 1e-9))
             * max(float(skill_weights.get(skill, 1.0)), 0.0)
             for skill in visited
         ])
@@ -88,9 +89,17 @@ class BeliefStateUpdater:
             "confidence": float(belief[label]),
             "visited_skills": self.get_visited_skills(),
             "evidence_counts": dict(self.evidence_counts),
+            "evidence_strengths": dict(self.evidence_strengths),
         }
         
-    def update_belief(self, skill, semantic_score, cognitive_load, behavior_score):
+    def update_belief(
+        self,
+        skill,
+        semantic_score,
+        cognitive_load,
+        behavior_score,
+        evidence_confidence=1.0,
+    ):
         """
         Bayesian update for a specific skill node.
         
@@ -131,6 +140,10 @@ class BeliefStateUpdater:
             * ((evidence_score - self.CLASS_CENTERS) / self.likelihood_sigma) ** 2
         )
         likelihood = self._normalize(likelihood)
+        evidence_confidence = float(np.clip(evidence_confidence, 0.0, 1.0))
+        # Temper uncertain evidence toward a uniform likelihood. A confidence of
+        # zero leaves the prior unchanged; one applies the full emission model.
+        likelihood = self._normalize(np.power(likelihood, evidence_confidence))
             
         # Bayesian update: Posterior propto Prior * Likelihood
         unnormalized_posterior = current_belief * likelihood
@@ -143,6 +156,7 @@ class BeliefStateUpdater:
         
         self.beliefs[skill] = new_belief
         self.evidence_counts[skill] += 1
+        self.evidence_strengths[skill] += evidence_confidence
         
         return self.beliefs[skill]
 
