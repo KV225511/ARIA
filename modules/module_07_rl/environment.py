@@ -22,13 +22,14 @@ class ARIAInterviewEnv(gym.Env):
     Integrates the Skill Ontology Graph and the Competency Belief Updater.
     """
     
-    def __init__(self, role_name="backend_developer", ontology=None):
+    def __init__(self, role_name="backend_developer", ontology=None, belief_sigma=None):
         super(ARIAInterviewEnv, self).__init__()
         
         # Load Ontology
         self.ontology = ontology if ontology is not None else SkillOntologyGraph(role_name)
         self.nodes = sorted(self.ontology.get_all_skills())[:MAX_NODES]
         self.num_nodes = len(self.nodes)
+        self.belief_sigma = belief_sigma
         
         # 8 Discrete Actions
         self.action_space = spaces.Discrete(len(RL_ACTION_SPACE))
@@ -43,7 +44,9 @@ class ARIAInterviewEnv(gym.Env):
         
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.belief_updater = BeliefStateUpdater(self.nodes)
+        self.belief_updater = BeliefStateUpdater(
+            self.nodes, likelihood_sigma=self.belief_sigma
+        )
         self.turn_id = 0
         self.current_node_idx = 0
         self.consecutive_turns_on_node = 0

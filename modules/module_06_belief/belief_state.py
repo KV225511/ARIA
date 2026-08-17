@@ -1,15 +1,18 @@
 import math
+import os
 import numpy as np
 
 class BeliefStateUpdater:
     DEFAULT_BELIEF = np.full(3, 1.0 / 3.0)
     CLASS_CENTERS = np.array([0.2, 0.5, 0.8])
 
-    def __init__(self, skill_nodes, likelihood_sigma=0.22):
+    def __init__(self, skill_nodes, likelihood_sigma=None):
         """
         Initializes the belief state for all skills in the ontology.
         Each skill starts with a uniform distribution: [P(beginner), P(mid), P(expert)] = [0.33, 0.33, 0.33]
         """
+        if likelihood_sigma is None:
+            likelihood_sigma = float(os.getenv("ARIA_BELIEF_SIGMA", "0.22"))
         if likelihood_sigma <= 0:
             raise ValueError("likelihood_sigma must be positive")
         self.likelihood_sigma = float(likelihood_sigma)
