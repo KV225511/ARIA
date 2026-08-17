@@ -41,6 +41,9 @@ python-dotenv
 # Final Pipeline Dependencies (Modules 8, 9, 14, 15)
 pyttsx3
 requests
+httpx
+scikit-learn
+pypdf
 
 # Orchestrator & API
 fastapi

@@ -18,7 +18,7 @@ class LLMQuestionGenerator:
         self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1")
         self.api_endpoint = f"{self.ollama_host}/api/generate"
 
-    async def generate_question(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level") -> str:
+    async def generate_question(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None) -> str:
         """
         Generates a natural language question based on the RL agent's action and the candidate's state.
         
@@ -33,7 +33,9 @@ class LLMQuestionGenerator:
         Returns:
             str: The generated question text.
         """
-        prompt = self._build_prompt(action, belief_state, resume, history, role, experience)
+        prompt = self._build_prompt(
+            action, belief_state, resume, history, role, experience, target_skill
+        )
         
         payload = {
             "model": self.model,
@@ -55,11 +57,13 @@ class LLMQuestionGenerator:
             logger.error(f"Failed to fetch from Ollama at {self.ollama_host}: {e}")
             return f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
 
-    async def generate_question_stream(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level"):
+    async def generate_question_stream(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None):
         """
         Generates a natural language question and yields it word-by-word (streaming).
         """
-        prompt = self._build_prompt(action, belief_state, resume, history, role, experience)
+        prompt = self._build_prompt(
+            action, belief_state, resume, history, role, experience, target_skill
+        )
         
         yield {"type": "prompt_debug", "prompt": prompt}
         
@@ -99,7 +103,7 @@ class LLMQuestionGenerator:
         if not chunk_yielded:
             yield f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
 
-    def _build_prompt(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level") -> str:
+    def _build_prompt(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None) -> str:
         history_text = "\n".join([f"Q: {t['q']}\nA: {t['a']}" for t in history[-5:]]) if history else "No previous questions."
         
         # Calculate entropy to find top 5 uncertain skills
@@ -131,6 +135,8 @@ class LLMQuestionGenerator:
             
         belief_summary_str = "\n".join(belief_summary) if belief_summary else "No skill beliefs recorded yet."
         
+        target_skill_text = target_skill or "the most uncertain relevant skill"
+
         return f"""You are ARIA, an expert, objective technical interviewer conducting an assessment for a {experience} {role} position.
 
 CANDIDATE RESUME CONTEXT:
@@ -144,10 +150,11 @@ CURRENT SKILL BELIEF STATE (Most uncertain skills):
 
 RL AGENT DIRECTIVE:
 - Selected Action: {action}
+- Required Target Skill: {target_skill_text}
 - Action Guidance: {action_guide.get(action, 'Ask a relevant technical question matching the target skill level.')}
 
 CRITICAL RULES:
-1. Generate exactly ONE clear, concise, direct question executing the RL action directive above.
+1. Generate exactly ONE clear, concise, direct question about the Required Target Skill and execute the RL action directive above.
 2. STRICTLY do NOT repeat or rephrase any question from the conversation history.
 3. Tone and complexity MUST align with a {experience} {role}.
 4. Output ONLY the question text. Do not include introductory filler, greetings, or conversational remarks.

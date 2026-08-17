@@ -14,7 +14,7 @@ def test_initial_belief_uniform(updater, nodes):
     """Test that all nodes start with uniform distributions."""
     for node in nodes:
         belief = updater.get_belief(node)
-        assert np.allclose(belief, [0.333, 0.333, 0.334], atol=1e-3)
+        assert np.allclose(belief, [1/3, 1/3, 1/3], atol=1e-6)
         assert np.isclose(np.sum(belief), 1.0)
 
 def test_initial_global_entropy(updater):
@@ -25,12 +25,12 @@ def test_initial_global_entropy(updater):
 def test_get_belief_unknown_node(updater):
     """Test getting belief for a node not in the graph."""
     belief = updater.get_belief("Unknown Node")
-    assert np.allclose(belief, [0.333, 0.333, 0.334], atol=1e-3)
+    assert np.allclose(belief, [1/3, 1/3, 1/3], atol=1e-6)
 
 def test_update_belief_unknown_node(updater):
     """Test updating belief for an unknown node (should not crash or modify others)."""
     updater.update_belief("Unknown Node", semantic_score=0.9, cognitive_load="low", behavior_score=0.9)
-    assert np.allclose(updater.get_belief("Unknown Node"), [0.333, 0.333, 0.334], atol=1e-3)
+    assert np.allclose(updater.get_belief("Unknown Node"), [1/3, 1/3, 1/3], atol=1e-6)
 
 def test_update_belief_strong_performance(updater):
     """Test that strong semantic + strong behavior + low load shifts belief towards expert."""
@@ -67,3 +67,26 @@ def test_zero_vector_normalization(updater):
     dist = np.array([0.0, 0.0, 0.0])
     norm = updater._normalize(dist)
     assert np.allclose(norm, [1/3, 1/3, 1/3], atol=1e-3)
+
+
+def test_aggregate_belief_ignores_unvisited_skills(updater):
+    updater.update_belief(
+        "SQL", semantic_score=0.9, cognitive_load="low", behavior_score=0.9
+    )
+    aggregate = updater.get_aggregate_belief()
+    assert np.allclose(aggregate, updater.get_belief("SQL"))
+    assert updater.get_visited_skills() == ["SQL"]
+
+
+def test_aggregate_assessment_tracks_evidence_counts(updater):
+    updater.update_belief(
+        "SQL", semantic_score=0.8, cognitive_load="low", behavior_score=0.8
+    )
+    updater.update_belief(
+        "Docker", semantic_score=0.2, cognitive_load="low", behavior_score=0.2
+    )
+    assessment = updater.get_aggregate_assessment()
+    assert assessment["evidence_counts"]["SQL"] == 1
+    assert assessment["evidence_counts"]["Docker"] == 1
+    assert set(assessment["visited_skills"]) == {"SQL", "Docker"}
+    assert np.isclose(np.sum(assessment["belief"]), 1.0)

@@ -102,7 +102,12 @@ def debug_eval(name: str, y_true, y_pred, labels=None):
         print(classification_report(y_true, y_pred, labels=[0, 1, 2], zero_division=0, target_names=["Beginner", "Mid", "Expert"]))
 
 def run_benchmark(dataset_file: str, output_file: str = "benchmark_report.json"):
-    """Reads dataset, computes metrics, and saves the report."""
+    """Evaluate stored belief verdicts; this does not evaluate an IQL policy.
+
+    Learned-policy evaluation requires loading a checkpoint and running fresh
+    environment rollouts. Keeping that distinction explicit prevents belief
+    classification metrics from being reported as policy performance.
+    """
     dataset_path = Path(dataset_file)
     if not dataset_path.exists():
         logger.error(f"Dataset not found: {dataset_file}")
@@ -176,9 +181,13 @@ def run_benchmark(dataset_file: str, output_file: str = "benchmark_report.json")
     debug_eval("TERMINAL INTERVIEW OUTCOME", terminal_true_labels, terminal_aria_labels)
     
     report = {
+        "evaluation_type": "stored_belief_verdict",
+        "evaluates_learned_policy": False,
         "num_episodes": len(episodes),
         "total_transitions": len(dataset),
         "rl_metrics": rl_metrics,
+        "belief_verdict_metrics": terminal_response_metrics,
+        # Backward-compatible alias for existing report consumers.
         "response_metrics": terminal_response_metrics,
         "overall_transitions_metrics": overall_response_metrics
     }
@@ -189,7 +198,8 @@ def run_benchmark(dataset_file: str, output_file: str = "benchmark_report.json")
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2)
         
-    print(f"\n--- Benchmark Report ({out_path.name}) ---")
+    print(f"\n--- Stored Belief Verdict Report ({out_path.name}) ---")
+    print("NOTE: This report does not load or evaluate the trained IQL policy.")
     print(json.dumps(report, indent=2))
     return report
 
