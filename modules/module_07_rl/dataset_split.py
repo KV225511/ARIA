@@ -12,6 +12,25 @@ from pathlib import Path
 SPLIT_NAMES = ("train", "validation", "test")
 
 
+def apply_terminal_outcome_rewards(transitions: list[dict], omega: float) -> int:
+    """Apply supervised outcome reward only to terminal training transitions."""
+    mismatches = 0
+    for transition in transitions:
+        if (
+            transition.get("done")
+            and "true_label" in transition
+            and "aria_label" in transition
+        ):
+            distance = abs(transition["true_label"] - transition["aria_label"])
+            transition["reward"] = (
+                float(transition.get("reward", 0.0))
+                + float(omega) * (1.0 - distance)
+            )
+            if distance > 0:
+                mismatches += 1
+    return mismatches
+
+
 def group_transitions_into_episodes(transitions: list[dict]) -> list[list[dict]]:
     """Group transitions without allowing an episode to cross a split boundary."""
     if not transitions:
@@ -47,6 +66,35 @@ def _episode_group_key(episode: list[dict]) -> tuple[str, str]:
     )
 
 
+def _connected_resume_jd_groups(episodes: list[list[dict]]):
+    """Group the bipartite resume/JD graph into leakage-safe components."""
+    parent = {}
+
+    def find(item):
+        parent.setdefault(item, item)
+        if parent[item] != item:
+            parent[item] = find(parent[item])
+        return parent[item]
+
+    def union(left, right):
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    episode_keys = []
+    for episode in episodes:
+        resume, jd = _episode_group_key(episode)
+        resume_key = ("resume", resume)
+        jd_key = ("jd", jd)
+        union(resume_key, jd_key)
+        episode_keys.append((episode, resume_key))
+
+    components = defaultdict(list)
+    for episode, resume_key in episode_keys:
+        components[find(resume_key)].append(episode)
+    return list(components.items())
+
+
 def split_by_resume_jd_group(
     transitions: list[dict],
     ratios: tuple[float, float, float] = (0.70, 0.15, 0.15),
@@ -61,11 +109,7 @@ def split_by_resume_jd_group(
     ratios = tuple(ratio / total_ratio for ratio in ratios)
 
     episodes = group_transitions_into_episodes(transitions)
-    grouped_episodes = defaultdict(list)
-    for episode in episodes:
-        grouped_episodes[_episode_group_key(episode)].append(episode)
-
-    groups = list(grouped_episodes.items())
+    groups = _connected_resume_jd_groups(episodes)
     random.Random(seed).shuffle(groups)
     split_targets = {
         "train": ratios[0] * len(episodes),

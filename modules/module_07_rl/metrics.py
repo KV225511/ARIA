@@ -101,25 +101,11 @@ def debug_eval(name: str, y_true, y_pred, labels=None):
         print("classification_report:")
         print(classification_report(y_true, y_pred, labels=[0, 1, 2], zero_division=0, target_names=["Beginner", "Mid", "Expert"]))
 
-def run_benchmark(dataset_file: str, output_file: str = "benchmark_report.json"):
-    """Evaluate stored belief verdicts; this does not evaluate an IQL policy.
-
-    Learned-policy evaluation requires loading a checkpoint and running fresh
-    environment rollouts. Keeping that distinction explicit prevents belief
-    classification metrics from being reported as policy performance.
-    """
-    dataset_path = Path(dataset_file)
-    if not dataset_path.exists():
-        logger.error(f"Dataset not found: {dataset_file}")
-        return
-        
-    with open(dataset_path, "r") as f:
-        dataset = json.load(f)
-        
+def build_belief_report(dataset: list[dict], emit_debug: bool = False):
+    """Build metrics for stored Bayesian verdicts, never a learned policy."""
     if not dataset:
-        logger.error("Dataset is empty.")
-        return
-        
+        return {}
+
     episodes = []
     current_ep = []
     
@@ -178,9 +164,10 @@ def run_benchmark(dataset_file: str, output_file: str = "benchmark_report.json")
         all_aria_labels, all_true_labels
     )
     
-    debug_eval("TERMINAL INTERVIEW OUTCOME", terminal_true_labels, terminal_aria_labels)
+    if emit_debug:
+        debug_eval("TERMINAL INTERVIEW OUTCOME", terminal_true_labels, terminal_aria_labels)
     
-    report = {
+    return {
         "evaluation_type": "stored_belief_verdict",
         "evaluates_learned_policy": False,
         "num_episodes": len(episodes),
@@ -191,6 +178,28 @@ def run_benchmark(dataset_file: str, output_file: str = "benchmark_report.json")
         "response_metrics": terminal_response_metrics,
         "overall_transitions_metrics": overall_response_metrics
     }
+
+
+def run_benchmark(dataset_file: str, output_file: str = "benchmark_report.json"):
+    """Evaluate stored belief verdicts; this does not evaluate an IQL policy.
+
+    Learned-policy evaluation requires loading a checkpoint and running fresh
+    environment rollouts. Keeping that distinction explicit prevents belief
+    classification metrics from being reported as policy performance.
+    """
+    dataset_path = Path(dataset_file)
+    if not dataset_path.exists():
+        logger.error(f"Dataset not found: {dataset_file}")
+        return
+
+    with open(dataset_path, "r") as f:
+        dataset = json.load(f)
+
+    if not dataset:
+        logger.error("Dataset is empty.")
+        return
+
+    report = build_belief_report(dataset, emit_debug=True)
     
     # Security fix: strip any path traversal from output_file
     safe_output_name = Path(output_file).name

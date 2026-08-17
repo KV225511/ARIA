@@ -1,4 +1,5 @@
 from modules.module_07_rl.dataset_split import (
+    apply_terminal_outcome_rewards,
     group_transitions_into_episodes,
     split_by_resume_jd_group,
 )
@@ -47,3 +48,32 @@ def test_split_keeps_resume_jd_groups_isolated():
             assert transition["dataset_split"] == split_name
 
     assert sum(len(items) for items in splits.values()) == len(transitions)
+
+
+def test_split_keeps_connected_resume_and_jd_identities_together():
+    transitions = (
+        _episode("a", "shared-resume", "jd-1", 0)
+        + _episode("b", "shared-resume", "jd-2", 1)
+        + _episode("c", "resume-3", "jd-2", 2)
+        + _episode("d", "resume-4", "jd-4", 0)
+    )
+    splits = split_by_resume_jd_group(transitions, seed=3)
+    owners = {}
+    for split_name, items in splits.items():
+        for transition in items:
+            owners[transition["episode_id"]] = split_name
+
+    assert owners["a"] == owners["b"] == owners["c"]
+
+
+def test_outcome_reward_only_changes_terminal_training_transition():
+    transitions = [
+        {"done": False, "true_label": 2, "aria_label": 0, "reward": 1.0},
+        {"done": True, "true_label": 2, "aria_label": 0, "reward": 1.0},
+        {"done": True, "true_label": 1, "aria_label": 1, "reward": 1.0},
+    ]
+    mismatches = apply_terminal_outcome_rewards(transitions, omega=5.0)
+    assert transitions[0]["reward"] == 1.0
+    assert transitions[1]["reward"] == -4.0
+    assert transitions[2]["reward"] == 6.0
+    assert mismatches == 1

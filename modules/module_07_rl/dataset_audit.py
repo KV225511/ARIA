@@ -58,15 +58,18 @@ def audit_dataset(transitions: list[dict]) -> dict:
         for transition in transitions
     )
 
-    split_groups = defaultdict(set)
+    resume_split_owners = defaultdict(set)
+    jd_split_owners = defaultdict(set)
     for transition in transitions:
         split_name = transition.get("dataset_split")
         if split_name:
-            split_groups[
-                (transition.get("resume_file"), transition.get("jd_file"))
-            ].add(split_name)
-    leaking_groups = [
-        list(group) for group, owners in split_groups.items() if len(owners) > 1
+            resume_split_owners[transition.get("resume_file")].add(split_name)
+            jd_split_owners[transition.get("jd_file")].add(split_name)
+    leaking_resumes = [
+        resume for resume, owners in resume_split_owners.items() if len(owners) > 1
+    ]
+    leaking_jds = [
+        jd for jd, owners in jd_split_owners.items() if len(owners) > 1
     ]
 
     candidate_models = {
@@ -87,8 +90,8 @@ def audit_dataset(transitions: list[dict]) -> dict:
         warnings.append("More than 60% of terminal predictions collapse to one class.")
     if invalid_evaluations:
         warnings.append("Dataset contains invalid evaluator outputs.")
-    if leaking_groups:
-        warnings.append("Resume/JD groups occur in more than one dataset split.")
+    if leaking_resumes or leaking_jds:
+        warnings.append("Resume or JD identities occur in more than one dataset split.")
     if candidate_models & evaluator_models:
         warnings.append("Candidate and evaluator model sets overlap.")
     for label, rewards in rewards_by_class.items():
@@ -118,7 +121,8 @@ def audit_dataset(transitions: list[dict]) -> dict:
             if transition.get("behavior_policy")
         )),
         "invalid_evaluations": invalid_evaluations,
-        "split_leaking_groups": leaking_groups,
+        "split_leaking_resumes": leaking_resumes,
+        "split_leaking_jds": leaking_jds,
         "candidate_models": sorted(candidate_models),
         "evaluator_models": sorted(evaluator_models),
         "warnings": warnings,

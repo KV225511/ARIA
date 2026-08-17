@@ -9,6 +9,7 @@ and trains an IQL policy (Value Network, Q-Networks, and Policy Network) over th
 
 import os
 import sys
+import json
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -96,11 +97,17 @@ def train_iql_policy(
     expectile=0.8,
     beta=3.0,
     resume_file=None,
-    jd_file=None
+    jd_file=None,
+    split_seed=42,
+    enforce_quality_gates=True,
 ):
     from modules.module_07_rl.data_loader import get_random_pair, get_specific_pair
-    from modules.module_07_rl.metrics import run_benchmark
-    import re
+    from modules.module_07_rl.dataset_audit import audit_dataset
+    from modules.module_07_rl.dataset_split import (
+        apply_terminal_outcome_rewards,
+        split_by_resume_jd_group,
+    )
+    from modules.module_07_rl.metrics import build_belief_report
     
     if resume_file and jd_file:
         resume_text, jd_text, r_name, j_name = get_specific_pair(resume_file, jd_file)
@@ -137,11 +144,32 @@ def train_iql_policy(
     
     # 1. Collect Data
     dataset_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'synthetic', 'qwen_rl_dataset.json')
+    validation_dataset = []
+    test_dataset = []
     if os.path.exists(dataset_file):
         print(f"Loading high-fidelity LLM dataset from {dataset_file}...")
-        import json
         with open(dataset_file, "r") as f:
-            dataset = json.load(f)
+            full_dataset = json.load(f)
+
+        audit = audit_dataset(full_dataset)
+        print("Dataset quality audit:")
+        print(json.dumps(audit, indent=2))
+        if enforce_quality_gates and not audit["passes_quality_gates"]:
+            print("[ERROR] Dataset failed quality gates. Regenerate it before training.")
+            return
+
+        splits = split_by_resume_jd_group(full_dataset, seed=split_seed)
+        dataset = splits["train"]
+        validation_dataset = splits["validation"]
+        test_dataset = splits["test"]
+        print(
+            "Leakage-safe transition splits: "
+            f"train={len(dataset)}, validation={len(validation_dataset)}, "
+            f"test={len(test_dataset)}"
+        )
+        if not dataset:
+            print("[ERROR] Grouped split produced an empty training set.")
+            return
     else:
         dataset = collect_offline_trajectories(env, num_transitions=num_transitions)
     
@@ -159,28 +187,18 @@ def train_iql_policy(
             )
             return
     
-    # 2.5 Soft outcome alignment and per-turn belief alignment reward shaping
+    # 2.5 Terminal-only outcome alignment. Ground-truth outcome labels are not
+    # available at deployment, so they must never shape every intermediate turn.
     from modules.module_07_rl.rl_spec import REWARD_COEFFICIENTS
     omega = REWARD_COEFFICIENTS.get("omega", 5.0)
-    zeta = REWARD_COEFFICIENTS.get("zeta", 0.5)
-    
-    mismatches = 0
-    for b in dataset:
-        if "true_label" in b and "aria_label" in b:
-            distance = abs(b["true_label"] - b["aria_label"])
-            # Dense per-turn alignment bonus
-            alignment_bonus = zeta * (1.0 - distance / 2.0)
-            b["reward"] = float(b.get("reward", 0.0)) + alignment_bonus
-            
-            # Graded outcome alignment on terminal transitions (prevents -5.0 crash)
-            if b.get("done"):
-                soft_terminal = omega * (1.0 - distance / 2.0)
-                b["reward"] += soft_terminal
-                if distance > 0:
-                    mismatches += 1
-                
+
+    mismatches = apply_terminal_outcome_rewards(dataset, omega)
+
     if dataset:
-        print(f"Dataset fix applied: Soft reward alignment active. (Found {mismatches} imperfect belief conclusions in dataset)")
+        print(
+            "Terminal outcome alignment active "
+            f"({mismatches} imperfect training conclusions)."
+        )
 
     # Pre-convert dataset to numpy arrays for much faster batch slicing
     obs_arr = np.array([b["obs"] for b in dataset], dtype=np.float32)
@@ -290,10 +308,15 @@ def train_iql_policy(
         
     print(f"IQL Model successfully saved to {model_path}")
     
-    # 3. Run Benchmark Metrics
-    if os.path.exists(dataset_file):
-        print("Evaluating policy and running benchmark metrics...")
-        run_benchmark(dataset_file)
+    # 3. Report held-out stored-belief baselines. These numbers diagnose the
+    # belief pipeline and are explicitly not learned-policy evaluations.
+    for split_name, split_dataset in (
+        ("validation", validation_dataset),
+        ("test", test_dataset),
+    ):
+        if split_dataset:
+            print(f"\nStored belief verdict metrics ({split_name} split):")
+            print(json.dumps(build_belief_report(split_dataset), indent=2))
 
 if __name__ == "__main__":
     train_iql_policy()
