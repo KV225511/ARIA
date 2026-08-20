@@ -1,16 +1,24 @@
-# React + Vite
+# ARIA Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The React interface for ARIA's adaptive interview workflow. It provides two primary experiences:
 
-Currently, two official plugins are available:
+- **Interview setup:** accepts a job description and candidate résumé, then starts an ontology-backed session through the FastAPI service.
+- **Live interview:** presents adaptive questions, candidate video, recording controls, typed responses, the live transcript, session state, and developer traces.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run locally
 
-## React Compiler
+```bash
+npm ci
+npm run dev
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The frontend expects the ARIA API at `http://localhost:8000` and connects to interview sessions through `ws://localhost:8000/ws/interview/{session_id}`.
 
-## Expanding the Oxlint configuration
+## Quality checks
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+```bash
+npm run lint
+npm run build
+```
+
+The interface is responsive across desktop, tablet, and mobile layouts. It uses native system typography and inline SVG controls, so it has no external font or icon requests.
