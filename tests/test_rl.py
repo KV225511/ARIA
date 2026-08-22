@@ -4,6 +4,7 @@ import random
 from modules.module_07_rl.environment import ARIAInterviewEnv
 from modules.module_07_rl.rl_spec import TERMINATION_ENTROPY_THRESHOLD
 from modules.module_07_rl.llm_simulator import ACTION_TO_INDEX, select_behavior_action
+from modules.module_07_rl.state_builder import STATE_DIM
 
 @pytest.fixture
 def env():
@@ -12,7 +13,7 @@ def env():
 def test_env_initialization(env):
     """Test that the environment initializes correctly."""
     assert env.num_nodes == 17  # Backend developer ontology has 17 nodes
-    assert env.observation_space.shape[0] == (50 * 3) + 2  # Padded beliefs (MAX_NODES=50) + entropy + turn = 152
+    assert env.observation_space.shape[0] == STATE_DIM
     assert env.action_space.n == 8
 
 def test_env_reset(env):
@@ -81,3 +82,16 @@ def test_env_truncation_condition(env):
     # Step with a non-conclude action (e.g. 3: switch_topic)
     obs, reward, terminated, truncated, info = env.step(3)
     assert truncated is True
+
+
+def test_ignorance_is_not_treated_as_distress(env):
+    env.reset()
+    target = env.nodes[0]
+    _, ignorance_reward, *_ = env.step_with_scores(
+        3, 0.1, 0.1, "ignorance", target_skill=target
+    )
+    env.reset()
+    _, anxiety_reward, *_ = env.step_with_scores(
+        3, 0.1, 0.1, "anxiety", target_skill=target
+    )
+    assert ignorance_reward > anxiety_reward

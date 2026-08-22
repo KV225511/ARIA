@@ -77,3 +77,16 @@ def test_outcome_reward_only_changes_terminal_training_transition():
     assert transitions[1]["reward"] == -4.0
     assert transitions[2]["reward"] == 6.0
     assert mismatches == 1
+
+
+def test_terminal_outcome_reward_cannot_be_applied_twice():
+    transitions = [
+        {"done": True, "true_label": 1, "aria_label": 1, "reward": 0.5},
+    ]
+    apply_terminal_outcome_rewards(transitions, omega=5.0)
+    try:
+        apply_terminal_outcome_rewards(transitions, omega=5.0)
+    except ValueError as error:
+        assert "already applied" in str(error)
+    else:
+        raise AssertionError("Expected terminal reward double-application rejection")

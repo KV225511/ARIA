@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import json
 import os
 import sys
@@ -26,15 +27,23 @@ EVALUATOR_MODEL = os.getenv("ARIA_EVALUATOR_MODEL", "llama3.1")
 DATASET_FILE = Path(__file__).parent.parent.parent / "data" / "synthetic" / "qwen_rl_dataset.json"
 PERSONA_TIERS = ("BEGINNER", "MID", "EXPERT")
 ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
+DEFAULT_SWEEP_EPISODES = 300
+MIN_RECOMMENDED_EPISODES = 200
+DATASET_SPLIT_RATIOS = (0.70, 0.15, 0.15)
 
-async def generate_llm_response(prompt: str, model: str, system: str = "") -> str:
+async def generate_llm_response(
+    prompt: str,
+    model: str,
+    system: str = "",
+    temperature: float = 0.8,
+) -> str:
     """Helper to call Ollama directly"""
     payload = {
         "model": model,
         "prompt": prompt,
         "system": system,
         "stream": False,
-        "options": {"temperature": 0.8}
+        "options": {"temperature": temperature}
     }
     async with httpx.AsyncClient() as client:
         try:
@@ -45,18 +54,30 @@ async def generate_llm_response(prompt: str, model: str, system: str = "") -> st
             print(f"Ollama API Error: {e}")
             return ""
 
-async def evaluate_answer(question: str, answer: str) -> tuple:
-    """Return scores plus a validity flag without consulting persona labels."""
-    prompt = f"""Evaluate the following interview answer strictly and objectively against standard technical hiring rubrics.
+def build_evaluator_prompt(question: str, answer: str) -> str:
+    """Build a label-blind rubric prompt with concrete score anchors."""
+    return f"""Evaluate the interview answer strictly against the technical question. Judge correctness, depth, trade-offs, and edge-case awareness. Do not reward length, confidence, terminology, or polished writing unless the technical substance supports it.
 
 Question: {question}
 Answer: {answer}
 
 Score calibration guide:
 - semantic_score:
-  * 0.0 - 0.3 (Beginner): Vague, incorrect, 'I do not know', or fundamentally flawed explanations.
-  * 0.3 - 0.6 (Mid-Level): Partially accurate, understands basic concepts but misses edge-cases, system architecture, or depth.
-  * 0.6 - 1.0 (Expert): Highly accurate, comprehensive, cites proper terminology, architecture patterns, trade-offs, and best practices.
+  * 0.00 - 0.25: Incorrect, confused, irrelevant, or explicitly does not know. A plausible-sounding answer with a fundamental misconception belongs here.
+  * 0.40 - 0.60: Correct implementation-level fundamentals, but limited architectural reasoning, trade-off analysis, failure handling, or depth.
+  * 0.80 - 0.95: Correct and precise, with relevant architecture, complexity or operational trade-offs, failure modes, and edge cases.
+  * Reserve 0.26 - 0.39 and 0.61 - 0.79 for genuinely intermediate cases. Do not cluster answers near 0.50 by default.
+
+Calibration anchors (score the substance in the same way across topics):
+1. Question: "What is a database index?"
+   Answer: "It stores the whole table in memory, so every query becomes O(1). More indexes always make writes faster."
+   semantic_score: 0.10 (fundamental misconceptions)
+2. Question: "What is a database index?"
+   Answer: "An index is a data structure that speeds up lookups on selected columns, but it uses storage and adds write overhead."
+   semantic_score: 0.50 (correct fundamentals, limited design depth)
+3. Question: "What is a database index?"
+   Answer: "A B-tree index gives logarithmic point/range lookup while adding storage, cache pressure, and write amplification. I would choose column order from query predicates and cardinality, verify with query plans, and account for selectivity, covering indexes, locking, and workload-specific write costs."
+   semantic_score: 0.90 (precise mechanisms, selection criteria, trade-offs, and operational checks)
 
 - behavior_score:
   * 0.0 - 0.4: Disorganized, rambling, evasive, or low confidence.
@@ -73,6 +94,11 @@ Return ONLY a valid JSON object without markdown fences, comments, or extra text
 {{"semantic_score": 0.0, "behavior_score": 0.0, "cog_load": "low", "confidence": 0.0, "rubric_evidence": ["brief reason"]}}
 """
 
+
+async def evaluate_answer(question: str, answer: str) -> tuple:
+    """Return scores plus a validity flag without consulting persona labels."""
+    prompt = build_evaluator_prompt(question, answer)
+
     # Invalid evaluations are never converted into label-dependent fallback
     # scores. Retry once, then let the simulator reject the turn.
     semantic_score = 0.5
@@ -83,7 +109,11 @@ Return ONLY a valid JSON object without markdown fences, comments, or extra text
     evaluation_valid = False
 
     for _ in range(2):
-        eval_text = await generate_llm_response(prompt, EVALUATOR_MODEL)
+        eval_text = await generate_llm_response(
+            prompt,
+            EVALUATOR_MODEL,
+            temperature=0.0,
+        )
         try:
             if "```json" in eval_text:
                 eval_text = eval_text.split("```json")[1].split("```")[0]
@@ -119,6 +149,122 @@ Return ONLY a valid JSON object without markdown fences, comments, or extra text
         evaluation_valid,
     )
 
+
+def build_candidate_system_prompt(persona_tier: str, resume_text: str) -> str:
+    """Create persona-specific answer constraints without exposing them to the judge."""
+    if persona_tier not in PERSONA_TIERS:
+        raise ValueError(f"Unknown persona tier: {persona_tier}")
+
+    personas = {
+        "BEGINNER": (
+            "You are a fresh CS graduate with weak command of the subject. Give a short "
+            "one- or two-sentence answer. When the topic is unfamiliar, say you do not "
+            "know. Otherwise, demonstrate realistic novice misconceptions: confuse one "
+            "core term, omit the mechanism, or suggest an incorrect implementation. Do "
+            "not add advanced caveats, architecture patterns, or trade-off analysis."
+        ),
+        "MID": (
+            "You are a mid-level developer with 2-4 years of experience. Base answers "
+            f"on this resume context when relevant: {resume_text[:1000]}\n"
+            "Give a correct, practical two- or three-sentence implementation-level "
+            "answer. Mention normal APIs, syntax, or workflow, but usually omit system "
+            "architecture, quantitative complexity analysis, rare failure modes, and "
+            "cross-service trade-offs."
+        ),
+        "EXPERT": (
+            "You are a senior engineer with 8+ years of experience. Give a technically "
+            "precise four- to six-sentence answer. Explain the underlying mechanism and "
+            "cite relevant architecture or distributed-systems patterns. Include time, "
+            "space, scale, or operational trade-offs when applicable, plus at least one "
+            "failure mode or edge case and a concrete production decision. Do not pad "
+            "the answer with generic leadership language."
+        ),
+    }
+    return f"""You are a candidate interviewing for a position.
+Your assigned skill persona for this interview: {persona_tier}
+{personas[persona_tier]}
+Stay in persona consistently. Answer only the question asked and remain conversational.
+"""
+
+
+def _three_way_counts(total: int, ratios=DATASET_SPLIT_RATIOS) -> list[int]:
+    """Allocate a total across three non-empty groups using largest remainders."""
+    if total < 3:
+        raise ValueError("At least three items are required for leakage-safe splitting")
+    raw = [total * ratio / sum(ratios) for ratio in ratios]
+    floors = [int(value) for value in raw]
+    counts = floors.copy()
+    for index in sorted(
+        range(3),
+        key=lambda item: raw[item] - floors[item],
+        reverse=True,
+    )[: total - sum(floors)]:
+        counts[index] += 1
+    for empty_index in [index for index, count in enumerate(counts) if count == 0]:
+        donor_index = max(range(3), key=lambda index: counts[index])
+        counts[donor_index] -= 1
+        counts[empty_index] = 1
+    return counts
+
+
+def build_split_safe_sweep_pairs(
+    resumes: list[Path],
+    jds: list[Path],
+    max_episodes: int,
+    seed: int,
+) -> list[tuple[str, str]]:
+    """Build disconnected resume/JD components sized for train/val/test.
+
+    A full Cartesian sweep creates one giant bipartite component and therefore
+    cannot be split without identity leakage. This builder partitions both
+    document sets first, then samples (and, when needed, repeats) pairs only
+    within the corresponding partition.
+    """
+    if max_episodes < 3:
+        raise ValueError("At least three episodes are required for a three-way split")
+    if len(resumes) < 3 or len(jds) < 3:
+        raise ValueError(
+            "Leakage-safe sweep generation requires at least three resumes and "
+            "three job descriptions"
+        )
+
+    rng = random.Random(seed)
+    resumes = list(resumes)
+    jds = list(jds)
+    rng.shuffle(resumes)
+    rng.shuffle(jds)
+
+    resume_counts = _three_way_counts(len(resumes))
+    jd_counts = _three_way_counts(len(jds))
+    episode_counts = _three_way_counts(max_episodes)
+
+    def partitions(items, counts):
+        result = []
+        cursor = 0
+        for count in counts:
+            result.append(items[cursor:cursor + count])
+            cursor += count
+        return result
+
+    resume_partitions = partitions(resumes, resume_counts)
+    jd_partitions = partitions(jds, jd_counts)
+    episodes_to_run = []
+    for split_index, episode_count in enumerate(episode_counts):
+        combinations = list(itertools.product(
+            resume_partitions[split_index],
+            jd_partitions[split_index],
+        ))
+        rng.shuffle(combinations)
+        episodes_to_run.extend(
+            (resume.name, jd.name)
+            for resume, jd in itertools.islice(
+                itertools.cycle(combinations),
+                episode_count,
+            )
+        )
+
+    return episodes_to_run
+
 def get_action_one_hot(action, action_dim):
     one_hot = np.zeros(action_dim, dtype=np.float32)
     one_hot[action] = 1.0
@@ -150,6 +296,8 @@ def select_behavior_action(env: ARIAInterviewEnv, rng: random.Random) -> tuple[i
         return ACTION_TO_INDEX["conclude_interview"], "confidence_heuristic"
 
     label = assessment["label"]
+    if label is None:
+        label = assessment["raw_label"]
     candidates_by_label = {
         0: ("probe_foundation", "decrease_difficulty", "switch_topic"),
         1: ("ask_follow_up_same_topic", "ask_situational", "switch_topic"),
@@ -189,28 +337,7 @@ async def simulate_episode(
         if persona_tier not in PERSONA_TIERS:
             raise ValueError(f"Unknown persona tier: {persona_tier}")
         rng = random.Random(seed + ep)
-        personas = {
-            "BEGINNER": (
-                "You are a fresh CS graduate with very limited experience. "
-                "Give short, uncertain answers. Frequently admit you don't know something. "
-                "Use vague language like 'I think', 'maybe', 'I'm not sure'. Give incorrect details sometimes."
-            ),
-            "MID": (
-                f"You are a mid-level developer with 2-4 years of experience. "
-                f"Base your answers on this resume context: {resume_text[:1000]}\n"
-                f"Give competent but occasionally incomplete answers. Hesitate on advanced topics."
-            ),
-            "EXPERT": (
-                "You are a senior engineer with 8+ years of experience. "
-                "Give confident, technically deep answers. Cite specific tools, patterns, and trade-offs. "
-                "Use precise terminology and give concrete real-world examples."
-            ),
-        }
-        system_prompt = f"""You are a candidate interviewing for a position.
-Your assigned skill persona for this interview: {persona_tier}
-{personas[persona_tier]}
-Keep your answers conversational and concise (2-4 sentences max).
-"""
+        system_prompt = build_candidate_system_prompt(persona_tier, resume_text)
         print(f"  Persona: {persona_tier}")
         
 
@@ -288,6 +415,7 @@ Keep your answers conversational and concise (2-4 sentences max).
                 action_idx, sem_score, beh_score, cog_load,
                 target_skill=target_skill,
                 evaluator_confidence=evaluator_confidence,
+                question_fingerprint=question,
             )
             
             done = terminated or truncated
@@ -299,6 +427,8 @@ Keep your answers conversational and concise (2-4 sentences max).
             # nodes cannot dominate the terminal class.
             assessment = env.belief_updater.get_aggregate_assessment()
             aria_label = assessment["label"]
+            if aria_label is None:
+                aria_label = assessment["raw_label"]
             
             # 5. Save Transition
             transition = {
@@ -338,7 +468,7 @@ Keep your answers conversational and concise (2-4 sentences max).
 
 async def run_simulation(
     sweep: bool = False,
-    max_episodes: int = 1000,
+    max_episodes: int = DEFAULT_SWEEP_EPISODES,
     max_concurrent: int = 5,
     seed: int = 42,
 ):
@@ -364,19 +494,17 @@ async def run_simulation(
         print(f"Sweep pool: {len(resumes)} valid resumes x {len(jds)} valid JDs "
               f"(filtered from {len(all_resumes)} resumes / {len(all_jds)} JDs)")
 
-        # Generate all valid combinations and shuffle
-        episodes_to_run = []
-        for j in jds:
-            for r in resumes:
-                episodes_to_run.append((r.name, j.name))
+        episodes_to_run = build_split_safe_sweep_pairs(
+            resumes,
+            jds,
+            max_episodes=max_episodes,
+            seed=seed,
+        )
 
-        random.Random(seed).shuffle(episodes_to_run)
-
-        if len(episodes_to_run) > max_episodes:
-            print(f"Sweep generated {len(episodes_to_run)} pairs. Capping at {max_episodes} for performance.")
-            episodes_to_run = episodes_to_run[:max_episodes]
-
-        print(f"Starting Multi-Agent Sweep Simulation with {len(episodes_to_run)} total episodes...")
+        print(
+            "Starting leakage-safe sweep simulation with "
+            f"{len(episodes_to_run)} total episodes..."
+        )
         dataset = [] # Start fresh for sweep
     else:
         num_eps = min(2, max_episodes) # fallback for small tests
@@ -385,6 +513,12 @@ async def run_simulation(
 
     semaphore = asyncio.Semaphore(max_concurrent)
     total_eps = len(episodes_to_run)
+    if total_eps < MIN_RECOMMENDED_EPISODES:
+        print(
+            f"[WARN] Only {total_eps} episodes will be generated; "
+            f"at least {MIN_RECOMMENDED_EPISODES} are recommended for reliable "
+            "calibration and held-out evaluation."
+        )
     
     # Run episodes concurrently
     tasks = [
@@ -414,7 +548,12 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--sweep", action="store_true", help="Run 1 episode for every JD-Resume permutation")
-    parser.add_argument("--max_episodes", type=int, default=1000, help="Maximum number of episodes to run (caps the sweep)")
+    parser.add_argument(
+        "--max_episodes",
+        type=int,
+        default=DEFAULT_SWEEP_EPISODES,
+        help="Maximum number of episodes to run (default: 300; caps the sweep)",
+    )
     parser.add_argument("--max_concurrent", type=int, default=5, help="Number of concurrent LLM requests to make")
     parser.add_argument("--seed", type=int, default=42, help="Simulation seed")
     args = parser.parse_args()

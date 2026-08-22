@@ -1,0 +1,39 @@
+{
+  "schema_version": "aria-replay-comparison-v2",
+  "illustrative_only": true,
+  "warning": "Schema example only. Values are not measured ARIA benchmark results.",
+  "raw_dataset_hash": "<sha256-of-canonical-raw-transitions>",
+  "split_manifest_hash": "<sha256-of-split-manifest>",
+  "belief_config_hash": "<sha256-of-canonical-belief-config>",
+  "belief_schema_version": "belief-v2",
+  "state_schema_version": "aria-state-v2",
+  "reward_schema_version": "aria-reward-v2",
+  "replay_schema_version": "aria-replay-v2",
+  "derived_transitions": "<count>",
+  "splits": {
+    "train": {
+      "raw": {
+        "num_episodes": "<count>",
+        "accuracy_micro_f1": "<value>",
+        "true_counts": "<counts>",
+        "prediction_counts": "<counts>",
+        "abstentions": "<count>"
+      },
+      "replayed": {
+        "num_episodes": "<count>",
+        "accuracy_micro_f1": "<value>",
+        "true_counts": "<counts>",
+        "prediction_counts": "<counts>",
+        "abstentions": "<count>"
+      }
+    },
+    "validation": {
+      "raw": "<same-summary-shape>",
+      "replayed": "<same-summary-shape>"
+    },
+    "test": {
+      "status": "locked",
+      "metrics_computed": false
+    }
+  }
+}

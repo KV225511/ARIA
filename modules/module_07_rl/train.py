@@ -1,322 +1,389 @@
-"""
-Native PyTorch Implementation of Implicit Q-Learning (IQL) for the ARIA RL Agent.
-Replaces the previous PPO dependency to align with the master specification
-without requiring external RL libraries that conflict with our PyTorch version.
+"""Deterministic IQL training over replayed, versioned ARIA transitions."""
 
-This script collects simulated offline trajectories from the ARIA POMDP environment
-and trains an IQL policy (Value Network, Q-Networks, and Policy Network) over them.
-"""
+from __future__ import annotations
 
-import os
-import sys
+import argparse
+import copy
 import json
+import math
+import os
+from pathlib import Path
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
-import numpy as np
-import copy
 
-# Adjust imports to local module structure
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from modules.module_07_rl.environment import ARIAInterviewEnv
+from modules.module_06_belief.belief_config import BeliefModelConfig
+from modules.module_07_rl.dataset_audit import (
+    audit_calibration_validation,
+    audit_offline_rl_support,
+    audit_raw_evidence,
+)
+from modules.module_07_rl.dataset_split import apply_terminal_outcome_rewards
+from modules.module_07_rl.metrics import build_belief_report
+from modules.module_07_rl.rl_spec import REWARD_COEFFICIENTS, RL_ACTION_SPACE
+from modules.module_07_rl.state_builder import (
+    STATE_DIM,
+    STATE_FEATURE_NAMES,
+    STATE_SCHEMA_VERSION,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DERIVED_DIR = PROJECT_ROOT / "data" / "synthetic" / "derived"
+DEFAULT_TRAIN_FILE = DEFAULT_DERIVED_DIR / "splits" / "train.json"
+DEFAULT_VALIDATION_FILE = DEFAULT_DERIVED_DIR / "splits" / "validation.json"
+DEFAULT_CONFIG_FILE = DEFAULT_DERIVED_DIR / "belief_model_v2.json"
+DEFAULT_CHECKPOINT = Path(__file__).with_name("aria_iql_belief_v2.pth")
+
 
 class IQLNetworks(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
-        # Value Network (V)
         self.v_net = nn.Sequential(
             nn.Linear(state_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(256, 1)
+            nn.Linear(256, 1),
         )
-        
-        # Q-Networks (Double Q-learning)
         self.q1_net = nn.Sequential(
             nn.Linear(state_dim + action_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(256, 1)
+            nn.Linear(256, 1),
         )
-        self.q2_net = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(256, 1)
-        )
-        
-        # Policy Network (Actor) - outputs logits for categorical distribution
+        self.q2_net = copy.deepcopy(self.q1_net)
         self.policy_net = nn.Sequential(
             nn.Linear(state_dim, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(256, 256), nn.LayerNorm(256), nn.ReLU(), nn.Dropout(0.1),
-            nn.Linear(256, action_dim)
+            nn.Linear(256, action_dim),
         )
+
 
 def get_action_one_hot(action, action_dim):
     one_hot = np.zeros(action_dim, dtype=np.float32)
     one_hot[action] = 1.0
     return one_hot
 
-def collect_offline_trajectories(env, num_transitions=5000):
-    """Simulate collecting offline data using a random policy"""
-    print(f"Collecting {num_transitions} transitions of offline data...")
-    transitions = []
-    obs, _ = env.reset()
-    
-    for _ in range(num_transitions):
-        action = env.action_space.sample()
-        next_obs, reward, terminated, truncated, _ = env.step(action)
-        
-        transitions.append({
-            "obs": obs,
-            "action": get_action_one_hot(action, env.action_space.n),
-            "action_idx": action,
-            "reward": reward,
-            "next_obs": next_obs,
-            "done": terminated or truncated
-        })
-        
-        if terminated or truncated:
-            obs, _ = env.reset()
-        else:
-            obs = next_obs
-            
-    return transitions
 
 def expectile_loss(diff, expectile=0.8):
-    weight = torch.where(diff > 0, expectile, (1 - expectile))
-    return weight * (diff ** 2)
+    weight = torch.where(diff > 0, expectile, 1 - expectile)
+    return weight * diff**2
+
+
+def seed_everything(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except TypeError:  # Older Torch versions do not support warn_only.
+        torch.use_deterministic_algorithms(True)
+
+
+def validate_replayed_dataset(dataset, config, expected_split):
+    if not dataset:
+        raise ValueError(f"{expected_split} replay dataset is empty")
+    required = {
+        "obs", "next_obs", "action_idx", "reward", "done",
+        "state_schema_version", "state_feature_names", "belief_config_hash",
+        "dataset_split",
+    }
+    for index, transition in enumerate(dataset):
+        missing = required - transition.keys()
+        if missing:
+            raise ValueError(f"Transition {index} is missing {sorted(missing)}")
+        if transition["state_schema_version"] != STATE_SCHEMA_VERSION:
+            raise ValueError(f"Transition {index} uses an incompatible state schema")
+        if tuple(transition["state_feature_names"]) != STATE_FEATURE_NAMES:
+            raise ValueError(f"Transition {index} uses incompatible state feature semantics")
+        if transition["belief_config_hash"] != config.config_hash:
+            raise ValueError(f"Transition {index} belief config hash mismatch")
+        if transition["dataset_split"] != expected_split:
+            raise ValueError(f"Transition {index} is assigned to the wrong split")
+        for field in ("obs", "next_obs"):
+            values = np.asarray(transition[field], dtype=float)
+            if values.shape != (STATE_DIM,) or not np.all(np.isfinite(values)):
+                raise ValueError(f"Transition {index} has invalid {field}")
+        action_idx = transition["action_idx"]
+        if not isinstance(action_idx, int) or not 0 <= action_idx < len(RL_ACTION_SPACE):
+            raise ValueError(f"Transition {index} has invalid action_idx")
+        reward = float(transition["reward"])
+        if not math.isfinite(reward):
+            raise ValueError(f"Transition {index} has non-finite reward")
+
+
+def _arrays(dataset):
+    action_indices = np.asarray([item["action_idx"] for item in dataset], dtype=np.int64)
+    return {
+        "obs": np.asarray([item["obs"] for item in dataset], dtype=np.float32),
+        "actions": np.asarray(
+            [get_action_one_hot(index, len(RL_ACTION_SPACE)) for index in action_indices],
+            dtype=np.float32,
+        ),
+        "action_indices": action_indices,
+        "rewards": np.asarray([item["reward"] for item in dataset], dtype=np.float32).reshape(-1, 1),
+        "next_obs": np.asarray([item["next_obs"] for item in dataset], dtype=np.float32),
+        "done": np.asarray([item["done"] for item in dataset], dtype=np.float32).reshape(-1, 1),
+    }
+
+
+def _deterministic_forward(module, values):
+    was_training = module.training
+    module.eval()
+    result = module(values)
+    module.train(was_training)
+    return result
+
+
+def _validation_objective(nets, arrays, device, gamma, expectile):
+    modes = {name: module.training for name, module in nets.named_children()}
+    nets.eval()
+    with torch.no_grad():
+        s = torch.as_tensor(arrays["obs"], device=device)
+        action = torch.as_tensor(arrays["actions"], device=device)
+        action_idx = torch.as_tensor(arrays["action_indices"], device=device)
+        reward = torch.as_tensor(arrays["rewards"], device=device)
+        next_state = torch.as_tensor(arrays["next_obs"], device=device)
+        done = torch.as_tensor(arrays["done"], device=device)
+        q1 = nets.q1_net(torch.cat([s, action], dim=1))
+        q2 = nets.q2_net(torch.cat([s, action], dim=1))
+        v = nets.v_net(s)
+        v_next = nets.v_net(next_state)
+        q_min = torch.minimum(q1, q2)
+        v_loss = expectile_loss(q_min - v, expectile).mean()
+        target = reward + (1 - done) * gamma * v_next
+        q_loss = F.mse_loss(q1, target) + F.mse_loss(q2, target)
+        behavior_nll = F.cross_entropy(nets.policy_net(s), action_idx)
+        objective = float((v_loss + q_loss + behavior_nll).item())
+    for name, module in nets.named_children():
+        module.train(modes[name])
+    return objective
+
+
+def _atomic_torch_save(value, output: Path):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    torch.save(value, temporary)
+    os.replace(temporary, output)
+
 
 def train_iql_policy(
-    role_name="backend_developer", 
+    train_file=DEFAULT_TRAIN_FILE,
+    validation_file=DEFAULT_VALIDATION_FILE,
+    belief_config_file=DEFAULT_CONFIG_FILE,
+    output_file=DEFAULT_CHECKPOINT,
     total_epochs=100,
-    num_transitions=5000,
     batch_size=256,
     lr=1e-4,
     gamma=0.99,
     tau=0.005,
     expectile=0.8,
     beta=3.0,
-    resume_file=None,
-    jd_file=None,
-    split_seed=42,
-    enforce_quality_gates=True,
+    seed=42,
+    enforce_belief_quality_gate=True,
 ):
-    from modules.module_07_rl.data_loader import get_random_pair, get_specific_pair
-    from modules.module_07_rl.dataset_audit import audit_dataset
-    from modules.module_07_rl.dataset_split import (
-        apply_terminal_outcome_rewards,
-        split_by_resume_jd_group,
+    """Train without loading the locked test split."""
+    train_path = Path(train_file)
+    validation_path = Path(validation_file)
+    config = BeliefModelConfig.load(belief_config_file)
+    training_source = json.loads(train_path.read_text(encoding="utf-8"))
+    validation_source = json.loads(validation_path.read_text(encoding="utf-8"))
+    validate_replayed_dataset(training_source, config, "train")
+    validate_replayed_dataset(validation_source, config, "validation")
+
+    combined_for_integrity = training_source + validation_source
+    raw_gate = audit_raw_evidence(
+        combined_for_integrity,
+        min_episodes=1,
+        min_independent_components=2,
     )
-    from modules.module_07_rl.metrics import build_belief_report
-    
-    if resume_file and jd_file:
-        resume_text, jd_text, r_name, j_name = get_specific_pair(resume_file, jd_file)
-    else:
-        resume_text, jd_text, r_name, j_name = get_random_pair()
-        
-    print(f"Training on Resume: {r_name} | JD: {j_name}")
-    
-    env = ARIAInterviewEnv(role_name)
-    env.ontology.adapt_to_candidate(jd_text, resume_text)
-    # The adapted ontology can change both skill identities and node count.
-    # Rebuild environment state before deriving dimensions or collecting data.
-    env.sync_ontology_nodes()
-    env.reset()
-    
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.n
-    
-    # Initialize networks
+    offline_gate = audit_offline_rl_support(training_source)
+    belief_gate = audit_calibration_validation(validation_source)
+    print(json.dumps({
+        "raw_evidence_gate": raw_gate,
+        "offline_rl_gate": offline_gate,
+        "validation_belief_gate": belief_gate,
+    }, indent=2))
+    if not raw_gate["passes_quality_gates"]:
+        raise RuntimeError("Raw evidence gate failed; training is not permitted")
+    if not offline_gate["passes_quality_gates"]:
+        raise RuntimeError("Offline-RL support gate failed; training is not permitted")
+    if enforce_belief_quality_gate and not belief_gate["passes_quality_gates"]:
+        raise RuntimeError("Validation belief gate failed; freeze calibration before training")
+
+    training = [dict(item) for item in training_source]
+    validation = [dict(item) for item in validation_source]
+    omega = REWARD_COEFFICIENTS.get("omega", 5.0)
+    train_mismatches = apply_terminal_outcome_rewards(training, omega)
+    validation_mismatches = apply_terminal_outcome_rewards(validation, omega)
+    train_arrays = _arrays(training)
+    validation_arrays = _arrays(validation)
+
+    seed_everything(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    
-    nets = IQLNetworks(state_dim, action_dim).to(device)
-    q1_target = copy.deepcopy(nets.q1_net).to(device)
-    q2_target = copy.deepcopy(nets.q2_net).to(device)
-    
+    nets = IQLNetworks(STATE_DIM, len(RL_ACTION_SPACE)).to(device)
+    q1_target = copy.deepcopy(nets.q1_net).to(device).eval()
+    q2_target = copy.deepcopy(nets.q2_net).to(device).eval()
+    for parameter in list(q1_target.parameters()) + list(q2_target.parameters()):
+        parameter.requires_grad_(False)
+
     optimizer_v = optim.Adam(nets.v_net.parameters(), lr=lr)
-    optimizer_q = optim.Adam(list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), lr=lr)
+    optimizer_q = optim.Adam(
+        list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), lr=lr
+    )
     optimizer_policy = optim.Adam(nets.policy_net.parameters(), lr=lr)
-    
     scheduler_v = CosineAnnealingLR(optimizer_v, T_max=total_epochs, eta_min=1e-5)
     scheduler_q = CosineAnnealingLR(optimizer_q, T_max=total_epochs, eta_min=1e-5)
-    scheduler_pi = CosineAnnealingLR(optimizer_policy, T_max=total_epochs, eta_min=1e-5)
-    
-    # 1. Collect Data
-    dataset_file = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'synthetic', 'qwen_rl_dataset.json')
-    validation_dataset = []
-    test_dataset = []
-    if os.path.exists(dataset_file):
-        print(f"Loading high-fidelity LLM dataset from {dataset_file}...")
-        with open(dataset_file, "r") as f:
-            full_dataset = json.load(f)
+    scheduler_policy = CosineAnnealingLR(optimizer_policy, T_max=total_epochs, eta_min=1e-5)
 
-        audit = audit_dataset(full_dataset)
-        print("Dataset quality audit:")
-        print(json.dumps(audit, indent=2))
-        if enforce_quality_gates and not audit["passes_quality_gates"]:
-            print("[ERROR] Dataset failed quality gates. Regenerate it before training.")
-            return
+    num_samples = len(training)
+    batch_size = min(batch_size, num_samples)
+    num_batches = math.ceil(num_samples / batch_size)
+    best_validation_objective = math.inf
+    best_epoch = None
+    output_path = Path(output_file)
 
-        splits = split_by_resume_jd_group(full_dataset, seed=split_seed)
-        dataset = splits["train"]
-        validation_dataset = splits["validation"]
-        test_dataset = splits["test"]
-        print(
-            "Leakage-safe transition splits: "
-            f"train={len(dataset)}, validation={len(validation_dataset)}, "
-            f"test={len(test_dataset)}"
-        )
-        if not dataset:
-            print("[ERROR] Grouped split produced an empty training set.")
-            return
-    else:
-        dataset = collect_offline_trajectories(env, num_transitions=num_transitions)
-    
-    # 2. Validate dataset dimensions to catch stale pre-padding data (Bug #5 fix)
-    if dataset:
-        sample_obs_len = len(dataset[0]["obs"])
-        expected_obs_dim = env.observation_space.shape[0]
-        if sample_obs_len != expected_obs_dim:
-            print(
-                f"\n[ERROR] Dataset dimension mismatch!\n"
-                f"  Dataset obs length : {sample_obs_len}\n"
-                f"  Expected obs length: {expected_obs_dim}\n"
-                f"  Your dataset was generated before the padding fix.\n"
-                f"  Please delete '{dataset_file}' and re-run llm_simulator.py to regenerate it."
-            )
-            return
-    
-    # 2.5 Terminal-only outcome alignment. Ground-truth outcome labels are not
-    # available at deployment, so they must never shape every intermediate turn.
-    from modules.module_07_rl.rl_spec import REWARD_COEFFICIENTS
-    omega = REWARD_COEFFICIENTS.get("omega", 5.0)
-
-    mismatches = apply_terminal_outcome_rewards(dataset, omega)
-
-    if dataset:
-        print(
-            "Terminal outcome alignment active "
-            f"({mismatches} imperfect training conclusions)."
-        )
-
-    # Pre-convert dataset to numpy arrays for much faster batch slicing
-    obs_arr = np.array([b["obs"] for b in dataset], dtype=np.float32)
-    action_onehot_arr = np.array([b["action"] for b in dataset], dtype=np.float32)
-    action_idx_arr = np.array([b["action_idx"] for b in dataset], dtype=np.int64)
-    reward_arr = np.array([b["reward"] for b in dataset], dtype=np.float32).reshape(-1, 1)
-    next_obs_arr = np.array([b["next_obs"] for b in dataset], dtype=np.float32)
-    done_arr = np.array([b["done"] for b in dataset], dtype=np.float32).reshape(-1, 1)
-    
-    # 2. Offline Training Loop
-    print(f"Starting IQL Offline Training for {total_epochs} epochs...")
-    import math
-    num_samples = len(dataset)
-    if num_samples < batch_size:
-        batch_size = num_samples
-    # Use ceil to ensure all samples are included (avoids dropping the last partial batch)
-    num_batches = max(1, math.ceil(num_samples / batch_size)) if num_samples > 0 else 0
-    
     for epoch in range(total_epochs):
-        # Seed per epoch for reproducibility: shuffle is deterministic but different per epoch
-        rng = np.random.default_rng(seed=epoch)
-        indices = rng.permutation(num_samples)
-        
-        epoch_v_loss = 0
-        epoch_q_loss = 0
-        epoch_pi_loss = 0
-        
-        for i in range(num_batches):
-            batch_idx = indices[i*batch_size : (i+1)*batch_size]
-            
-            s = torch.tensor(obs_arr[batch_idx]).to(device)
-            a_onehot = torch.tensor(action_onehot_arr[batch_idx]).to(device)
-            a_idx = torch.tensor(action_idx_arr[batch_idx]).to(device)
-            r = torch.tensor(reward_arr[batch_idx]).to(device)
-            s_next = torch.tensor(next_obs_arr[batch_idx]).to(device)
-            d = torch.tensor(done_arr[batch_idx]).to(device)
-            
-            # --- Update Value Network (Expectile Regression) ---
+        nets.train()
+        indices = np.random.default_rng(seed + epoch).permutation(num_samples)
+        totals = {"v": 0.0, "q": 0.0, "policy": 0.0}
+        for start in range(0, num_samples, batch_size):
+            batch = indices[start:start + batch_size]
+            s = torch.as_tensor(train_arrays["obs"][batch], device=device)
+            action = torch.as_tensor(train_arrays["actions"][batch], device=device)
+            action_idx = torch.as_tensor(train_arrays["action_indices"][batch], device=device)
+            reward = torch.as_tensor(train_arrays["rewards"][batch], device=device)
+            next_state = torch.as_tensor(train_arrays["next_obs"][batch], device=device)
+            done = torch.as_tensor(train_arrays["done"][batch], device=device)
+
             with torch.no_grad():
-                q1 = q1_target(torch.cat([s, a_onehot], dim=1))
-                q2 = q2_target(torch.cat([s, a_onehot], dim=1))
-                q_target_val_policy = torch.min(q1, q2)
-                
-            v = nets.v_net(s)
-            v_loss = expectile_loss(q_target_val_policy - v, expectile).mean()
-            
+                q_target_behavior = torch.minimum(
+                    q1_target(torch.cat([s, action], dim=1)),
+                    q2_target(torch.cat([s, action], dim=1)),
+                )
+            value = nets.v_net(s)
+            value_loss = expectile_loss(q_target_behavior - value, expectile).mean()
             optimizer_v.zero_grad()
-            v_loss.backward()
-            torch.nn.utils.clip_grad_norm_(nets.v_net.parameters(), max_norm=1.0)
+            value_loss.backward()
+            torch.nn.utils.clip_grad_norm_(nets.v_net.parameters(), 1.0)
             optimizer_v.step()
-            
-            # --- Update Q Networks ---
+
             with torch.no_grad():
-                v_next = nets.v_net(s_next)
-                q_target_val = r + (1 - d) * gamma * v_next
-                
-            q1 = nets.q1_net(torch.cat([s, a_onehot], dim=1))
-            q2 = nets.q2_net(torch.cat([s, a_onehot], dim=1))
-            q_loss = F.mse_loss(q1, q_target_val) + F.mse_loss(q2, q_target_val)
-            
+                next_value = _deterministic_forward(nets.v_net, next_state)
+                q_backup = reward + (1 - done) * gamma * next_value
+            q1 = nets.q1_net(torch.cat([s, action], dim=1))
+            q2 = nets.q2_net(torch.cat([s, action], dim=1))
+            q_loss = F.mse_loss(q1, q_backup) + F.mse_loss(q2, q_backup)
             optimizer_q.zero_grad()
             q_loss.backward()
-            torch.nn.utils.clip_grad_norm_(list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(
+                list(nets.q1_net.parameters()) + list(nets.q2_net.parameters()), 1.0
+            )
             optimizer_q.step()
-            
-            # --- Update Policy Network (Advantage Weighted Regression) ---
+
             with torch.no_grad():
-                # Re-evaluate V using the UPDATED value network to prevent using a stale value
-                v_updated = nets.v_net(s)
-                adv = q_target_val_policy - v_updated
-                weight = torch.exp(beta * adv).clamp(max=100.0)
-                
-            logits = nets.policy_net(s)
-            log_probs = F.log_softmax(logits, dim=-1)
-            action_log_probs = log_probs.gather(1, a_idx.unsqueeze(1))
-            
-            pi_loss = -(weight * action_log_probs).mean()
-            
+                current_value = _deterministic_forward(nets.v_net, s)
+                advantage = q_target_behavior - current_value
+                weight = torch.exp(beta * advantage).clamp(max=100.0)
+            log_probs = F.log_softmax(nets.policy_net(s), dim=-1)
+            policy_loss = -(weight * log_probs.gather(1, action_idx.unsqueeze(1))).mean()
             optimizer_policy.zero_grad()
-            pi_loss.backward()
-            torch.nn.utils.clip_grad_norm_(nets.policy_net.parameters(), max_norm=1.0)
+            policy_loss.backward()
+            torch.nn.utils.clip_grad_norm_(nets.policy_net.parameters(), 1.0)
             optimizer_policy.step()
-            
-            # Soft update target networks
+
             with torch.no_grad():
-                for param, target_param in zip(nets.q1_net.parameters(), q1_target.parameters()):
-                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-                for param, target_param in zip(nets.q2_net.parameters(), q2_target.parameters()):
-                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-                
-            epoch_v_loss += v_loss.item()
-            epoch_q_loss += q_loss.item()
-            epoch_pi_loss += pi_loss.item()
-            
-        if num_batches > 0:
-            print(f"Epoch {epoch+1}/{total_epochs} | V Loss: {epoch_v_loss/num_batches:.4f} | Q Loss: {epoch_q_loss/num_batches:.4f} | Pi Loss: {epoch_pi_loss/num_batches:.4f}")
-        else:
-            print(f"Epoch {epoch+1}/{total_epochs} | No batches to train on.")
-        
+                for source, target in zip(nets.q1_net.parameters(), q1_target.parameters()):
+                    target.copy_(tau * source + (1 - tau) * target)
+                for source, target in zip(nets.q2_net.parameters(), q2_target.parameters()):
+                    target.copy_(tau * source + (1 - tau) * target)
+            totals["v"] += value_loss.item()
+            totals["q"] += q_loss.item()
+            totals["policy"] += policy_loss.item()
+
+        validation_objective = _validation_objective(
+            nets, validation_arrays, device, gamma, expectile
+        )
+        print(
+            f"Epoch {epoch + 1}/{total_epochs} | "
+            f"V {totals['v']/num_batches:.4f} | Q {totals['q']/num_batches:.4f} | "
+            f"Pi {totals['policy']/num_batches:.4f} | "
+            f"validation_objective {validation_objective:.4f}"
+        )
+        if validation_objective < best_validation_objective:
+            best_validation_objective = validation_objective
+            best_epoch = epoch + 1
+            checkpoint = {
+                "checkpoint_schema_version": "aria-iql-checkpoint-v2",
+                "model_state_dict": nets.state_dict(),
+                "state_schema_version": STATE_SCHEMA_VERSION,
+                "state_feature_names": list(STATE_FEATURE_NAMES),
+                "belief_config": config.to_dict(),
+                "belief_config_hash": config.config_hash,
+                "split_manifest_hash": config.split_manifest_hash,
+                "training": {
+                    "best_epoch": best_epoch,
+                    "validation_selection_metric": "offline_iql_validation_objective",
+                    "validation_objective": best_validation_objective,
+                    "seed": seed,
+                    "hyperparameters": {
+                        "gamma": gamma, "tau": tau, "expectile": expectile,
+                        "beta": beta, "learning_rate": lr,
+                    },
+                    "train_terminal_mismatches": train_mismatches,
+                    "validation_terminal_mismatches": validation_mismatches,
+                },
+            }
+            _atomic_torch_save(checkpoint, output_path)
         scheduler_v.step()
         scheduler_q.step()
-        scheduler_pi.step()
-        
-        # Save a checkpoint per epoch
-        model_path = os.path.join(os.path.dirname(__file__), "aria_iql_universal.pth")
-        torch.save(nets.state_dict(), model_path)
-        
-    print(f"IQL Model successfully saved to {model_path}")
-    
-    # 3. Report held-out stored-belief baselines. These numbers diagnose the
-    # belief pipeline and are explicitly not learned-policy evaluations.
-    for split_name, split_dataset in (
-        ("validation", validation_dataset),
-        ("test", test_dataset),
-    ):
-        if split_dataset:
-            print(f"\nStored belief verdict metrics ({split_name} split):")
-            print(json.dumps(build_belief_report(split_dataset), indent=2))
+        scheduler_policy.step()
+
+    result = {
+        "checkpoint": str(output_path),
+        "best_epoch": best_epoch,
+        "best_validation_objective": best_validation_objective,
+        "validation_belief_report": build_belief_report(validation_source),
+        "evaluates_learned_policy": False,
+        "policy_evaluation_limitation": (
+            "Fixed offline trajectories cannot evaluate counterfactual IQL actions "
+            "without fresh rollouts or logged behavior propensities."
+        ),
+    }
+    print(json.dumps(result, indent=2))
+    return result
+
 
 if __name__ == "__main__":
-    train_iql_policy()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train-file", default=str(DEFAULT_TRAIN_FILE))
+    parser.add_argument("--validation-file", default=str(DEFAULT_VALIDATION_FILE))
+    parser.add_argument("--belief-config", default=str(DEFAULT_CONFIG_FILE))
+    parser.add_argument("--output", default=str(DEFAULT_CHECKPOINT))
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--allow-belief-gate-failure",
+        action="store_true",
+        help="Experimental only; raw-evidence and offline-RL gates remain enforced.",
+    )
+    args = parser.parse_args()
+    try:
+        train_iql_policy(
+            train_file=args.train_file,
+            validation_file=args.validation_file,
+            belief_config_file=args.belief_config,
+            output_file=args.output,
+            total_epochs=args.epochs,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            enforce_belief_quality_gate=not args.allow_belief_gate_failure,
+        )
+    except (OSError, ValueError, RuntimeError) as error:
+        parser.exit(1, f"[ERROR] {error}\n")

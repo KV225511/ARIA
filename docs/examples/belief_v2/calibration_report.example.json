@@ -1,0 +1,48 @@
+{
+  "schema_version": "aria-calibration-report-v2",
+  "illustrative_only": true,
+  "warning": "Schema example only. Values are not measured ARIA benchmark results.",
+  "raw_dataset_hash": "<sha256-of-canonical-raw-transitions>",
+  "split_manifest_hash": "<sha256-of-split-manifest>",
+  "belief_config_hash": "<sha256-of-canonical-belief-config>",
+  "belief_schema_version": "belief-v2",
+  "state_schema_version": "aria-state-v2",
+  "reward_schema_version": "aria-reward-v2",
+  "replay_schema_version": "aria-replay-v2",
+  "test_metrics_locked": true,
+  "calibration": {
+    "config": {
+      "schema_version": "belief-v2",
+      "class_centers": [0.24, 0.49, 0.76],
+      "class_scales": [0.14, 0.16, 0.15],
+      "class_prior": [0.333333, 0.333333, 0.333334],
+      "repeat_discount_power": 0.5,
+      "duplicate_question_multiplier": 0.25,
+      "max_skill_effective_sample_size": 5.0,
+      "aggregation_temperature": 1.0,
+      "posterior_floor": 0.0001,
+      "minimum_assessment_confidence": 0.65,
+      "minimum_effective_evidence": 2.0,
+      "minimum_skill_coverage": 3,
+      "raw_dataset_hash": "<sha256-of-canonical-raw-transitions>",
+      "split_manifest_hash": "<sha256-of-split-manifest>",
+      "fit_metadata": {
+        "emissions_fit_split": "train",
+        "meta_parameters_tuned_split": "validation",
+        "test_metrics_locked_at_freeze": true
+      }
+    },
+    "validation_metrics": {
+      "macro_f1": "<measured-on-validation>",
+      "ordinal_mae": "<measured-on-validation>",
+      "expected_calibration_error": "<measured-on-validation>",
+      "passes_collapse_gate": "<true-or-false>"
+    },
+    "bootstrap_stability": {
+      "successful_samples": "<count>",
+      "center_mean": "<three-values>",
+      "center_std": "<three-values>",
+      "ordered_fraction": "<fraction>"
+    }
+  }
+}

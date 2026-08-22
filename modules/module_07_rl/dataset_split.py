@@ -14,20 +14,12 @@ SPLIT_NAMES = ("train", "validation", "test")
 
 def apply_terminal_outcome_rewards(transitions: list[dict], omega: float) -> int:
     """Apply supervised outcome reward only to terminal training transitions."""
+    from modules.module_07_rl.reward_model import apply_terminal_outcome_once
+
     mismatches = 0
     for transition in transitions:
-        if (
-            transition.get("done")
-            and "true_label" in transition
-            and "aria_label" in transition
-        ):
-            distance = abs(transition["true_label"] - transition["aria_label"])
-            transition["reward"] = (
-                float(transition.get("reward", 0.0))
-                + float(omega) * (1.0 - distance)
-            )
-            if distance > 0:
-                mismatches += 1
+        if transition.get("done") and "true_label" in transition:
+            mismatches += int(apply_terminal_outcome_once(transition, omega))
     return mismatches
 
 
@@ -61,8 +53,8 @@ def group_transitions_into_episodes(transitions: list[dict]) -> list[list[dict]]
 def _episode_group_key(episode: list[dict]) -> tuple[str, str]:
     first = episode[0]
     return (
-        str(first.get("resume_file", "unknown_resume")),
-        str(first.get("jd_file", "unknown_jd")),
+        str(first.get("resume_content_hash") or first.get("resume_file", "unknown_resume")),
+        str(first.get("jd_content_hash") or first.get("jd_file", "unknown_jd")),
     )
 
 
@@ -95,6 +87,16 @@ def _connected_resume_jd_groups(episodes: list[list[dict]]):
     return list(components.items())
 
 
+def connected_identity_components(transitions: list[dict]):
+    """Public identity-component view used by audits and bootstrap reporting."""
+    return [
+        episodes
+        for _, episodes in _connected_resume_jd_groups(
+            group_transitions_into_episodes(transitions)
+        )
+    ]
+
+
 def split_by_resume_jd_group(
     transitions: list[dict],
     ratios: tuple[float, float, float] = (0.70, 0.15, 0.15),
@@ -110,7 +112,12 @@ def split_by_resume_jd_group(
 
     episodes = group_transitions_into_episodes(transitions)
     groups = _connected_resume_jd_groups(episodes)
+    # Shuffle first for deterministic random tie-breaking, then place the
+    # largest components first. Without this ordering, a small component can
+    # consume the train target before a train-sized component is considered,
+    # leaving validation or test empty even when an exact allocation exists.
     random.Random(seed).shuffle(groups)
+    groups.sort(key=lambda item: len(item[1]), reverse=True)
     split_targets = {
         "train": ratios[0] * len(episodes),
         "validation": ratios[1] * len(episodes),

@@ -1,167 +1,179 @@
-# ARIA RL Benchmark Improvement Changes
+# ARIA belief-v2 and replay-v2 design
 
-## Goal
+## Outcome
 
-Improve the ARIA RL benchmark from roughly 40% micro-F1 toward a credible 80-90% heldout micro-F1.
+ARIA now has a replay-first migration path for the existing evaluator evidence.
+It does not require or permit LLM question/answer regeneration. The raw JSON is
+read-only; calibration, state, reward, labels, and termination are emitted to a
+new versioned derived directory.
 
-The key point is that the original low score was not caused by a single bug. It came from a combination of weak belief aggregation, noisy evaluator evidence, random-policy data, unsafe splits, and evaluation that reported stored belief labels rather than a clearly separated learned-policy result.
+The redesign fixes the structural reason calibration previously had little
+effect: old observations, rewards, and `aria_label` values remained embedded in
+the offline transitions after belief parameters changed. Replay-v2 rebuilds
+every derived field from the frozen configuration.
 
-## Why These Changes Were Needed
-
-The benchmark showed a strong prediction collapse:
-
-```text
-aria_label_counts: {0: 423, 1: 76, 2: 1}
-true_label_counts: {0: 180, 1: 165, 2: 155}
-```
-
-That means ARIA mostly predicted Beginner, almost never predicted Expert, and therefore had poor recall for Mid and Expert candidates. Since this is a single-label three-class task, micro-F1 is effectively the same as accuracy, so the collapse directly limited the score to around 40%.
-
-The target improvement requires an honest pipeline first. Raising the score by leaking the candidate tier into the simulator or evaluation would make the benchmark meaningless. The changes below focus on improving the system without using the true label as evidence.
-
-## Changes Made
-
-### 1. Repaired the Belief Pipeline
-
-Files changed:
-
-- `modules/module_06_belief/belief_state.py`
-- `modules/module_07_rl/environment.py`
-- `modules/module_07_rl/llm_simulator.py`
-- `modules/module_08_llm/generator.py`
-- `modules/module_07_rl/metrics.py`
-
-What changed:
-
-- Replaced fragile single-node terminal verdicts with aggregate belief across visited skills.
-- Added deterministic node ordering so runs are reproducible.
-- Normalized entropy by `log(3)` so the observation space remains inside the declared `[0, 1]` bounds.
-- Passed an explicit target skill into question generation and belief updates.
-- Increased the minimum interview length and required broader skill coverage before conclusion.
-- Made benchmark reporting explicit that stored `aria_label` values are belief verdicts, not learned-policy rollouts.
-
-Why:
-
-The old terminal verdict could be based on one noisy skill node. If that node received a conservative score, the final label often collapsed to Beginner even when other evidence existed. Aggregating visited skill beliefs makes the final assessment more stable and better aligned with the whole interview.
-
-### 2. Improved Synthetic Data Quality
-
-Files changed:
-
-- `modules/module_07_rl/llm_simulator.py`
-- `modules/module_06_belief/belief_state.py`
-- `modules/module_07_rl/environment.py`
-- `modules/module_07_rl/dataset_audit.py`
-
-What changed:
-
-- Added separate candidate and evaluator model configuration:
-  - `ARIA_CANDIDATE_MODEL`
-  - `ARIA_EVALUATOR_MODEL`
-- Removed persona leakage from interviewer prompts.
-- Added structured evaluator output with semantic score, behavior score, cognitive load, confidence, and rubric evidence.
-- Added evaluator retries and invalid-evaluation rejection.
-- Added balanced persona cycling across Beginner, Mid, and Expert candidates.
-- Replaced pure random data collection with a mixed behavior policy:
-  - exploration
-  - coverage-oriented questioning
-  - belief-oriented questioning
-  - confidence-aware conclusion
-- Added dataset auditing for label balance, prediction collapse, score spread, reward spread, invalid evaluator outputs, model overlap, and split leakage.
-
-Why:
-
-The old dataset was collected with a nearly random policy and weak, low-variance rewards. Offline RL cannot learn a good interview policy from random actions and flat rewards. The improved simulator produces more useful trajectories while still avoiding true-label leakage.
-
-### 3. Added Leakage-Safe Dataset Splits
-
-Files changed:
-
-- `modules/module_07_rl/dataset_split.py`
-- `modules/module_07_rl/dataset_audit.py`
-- `modules/module_07_rl/train.py`
-- `modules/module_07_rl/metrics.py`
-
-What changed:
-
-- Added connected-component dataset splitting across resumes and job descriptions.
-- Ensured any shared resume or job description stays entirely within one split.
-- Added audit checks for resume leakage and job-description leakage.
-- Split data into train, validation, and test sets before training.
-- Trained only on the train split.
-- Reported heldout stored-belief metrics separately from policy evaluation.
-- Added terminal-only supervised outcome reward shaping for training transitions.
-
-Why:
-
-If the same resume or JD appears in both train and test, high scores can come from memorization instead of generalization. Leakage-safe splitting is required before treating any 80-90% micro-F1 result as real.
-
-### 4. Added Validation-Only Belief Calibration
-
-Files changed:
-
-- `modules/module_07_rl/belief_calibration.py`
-- `modules/module_06_belief/belief_state.py`
-- `modules/module_07_rl/environment.py`
-
-What changed:
-
-- Added a calibration script that replays validation episodes and tests candidate belief likelihood sigmas.
-- Selects sigma using validation micro-F1, with macro-F1 as a tie-breaker to avoid class collapse.
-- Allows runtime configuration through `ARIA_BELIEF_SIGMA`.
-
-Why:
-
-The Gaussian likelihood width controls how strongly semantic scores separate Beginner, Mid, and Expert. Too wide, and classes bleed together. Too tight, and individual noisy scores dominate. Calibrating on validation data gives a principled way to tune this without touching the test set.
-
-## Tests Added or Updated
-
-Tests were added or expanded for:
-
-- belief aggregation and confidence handling
-- simulator behavior and evaluator parsing
-- dataset audit checks
-- leakage-safe splitting
-- metrics reporting
-- validation-only belief calibration
-- RL environment behavior
-
-The targeted test suite passed after the changes:
+## Data and control flow
 
 ```text
-32 passed
+immutable raw transitions
+        |
+        v
+identity components (resume/JD content hash preferred)
+        |
+        +--> train ------> fit class emissions + bootstrap stability
+        |
+        +--> validation -> tune repetition/ESS/aggregation/abstention
+        |
+        +--> test -------- LOCKED
+        |
+        v
+frozen BeliefModelConfig (hash-addressed)
+        |
+        v
+deterministic episode replay
+        |
+        +--> versioned train.json ------+
+        +--> versioned validation.json -+--> IQL training/model selection
+        +--> versioned test.json ---------> explicit post-freeze evaluation only
 ```
 
-## What Still Needs To Happen
+## Design changes
 
-The implementation work is in place, but the score cannot be honestly raised to 80-90% until a clean dataset is regenerated and evaluated.
+### Belief model
 
-Current blocker:
+- `BeliefModelConfig` is immutable, validated, deterministically serialized,
+  and addressed by a SHA-256 configuration hash.
+- Technical competency likelihood uses only `semantic_score`.
+- Evaluator, STT, and modality confidence scale evidence reliability; they do
+  not move the score toward a competency class.
+- Behavior, prosody, anxiety, accent, incongruence, and presentation style are
+  policy/context features only.
+- Per-skill evidence uses Gaussian log-likelihoods, log-space normalization,
+  repeated-question discount, sublinear repeated evidence, and an ESS cap.
+- Global belief uses a normalized log-opinion pool over visited skills only.
+- Abstention is explicit when coverage, ESS, or confidence is insufficient.
+- Non-finite and out-of-range evidence is rejected rather than silently
+  poisoning a posterior.
+- Legacy shared-sigma behavior is available only through the explicit
+  `BeliefModelConfig.legacy(...)` adapter.
 
-- `data/resumes/` has no resume PDFs.
-- `data/jds/` has job-description PDFs.
-- The simulator requires both valid resumes and valid job descriptions.
-- Old resumes were intentionally removed from the repository and ignored by `.gitignore`, so they should not be restored without explicit approval.
+### Calibration and split isolation
 
-Next required steps:
+- Resume/JD identity components are split before fitting. Content hashes take
+  priority over filenames, so renamed duplicates stay together.
+- Centers and scales are fitted on training labels only using episode-balanced
+  robust statistics. Small-class scales shrink toward a pooled scale.
+- Centers are projected into monotonic order without imposing artificial
+  spacing.
+- Validation labels tune only repeat discount, skill ESS cap, aggregation
+  temperature, and the abstention threshold.
+- Collapsed validation candidates are rejected before ranking by macro-F1,
+  ordinal MAE, and expected calibration error.
+- Parameter stability is bootstrapped by episode. Test metrics are not computed
+  by the prepare or training commands.
 
-1. Add valid resume PDFs under `data/resumes/`.
-2. Regenerate the RL dataset with distinct candidate and evaluator models.
-3. Run the dataset audit and reject the dataset if it shows collapse, leakage, or flat rewards.
-4. Calibrate belief sigma on the validation split only.
-5. Retrain IQL on the train split.
-6. Evaluate on the heldout test split.
-7. Report both stored-belief metrics and actual learned-policy rollout metrics.
+### Replay and stable state
 
-## Expected Impact
+- Replay preserves every source field and stores `raw_*` copies for fields it
+  replaces.
+- It recomputes belief, verdict/abstention, confidence, ESS, information gain,
+  observation, next observation, reward, termination, and action mask.
+- Every replayed transition carries raw dataset, split manifest, and belief
+  config hashes plus belief/state/reward/replay schema versions.
+- State-v2 has 32 named, fixed-position features. It contains global belief,
+  entropy, coverage, turn, focus belief/ESS, and previous evidence/context/action
+  values with availability flags. It never depends on JD-specific padding.
+- The action mask is a separate field and is not smuggled into the state.
+- `obs` is constructed before the current action/evidence and `next_obs` after
+  it, preventing future-transition leakage.
 
-These changes should improve micro-F1 by fixing the main structural causes of Beginner collapse:
+### Reward, termination, and gates
 
-- final predictions now use global evidence instead of one node
-- interviews collect broader skill evidence before conclusion
-- evaluator confidence affects belief updates
-- synthetic data is more balanced and informative
-- train/test leakage is guarded against
-- belief sharpness can be tuned on validation data
+- Information gain is measured on the target skill, not untouched uniform
+  ontology nodes.
+- Ignorance is not treated as anxiety/distress.
+- Step reward includes coverage, duration, redundancy, anxiety, and invalid
+  action terms. There is no unconditional conclusion bonus.
+- Terminal correctness has explicit correct/adjacent/opposite/abstain costs and
+  is applied exactly once; a second shaping attempt is an error.
+- Conclusion requires minimum turns, coverage, ESS, and calibrated certainty,
+  and produces a structured termination reason.
+- Gates are separate: raw evidence, calibration validation, locked test,
+  offline-RL support, and learned-policy rollout. Relaxing the validation
+  belief gate does not bypass raw or offline-support failures.
+- Stored-belief reports explicitly set `evaluates_learned_policy: false`.
 
-The remaining jump to 80-90% depends on regenerating a high-quality dataset and confirming the result on a leakage-safe heldout test split.
+### Training
+
+- Training accepts only replay-v2 train and validation splits. It has no test
+  input.
+- Every transition is checked for split, configuration hash, state schema,
+  feature names, dimensions, finite values, actions, and rewards.
+- Python, NumPy, Torch, and CUDA randomness is seeded; deterministic algorithms
+  and evaluation-mode target inference are used.
+- The best validation checkpoint is written atomically to a new v2 filename.
+  The prior accepted checkpoint is never overwritten.
+- Checkpoints include model, belief config/hash, state schema/names, split hash,
+  seed, hyperparameters, and selection metadata.
+
+## Commands
+
+Prepare calibration and immutable replay from the existing raw log:
+
+```powershell
+python -m modules.module_07_rl.prepare_belief_pipeline `
+  data/synthetic/qwen_rl_dataset.json `
+  data/synthetic/derived
+```
+
+This produces:
+
+- `belief_model_v2.json`
+- `calibration_report_v2.json`
+- `split_manifest_v2.json`
+- `qwen_rl_dataset_belief_v2.json`
+- `replay_comparison_v2.json`
+- `splits/train.json`, `splits/validation.json`, and locked `splits/test.json`
+
+Train and select the best checkpoint without loading test:
+
+```powershell
+python -m modules.module_07_rl.train `
+  --train-file data/synthetic/derived/splits/train.json `
+  --validation-file data/synthetic/derived/splits/validation.json `
+  --belief-config data/synthetic/derived/belief_model_v2.json
+```
+
+Only after calibration and model selection are frozen, unlock the stored-belief
+test result once:
+
+```powershell
+python -m modules.module_07_rl.evaluate_locked_test `
+  data/synthetic/derived/splits/test.json `
+  data/synthetic/derived/belief_model_v2.json `
+  data/synthetic/derived/locked_test_report_v2.json `
+  --confirm-config-frozen
+```
+
+The command refuses to overwrite an existing locked-test report.
+
+## Quality interpretation
+
+The raw evidence gate may still fail if the fixed log has genuine semantic
+score compression, insufficient identity components, invalid evidence, model
+overlap, or leakage. Calibration can improve the mapping of informative scores;
+it cannot create class information absent from the evidence. A failed raw gate
+must not be bypassed to claim a benchmark result.
+
+Most importantly, fixed offline trajectories cannot honestly evaluate
+counterfactual IQL actions without fresh rollouts or logged behavior
+propensities. Validation loss is useful for checkpoint selection, but it is not
+learned-policy performance. A learned-policy gate accepts only reports from
+fresh rollouts tied to a checkpoint hash.
+
+## Artifact examples
+
+Illustrative, non-benchmark schema examples live in
+`docs/examples/belief_v2/`. Real reports are intentionally absent because the
+raw transition log is not available in this workspace. The examples must never
+be quoted as measured ARIA performance.

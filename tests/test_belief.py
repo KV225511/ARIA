@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+from modules.module_06_belief.belief_config import BeliefModelConfig
 from modules.module_06_belief.belief_state import BeliefStateUpdater
 
 @pytest.fixture
@@ -103,3 +104,54 @@ def test_low_confidence_evidence_moves_belief_less(updater):
     )
     assert high_confidence.get_belief("SQL")[2] > low_confidence.get_belief("SQL")[2]
     assert low_confidence.evidence_strengths["SQL"] == pytest.approx(0.2)
+
+
+def test_behavior_does_not_change_competency_posterior():
+    low_behavior = BeliefStateUpdater(["SQL"])
+    high_behavior = BeliefStateUpdater(["SQL"])
+    low_behavior.update_belief("SQL", 0.7, "low", behavior_score=0.0)
+    high_behavior.update_belief("SQL", 0.7, "low", behavior_score=1.0)
+    assert np.allclose(
+        low_behavior.get_belief("SQL"), high_behavior.get_belief("SQL")
+    )
+
+
+def test_repeated_evidence_has_sublinear_effective_weight():
+    updater = BeliefStateUpdater(["SQL"])
+    updater.update_belief("SQL", 0.8, "low", evidence_confidence=1.0)
+    first_ess = updater.get_effective_sample_size("SQL")
+    updater.update_belief("SQL", 0.8, "low", evidence_confidence=1.0)
+    second_increment = updater.get_effective_sample_size("SQL") - first_ess
+    assert first_ess == pytest.approx(1.0)
+    assert second_increment < first_ess
+
+
+def test_duplicate_question_receives_extra_discount():
+    unique = BeliefStateUpdater(["SQL"])
+    duplicate = BeliefStateUpdater(["SQL"])
+    unique.update_belief("SQL", 0.8, question_fingerprint="a")
+    unique.update_belief("SQL", 0.8, question_fingerprint="b")
+    duplicate.update_belief("SQL", 0.8, question_fingerprint="a")
+    duplicate.update_belief("SQL", 0.8, question_fingerprint="a")
+    assert duplicate.get_effective_sample_size("SQL") < unique.get_effective_sample_size("SQL")
+
+
+def test_non_finite_evidence_is_rejected_without_state_change():
+    updater = BeliefStateUpdater(["SQL"])
+    before = updater.get_belief("SQL")
+    with pytest.raises(ValueError):
+        updater.update_belief("SQL", float("nan"))
+    assert np.allclose(before, updater.get_belief("SQL"))
+    assert updater.get_evidence_count("SQL") == 0
+
+
+def test_assessment_abstains_when_configured_evidence_is_missing():
+    config = BeliefModelConfig(
+        minimum_assessment_confidence=0.8,
+        minimum_effective_evidence=2.0,
+        minimum_skill_coverage=2,
+    )
+    updater = BeliefStateUpdater(["SQL", "Docker"], config=config)
+    assessment = updater.get_aggregate_assessment()
+    assert assessment["label"] is None
+    assert assessment["status"] == "insufficient_evidence"
