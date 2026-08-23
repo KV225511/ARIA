@@ -23,7 +23,7 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 CANDIDATE_MODEL = os.getenv("ARIA_CANDIDATE_MODEL", "qwen2.5:7b")
 # Keep candidate generation and evaluation independent by default. Operators can
 # override either model explicitly, but should not point both at the same model.
-EVALUATOR_MODEL = os.getenv("ARIA_EVALUATOR_MODEL", "llama3.1")
+EVALUATOR_MODEL = os.getenv("ARIA_EVALUATOR_MODEL", "gemma3:4b")
 DATASET_FILE = Path(__file__).parent.parent.parent / "data" / "synthetic" / "qwen_rl_dataset.json"
 PERSONA_TIERS = ("BEGINNER", "MID", "EXPERT")
 ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}

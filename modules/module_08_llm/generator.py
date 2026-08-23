@@ -15,7 +15,7 @@ class LLMQuestionGenerator:
         """
         load_dotenv()
         self.ollama_host = ollama_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1")
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
         self.api_endpoint = f"{self.ollama_host}/api/generate"
 
     async def generate_question(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None) -> str:
