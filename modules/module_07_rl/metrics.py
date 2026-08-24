@@ -25,7 +25,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 def compute_rl_metrics(episodes_data):
-    """Compute RL-specific metrics from a list of episodes."""
+    """Describe fixed logged trajectories; do not imply policy evaluation."""
     if not episodes_data:
         return {}
         
@@ -49,9 +49,11 @@ def compute_rl_metrics(episodes_data):
             entropies.append(0.0)
             
     return {
-        "avg_episode_length": float(avg_length),
-        "avg_cumulative_reward": float(np.mean(rewards)),
-        "policy_entropy": float(np.mean(entropies))
+        "evaluation_type": "logged_behavior_trajectories",
+        "evaluates_learned_policy": False,
+        "logged_avg_episode_length": float(avg_length),
+        "logged_avg_cumulative_reward": float(np.mean(rewards)),
+        "logged_action_entropy": float(np.mean(entropies)),
     }
 
 def compute_response_metrics(

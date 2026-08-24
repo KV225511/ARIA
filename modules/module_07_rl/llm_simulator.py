@@ -1,9 +1,15 @@
 import asyncio
+from collections import defaultdict
+from datetime import datetime, timezone
+import hashlib
 import itertools
 import json
 import os
+import re
+import shutil
 import sys
 import random
+import time
 import httpx
 import numpy as np
 from pathlib import Path
@@ -17,19 +23,28 @@ from modules.module_07_rl.data_loader import (
     get_specific_pair, is_valid_resume, is_valid_jd
 )
 from modules.module_07_rl.rl_spec import RL_ACTION_SPACE
+from modules.module_07_rl.dataset_split import (
+    SPLIT_NAMES,
+    group_transitions_into_episodes,
+    split_by_resume_jd_group,
+)
 
 # Settings
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_KEEP_ALIVE = os.getenv("ARIA_OLLAMA_KEEP_ALIVE", "-1")
+OLLAMA_NUM_CTX = int(os.getenv("ARIA_OLLAMA_NUM_CTX", "4096"))
+OLLAMA_REQUEST_TIMEOUT = float(os.getenv("ARIA_OLLAMA_TIMEOUT", "300"))
 CANDIDATE_MODEL = os.getenv("ARIA_CANDIDATE_MODEL", "qwen2.5:7b")
 # Keep candidate generation and evaluation independent by default. Operators can
 # override either model explicitly, but should not point both at the same model.
-EVALUATOR_MODEL = os.getenv("ARIA_EVALUATOR_MODEL", "llama3.1")
+EVALUATOR_MODEL = os.getenv("ARIA_EVALUATOR_MODEL", "gemma3:4b")
 DATASET_FILE = Path(__file__).parent.parent.parent / "data" / "synthetic" / "qwen_rl_dataset.json"
 PERSONA_TIERS = ("BEGINNER", "MID", "EXPERT")
 ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
 DEFAULT_SWEEP_EPISODES = 300
 MIN_RECOMMENDED_EPISODES = 200
 DATASET_SPLIT_RATIOS = (0.70, 0.15, 0.15)
+GENERATOR_SCHEMA_VERSION = "aria-simulator-v2-append"
 
 async def generate_llm_response(
     prompt: str,
@@ -43,11 +58,19 @@ async def generate_llm_response(
         "prompt": prompt,
         "system": system,
         "stream": False,
-        "options": {"temperature": temperature}
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "options": {
+            "temperature": temperature,
+            "num_ctx": OLLAMA_NUM_CTX,
+        },
     }
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=120.0)
+            response = await client.post(
+                f"{OLLAMA_HOST}/api/generate",
+                json=payload,
+                timeout=OLLAMA_REQUEST_TIMEOUT,
+            )
             response.raise_for_status()
             return response.json().get("response", "").strip()
         except Exception as e:
@@ -265,6 +288,215 @@ def build_split_safe_sweep_pairs(
 
     return episodes_to_run
 
+
+def _atomic_json_write(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _format_duration(seconds: float) -> str:
+    """Format an ETA without implying more precision than the estimate has."""
+    seconds = max(int(round(seconds)), 0)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
+def _load_dataset(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ValueError(f"Dataset must be a JSON list of transitions: {path}")
+    return value
+
+
+def _next_episode_index(transitions: list[dict]) -> int:
+    indices = []
+    for transition in transitions:
+        match = re.fullmatch(r"episode[_-](\d+)", str(transition.get("episode_id", "")))
+        if match:
+            indices.append(int(match.group(1)))
+    return max(indices, default=-1) + 1
+
+
+def _backup_before_append(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+    backup = path.parent / "backups" / f"{path.stem}.pre_append.{digest}{path.suffix}"
+    if not backup.exists():
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, backup)
+    return backup
+
+
+def validate_append_provenance(
+    transitions: list[dict],
+    candidate_model: str,
+    evaluator_model: str,
+    allow_model_mix: bool = False,
+) -> None:
+    if candidate_model == evaluator_model:
+        raise ValueError("Candidate and evaluator models must remain distinct")
+    existing_candidates = {
+        str(item["candidate_model"])
+        for item in transitions if item.get("candidate_model")
+    }
+    existing_evaluators = {
+        str(item["evaluator_model"])
+        for item in transitions if item.get("evaluator_model")
+    }
+    mismatch = (
+        existing_candidates and candidate_model not in existing_candidates
+    ) or (
+        existing_evaluators and evaluator_model not in existing_evaluators
+    )
+    if mismatch and not allow_model_mix:
+        raise ValueError(
+            "Append model provenance differs from the existing corpus. "
+            f"Existing candidate={sorted(existing_candidates)}, "
+            f"evaluator={sorted(existing_evaluators)}; requested "
+            f"candidate={candidate_model}, evaluator={evaluator_model}. "
+            "Use --allow-model-mix only after accepting distribution-shift risk."
+        )
+
+
+def _partition_extra_paths(paths: list[Path], seed: int) -> dict[str, list[Path]]:
+    shuffled = list(paths)
+    random.Random(seed).shuffle(shuffled)
+    result = {name: [] for name in SPLIT_NAMES}
+    for index, path in enumerate(shuffled):
+        result[SPLIT_NAMES[index % len(SPLIT_NAMES)]].append(path)
+    return result
+
+
+def build_append_sweep_pairs(
+    existing_transitions: list[dict],
+    resumes: list[Path],
+    jds: list[Path],
+    max_episodes: int,
+    seed: int,
+) -> tuple[list[tuple[str, str]], str]:
+    """Plan an append without connecting identities across existing splits.
+
+    Completely unused resumes and JDs form new independent components when
+    possible. Otherwise new documents are assigned to one existing partition
+    and never crossed into another partition.
+    """
+    if max_episodes < 3:
+        raise ValueError("An append needs at least three episodes for split balance")
+    resume_by_name = {path.name: path for path in resumes}
+    jd_by_name = {path.name: path for path in jds}
+    used_resumes = {
+        str(item["resume_file"])
+        for item in existing_transitions if item.get("resume_file")
+    }
+    used_jds = {
+        str(item["jd_file"])
+        for item in existing_transitions if item.get("jd_file")
+    }
+    unused_resumes = [path for path in resumes if path.name not in used_resumes]
+    unused_jds = [path for path in jds if path.name not in used_jds]
+
+    if len(unused_resumes) >= 3 and len(unused_jds) >= 3:
+        return (
+            build_split_safe_sweep_pairs(
+                unused_resumes, unused_jds, max_episodes=max_episodes, seed=seed
+            ),
+            "new_identity_components",
+        )
+
+    existing_splits = split_by_resume_jd_group(existing_transitions, seed=42)
+    resume_pools = {name: set() for name in SPLIT_NAMES}
+    jd_pools = {name: set() for name in SPLIT_NAMES}
+    for split_name, items in existing_splits.items():
+        resume_pools[split_name].update(
+            str(item["resume_file"]) for item in items if item.get("resume_file")
+        )
+        jd_pools[split_name].update(
+            str(item["jd_file"]) for item in items if item.get("jd_file")
+        )
+
+    extra_resumes = _partition_extra_paths(unused_resumes, seed)
+    extra_jds = _partition_extra_paths(unused_jds, seed + 1)
+    for split_name in SPLIT_NAMES:
+        resume_pools[split_name].update(path.name for path in extra_resumes[split_name])
+        jd_pools[split_name].update(path.name for path in extra_jds[split_name])
+        missing_resumes = resume_pools[split_name] - resume_by_name.keys()
+        missing_jds = jd_pools[split_name] - jd_by_name.keys()
+        if missing_resumes or missing_jds:
+            raise ValueError(
+                "Existing dataset references documents missing from disk: "
+                f"resumes={sorted(missing_resumes)}, jds={sorted(missing_jds)}"
+            )
+        if not resume_pools[split_name] or not jd_pools[split_name]:
+            raise ValueError(
+                f"Cannot append safely because the {split_name} identity pool is empty"
+            )
+
+    episode_counts = _three_way_counts(max_episodes)
+    used_pairs = {
+        (str(item.get("resume_file")), str(item.get("jd_file")))
+        for item in existing_transitions
+    }
+    rng = random.Random(seed)
+    planned = []
+    for split_name, episode_count in zip(SPLIT_NAMES, episode_counts):
+        combinations = list(itertools.product(
+            sorted(resume_pools[split_name]), sorted(jd_pools[split_name])
+        ))
+        rng.shuffle(combinations)
+        fresh = [pair for pair in combinations if pair not in used_pairs]
+        ordered = fresh + [pair for pair in combinations if pair in used_pairs]
+        planned.extend(itertools.islice(itertools.cycle(ordered), episode_count))
+    return planned, "existing_identity_partitions"
+
+
+async def report_ollama_capacity(gpu_vram_gb: float) -> dict:
+    """Report weight-size feasibility; actual residency is verified by ollama ps."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(f"{OLLAMA_HOST}/api/tags")
+        response.raise_for_status()
+        models = response.json().get("models", [])
+        sizes = {item.get("name"): int(item.get("size", 0)) for item in models}
+        running_response = await client.get(f"{OLLAMA_HOST}/api/ps")
+        running_response.raise_for_status()
+        running = running_response.json().get("models", [])
+    selected = {
+        CANDIDATE_MODEL: sizes.get(CANDIDATE_MODEL),
+        EVALUATOR_MODEL: sizes.get(EVALUATOR_MODEL),
+    }
+    missing = [name for name, size in selected.items() if not size]
+    if missing:
+        raise ValueError(f"Ollama models are not installed: {missing}")
+    weights_gb = sum(selected.values()) / 1_000_000_000
+    # Reserve is intentionally conservative: Windows display use, CUDA runtime,
+    # compute buffers, and both models' KV caches are not included in file sizes.
+    safe_budget_gb = max(float(gpu_vram_gb) - 1.25, 0.0)
+    result = {
+        "candidate_model": CANDIDATE_MODEL,
+        "evaluator_model": EVALUATOR_MODEL,
+        "model_file_sizes_gb": {
+            name: round(size / 1_000_000_000, 3) for name, size in selected.items()
+        },
+        "combined_weight_files_gb": round(weights_gb, 3),
+        "declared_vram_gb": float(gpu_vram_gb),
+        "conservative_model_budget_gb": round(safe_budget_gb, 3),
+        "full_dual_gpu_residency_feasible": weights_gb <= safe_budget_gb,
+        "ollama_num_ctx": OLLAMA_NUM_CTX,
+        "ollama_keep_alive": OLLAMA_KEEP_ALIVE,
+        "currently_running": running,
+    }
+    print(json.dumps({"ollama_capacity": result}, indent=2))
+    return result
+
 def get_action_one_hot(action, action_dim):
     one_hot = np.zeros(action_dim, dtype=np.float32)
     one_hot[action] = 1.0
@@ -313,6 +545,9 @@ async def simulate_episode(
     semaphore: asyncio.Semaphore,
     persona_tier: str | None = None,
     seed: int = 42,
+    display_number: int | None = None,
+    generation_run_id: str = "",
+    generation_started_at: str = "",
 ) -> list:
     """Simulates a single episode, isolated to its own environment to avoid state conflicts."""
     async with semaphore:
@@ -322,7 +557,11 @@ async def simulate_episode(
         else:
             resume_text, jd_text, resume_name, jd_name = get_random_pair()
             
-        print(f"\n--- Starting Episode {ep+1}/{total_eps} | Resume: {resume_name} | JD: {jd_name} ---")
+        display_number = display_number if display_number is not None else ep + 1
+        print(
+            f"\n--- Starting New Episode {display_number}/{total_eps} "
+            f"| ID: episode_{ep} | Resume: {resume_name} | JD: {jd_name} ---"
+        )
         
         # Isolated env per task
         env = ARIAInterviewEnv("backend_developer")
@@ -354,6 +593,7 @@ async def simulate_episode(
             env.ontology, "inferred_experience", "Mid-Level"
         )
         consecutive_evaluation_failures = 0
+        consecutive_question_failures = 0
         while not done:
             action_idx, behavior_policy = select_behavior_action(env, rng)
             action_name = RL_ACTION_SPACE[action_idx]
@@ -374,8 +614,16 @@ async def simulate_episode(
             
             # Guard: skip turn if question is empty (Ollama timeout / model hiccup)
             if not question or not question.strip():
-                print(f"  [WARN] Episode {ep+1}: Empty question generated for action '{action_name}'. Skipping turn.")
+                consecutive_question_failures += 1
+                print(
+                    f"  [WARN] Episode episode_{ep}: empty question generated "
+                    f"for action '{action_name}'."
+                )
+                if consecutive_question_failures >= 3:
+                    print(f"  [ERROR] Episode episode_{ep}: question generation repeatedly failed.")
+                    return []
                 continue
+            consecutive_question_failures = 0
             
             # 2. Candidate answers
             answer = await generate_llm_response(question, CANDIDATE_MODEL, system=system_prompt)
@@ -401,11 +649,11 @@ async def simulate_episode(
                 consecutive_evaluation_failures += 1
                 history.pop()
                 print(
-                    f"  [WARN] Episode {ep+1}: invalid evaluator output; "
+                    f"  [WARN] Episode episode_{ep}: invalid evaluator output; "
                     "rejecting turn."
                 )
                 if consecutive_evaluation_failures >= 3:
-                    print(f"  [ERROR] Episode {ep+1}: evaluator repeatedly failed.")
+                    print(f"  [ERROR] Episode episode_{ep}: evaluator repeatedly failed.")
                     return []
                 continue
             consecutive_evaluation_failures = 0
@@ -457,31 +705,85 @@ async def simulate_episode(
                 "evaluator_model": EVALUATOR_MODEL,
                 "simulation_seed": seed + ep,
                 "episode_id": f"episode_{ep}",
+                "generation_run_id": generation_run_id,
+                "generation_started_at": generation_started_at,
+                "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+                "ollama_num_ctx": OLLAMA_NUM_CTX,
+                "ollama_keep_alive": OLLAMA_KEEP_ALIVE,
                 "question": question,
                 "jd_text": jd_text[:2000]
             }
             episode_transitions.append(transition)
             obs = next_obs
             
-        print(f"--- Finished Episode {ep+1}/{total_eps} | Transitions: {len(episode_transitions)} ---")
+        print(
+            f"--- Finished New Episode {display_number}/{total_eps} "
+            f"| ID: episode_{ep} | Transitions: {len(episode_transitions)} ---"
+        )
         return episode_transitions
 
 async def run_simulation(
     sweep: bool = False,
     max_episodes: int = DEFAULT_SWEEP_EPISODES,
-    max_concurrent: int = 5,
+    max_concurrent: int = 2,
     seed: int = 42,
+    dataset_file: str | Path = DATASET_FILE,
+    append: bool = False,
+    replace_existing: bool = False,
+    allow_model_mix: bool = False,
+    gpu_vram_gb: float = 8.0,
+    check_ollama_capacity: bool = True,
 ):
-    os.makedirs(DATASET_FILE.parent, exist_ok=True)
-    
-    dataset = []
-    if DATASET_FILE.exists() and not sweep:
-        try:
-            with open(DATASET_FILE, "r") as f:
-                dataset = json.load(f)
-            print(f"Loaded existing dataset with {len(dataset)} transitions.")
-        except Exception:
-            pass
+    dataset_path = Path(dataset_file)
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    if max_concurrent <= 0:
+        raise ValueError("max_concurrent must be positive")
+    if append and replace_existing:
+        raise ValueError("Choose --append or --replace-existing, not both")
+    if CANDIDATE_MODEL == EVALUATOR_MODEL:
+        raise ValueError("Candidate and evaluator models must remain distinct")
+    if check_ollama_capacity:
+        capacity = await report_ollama_capacity(gpu_vram_gb)
+        if not capacity["full_dual_gpu_residency_feasible"]:
+            print(
+                "[INFO] Both quality models cannot safely remain fully resident "
+                "on this GPU. Ollama will phase/queue them; use one loaded model "
+                "at a time and batch two episodes per phase."
+            )
+
+    existing = _load_dataset(dataset_path)
+    if sweep and existing and not append and not replace_existing:
+        raise ValueError(
+            f"Refusing to erase existing dataset {dataset_path}. Use --append to "
+            "preserve it or --replace-existing for an intentional replacement."
+        )
+    if replace_existing:
+        existing = []
+    if append:
+        validate_append_provenance(
+            existing,
+            CANDIDATE_MODEL,
+            EVALUATOR_MODEL,
+            allow_model_mix=allow_model_mix,
+        )
+        backup = _backup_before_append(dataset_path)
+        if backup:
+            print(f"Immutable pre-append backup: {backup}")
+    elif existing and not sweep:
+        validate_append_provenance(
+            existing,
+            CANDIDATE_MODEL,
+            EVALUATOR_MODEL,
+            allow_model_mix=allow_model_mix,
+        )
+        backup = _backup_before_append(dataset_path)
+        if backup:
+            print(f"Immutable pre-append backup: {backup}")
+
+    print(
+        f"Starting with {len(group_transitions_into_episodes(existing))} existing "
+        f"episodes and {len(existing)} existing transitions."
+    )
             
     if sweep:
         all_jds = get_all_pdfs(JDS_DIR)
@@ -494,18 +796,33 @@ async def run_simulation(
         print(f"Sweep pool: {len(resumes)} valid resumes x {len(jds)} valid JDs "
               f"(filtered from {len(all_resumes)} resumes / {len(all_jds)} JDs)")
 
-        episodes_to_run = build_split_safe_sweep_pairs(
-            resumes,
-            jds,
-            max_episodes=max_episodes,
-            seed=seed,
-        )
+        if append and existing:
+            episodes_to_run, append_mode = build_append_sweep_pairs(
+                existing,
+                resumes,
+                jds,
+                max_episodes=max_episodes,
+                seed=seed,
+            )
+            print(f"Append identity mode: {append_mode}")
+            if append_mode == "existing_identity_partitions":
+                print(
+                    "[WARN] Fewer than three unused resumes and JDs were available. "
+                    "The append remains leakage-safe, but add new de-identified "
+                    "documents to increase independent identity components."
+                )
+        else:
+            episodes_to_run = build_split_safe_sweep_pairs(
+                resumes,
+                jds,
+                max_episodes=max_episodes,
+                seed=seed,
+            )
 
         print(
             "Starting leakage-safe sweep simulation with "
             f"{len(episodes_to_run)} total episodes..."
         )
-        dataset = [] # Start fresh for sweep
     else:
         num_eps = min(2, max_episodes) # fallback for small tests
         print(f"Starting Multi-Agent Simulation with {num_eps} random episodes...")
@@ -513,36 +830,99 @@ async def run_simulation(
 
     semaphore = asyncio.Semaphore(max_concurrent)
     total_eps = len(episodes_to_run)
-    if total_eps < MIN_RECOMMENDED_EPISODES:
+    final_episode_target = len(group_transitions_into_episodes(existing)) + total_eps
+    if final_episode_target < MIN_RECOMMENDED_EPISODES:
         print(
-            f"[WARN] Only {total_eps} episodes will be generated; "
+            f"[WARN] Combined corpus will contain only {final_episode_target} episodes; "
             f"at least {MIN_RECOMMENDED_EPISODES} are recommended for reliable "
             "calibration and held-out evaluation."
         )
-    
-    # Run episodes concurrently
+
+    start_index = _next_episode_index(existing)
+    source_hash = (
+        hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+        if dataset_path.exists() and existing else "new-corpus"
+    )
+    generation_started_at = datetime.now(timezone.utc).isoformat()
+    run_material = (
+        f"{source_hash}|{seed}|{start_index}|{total_eps}|"
+        f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}"
+    )
+    generation_run_id = hashlib.sha256(run_material.encode("utf-8")).hexdigest()[:16]
+    print(
+        f"Generation run {generation_run_id}: adding {total_eps} episodes with "
+        f"global IDs episode_{start_index}..episode_{start_index + total_eps - 1}."
+    )
+
+    async def run_one(order, pair):
+        global_index = start_index + order
+        try:
+            transitions = await simulate_episode(
+                global_index,
+                pair,
+                total_eps,
+                semaphore,
+                persona_tier=PERSONA_TIERS[global_index % len(PERSONA_TIERS)],
+                seed=seed,
+                display_number=order + 1,
+                generation_run_id=generation_run_id,
+                generation_started_at=generation_started_at,
+            )
+            return order, transitions, None
+        except Exception as error:
+            # A transient Ollama/document failure must not cancel every other
+            # episode in a run that may already have consumed many GPU-hours.
+            message = f"{type(error).__name__}: {error}"
+            return order, [], message
+
     tasks = [
-        simulate_episode(
-            ep,
-            pair,
-            total_eps,
-            semaphore,
-            persona_tier=PERSONA_TIERS[ep % len(PERSONA_TIERS)],
-            seed=seed,
-        )
-        for ep, pair in enumerate(episodes_to_run)
+        asyncio.create_task(run_one(order, pair))
+        for order, pair in enumerate(episodes_to_run)
     ]
-    
-    results = await asyncio.gather(*tasks)
-    
-    # Flatten the results
-    for ep_transitions in results:
-        dataset.extend(ep_transitions)
-            
-    # Save dataset
-    with open(DATASET_FILE, "w") as f:
-        json.dump(dataset, f, indent=2)
-    print(f"\nSimulation complete! Dataset saved with {len(dataset)} total transitions.")
+    completed = {}
+    failed = {}
+    run_started = time.monotonic()
+    finished_count = 0
+    for future in asyncio.as_completed(tasks):
+        order, episode_transitions, error = await future
+        finished_count += 1
+        if not episode_transitions:
+            failed[order] = error or "episode returned no valid transitions"
+            print(
+                f"[WARN] New episode {order + 1} failed and was not appended: "
+                f"{failed[order]}"
+            )
+            continue
+        completed[order] = episode_transitions
+        combined = list(existing)
+        for completed_order in sorted(completed):
+            combined.extend(completed[completed_order])
+        _atomic_json_write(dataset_path, combined)
+        elapsed = max(time.monotonic() - run_started, 1e-9)
+        episodes_per_hour = finished_count / elapsed * 3600
+        remaining = total_eps - finished_count
+        eta = remaining / max(finished_count / elapsed, 1e-9)
+        print(
+            f"Checkpointed {len(completed)}/{total_eps} new episodes; "
+            f"combined transitions={len(combined)}; "
+            f"observed rate={episodes_per_hour:.2f} episodes/hour; "
+            f"ETA={_format_duration(eta)}."
+        )
+
+    dataset = list(existing)
+    for completed_order in sorted(completed):
+        dataset.extend(completed[completed_order])
+    print(
+        f"\nSimulation complete: {len(completed)}/{total_eps} new episodes saved. "
+        f"Failures: {len(failed)}. "
+        f"Combined dataset has {len(group_transitions_into_episodes(dataset))} "
+        f"episodes and {len(dataset)} transitions at {dataset_path}."
+    )
+    if not completed:
+        raise RuntimeError(
+            "No new episodes completed successfully; the existing dataset was preserved"
+        )
+    return dataset
 
 if __name__ == "__main__":
     import argparse
@@ -552,15 +932,46 @@ if __name__ == "__main__":
         "--max_episodes",
         type=int,
         default=DEFAULT_SWEEP_EPISODES,
-        help="Maximum number of episodes to run (default: 300; caps the sweep)",
+        help=(
+            "Episodes to generate in this run (with --append, this is the "
+            "number added to the existing corpus)"
+        ),
     )
-    parser.add_argument("--max_concurrent", type=int, default=5, help="Number of concurrent LLM requests to make")
+    parser.add_argument(
+        "--max_concurrent",
+        type=int,
+        default=2,
+        help="Concurrent episodes (2 recommended for an 8 GB RTX 4060 Laptop GPU)",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Simulation seed")
+    parser.add_argument("--dataset-file", default=str(DATASET_FILE))
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append max_episodes new episodes with backup and atomic checkpoints",
+    )
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Explicitly replace an existing dataset instead of appending",
+    )
+    parser.add_argument("--allow-model-mix", action="store_true")
+    parser.add_argument("--gpu-vram-gb", type=float, default=8.0)
+    parser.add_argument("--skip-ollama-capacity-check", action="store_true")
     args = parser.parse_args()
     
-    asyncio.run(run_simulation(
-        sweep=args.sweep, 
-        max_episodes=args.max_episodes,
-        max_concurrent=args.max_concurrent,
-        seed=args.seed,
-    ))
+    try:
+        asyncio.run(run_simulation(
+            sweep=args.sweep,
+            max_episodes=args.max_episodes,
+            max_concurrent=args.max_concurrent,
+            seed=args.seed,
+            dataset_file=args.dataset_file,
+            append=args.append,
+            replace_existing=args.replace_existing,
+            allow_model_mix=args.allow_model_mix,
+            gpu_vram_gb=args.gpu_vram_gb,
+            check_ollama_capacity=not args.skip_ollama_capacity_check,
+        ))
+    except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
+        parser.exit(1, f"[ERROR] {error}\n")

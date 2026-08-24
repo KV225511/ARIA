@@ -9,13 +9,29 @@ import os
 from dotenv import load_dotenv
 
 class LLMQuestionGenerator:
-    def __init__(self, ollama_host=None, model=None):
+    def __init__(
+        self,
+        ollama_host=None,
+        model=None,
+        keep_alive=None,
+        num_ctx=None,
+    ):
         """
         Initializes the LLM Question Generator using a local Ollama instance.
         """
         load_dotenv()
         self.ollama_host = ollama_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1")
+        self.keep_alive = (
+            keep_alive
+            if keep_alive is not None
+            else os.getenv("ARIA_OLLAMA_KEEP_ALIVE", "-1")
+        )
+        self.num_ctx = int(
+            num_ctx
+            if num_ctx is not None
+            else os.getenv("ARIA_OLLAMA_NUM_CTX", "4096")
+        )
         self.api_endpoint = f"{self.ollama_host}/api/generate"
 
     async def generate_question(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None) -> str:
@@ -41,8 +57,10 @@ class LLMQuestionGenerator:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,
             "options": {
-                "temperature": 0.7
+                "temperature": 0.7,
+                "num_ctx": self.num_ctx,
             }
         }
         
@@ -71,9 +89,10 @@ class LLMQuestionGenerator:
             "model": self.model,
             "prompt": prompt,
             "stream": True,
+            "keep_alive": self.keep_alive,
             "options": {
                 "temperature": 0.7,
-                "num_ctx": 16384
+                "num_ctx": self.num_ctx,
             }
         }
         

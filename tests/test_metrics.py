@@ -10,6 +10,9 @@ def test_belief_report_is_not_labeled_as_policy_evaluation():
     report = build_belief_report(dataset)
     assert report["evaluation_type"] == "stored_belief_verdict"
     assert report["evaluates_learned_policy"] is False
+    assert report["rl_metrics"]["evaluates_learned_policy"] is False
+    assert "logged_action_entropy" in report["rl_metrics"]
+    assert "policy_entropy" not in report["rl_metrics"]
     assert report["belief_verdict_metrics"]["micro_f1"] == 1.0
     assert report["belief_verdict_metrics"]["ordinal_mae"] == 0.0
     assert report["evaluates_learned_policy"] is False

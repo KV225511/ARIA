@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import torch
 
@@ -76,3 +77,41 @@ def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
     assert checkpoint["state_schema_version"] == STATE_SCHEMA_VERSION
     assert checkpoint["belief_config_hash"] == config.config_hash
     assert result["evaluates_learned_policy"] is False
+    assert result["epochs_completed"] == 1
+    assert result["stopped_early"] is False
+
+
+def test_training_stops_after_validation_patience(tmp_path):
+    config = BeliefModelConfig()
+    config_file = tmp_path / "belief.json"
+    config.save(config_file)
+    train_file = tmp_path / "train.json"
+    validation_file = tmp_path / "validation.json"
+    train_file.write_text(
+        json.dumps([_transition(index, "train") for index in range(160)]),
+        encoding="utf-8",
+    )
+    validation_file.write_text(
+        json.dumps([_transition(index, "validation") for index in range(24)]),
+        encoding="utf-8",
+    )
+
+    with patch(
+        "modules.module_07_rl.train._validation_objective",
+        return_value=3.0,
+    ):
+        result = train_iql_policy(
+            train_file=train_file,
+            validation_file=validation_file,
+            belief_config_file=config_file,
+            output_file=tmp_path / "checkpoint.pth",
+            total_epochs=20,
+            batch_size=160,
+            seed=7,
+            early_stopping_patience=2,
+            early_stopping_min_delta=1e-4,
+        )
+
+    assert result["best_epoch"] == 1
+    assert result["epochs_completed"] == 3
+    assert result["stopped_early"] is True

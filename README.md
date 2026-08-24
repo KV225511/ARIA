@@ -179,7 +179,7 @@ ARIA reads the following environment variables, including values placed in a roo
 | `OLLAMA_MODEL` | `llama3.1` | Live ontology/question/report model |
 | `ARIA_DEVICE` | `cuda` | Primary ML execution device; use `cpu` when CUDA is unavailable |
 | `ARIA_CANDIDATE_MODEL` | `qwen2.5:7b` | Synthetic candidate model used during rollout generation |
-| `ARIA_EVALUATOR_MODEL` | `llama3.1` | Independent semantic evaluator used during rollout generation |
+| `ARIA_EVALUATOR_MODEL` | `gemma3:4b` | Independent semantic evaluator used during rollout generation |
 | `L2CS_WEIGHTS_PATH` | `models/L2CSNet_gaze360.pkl` | Gaze-estimation checkpoint path |
 
 Candidate and evaluator models must remain distinct when generating benchmark evidence.
@@ -220,9 +220,15 @@ $env:ARIA_EVALUATOR_MODEL = "llama3.1"
 python -m modules.module_07_rl.llm_simulator `
   --sweep `
   --max_episodes 300 `
-  --max_concurrent 5 `
+  --max_concurrent 2 `
   --seed 42
 ```
+
+To preserve an existing raw corpus and add new episodes, use `--append`; a plain
+`--sweep` refuses to erase an existing dataset. See
+[the 8 GB Ollama append workflow](docs/OLLAMA_APPEND_WORKFLOW.md) for model
+residency settings, append safeguards, and the complete post-generation command
+sequence.
 
 Prepare the identity-safe split, calibration, and replay-v2 artifacts:
 

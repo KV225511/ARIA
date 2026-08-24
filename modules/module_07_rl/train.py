@@ -186,6 +186,8 @@ def train_iql_policy(
     beta=3.0,
     seed=42,
     enforce_belief_quality_gate=True,
+    early_stopping_patience=10,
+    early_stopping_min_delta=1e-4,
 ):
     """Train without loading the locked test split."""
     train_path = Path(train_file)
@@ -246,9 +248,13 @@ def train_iql_policy(
     num_batches = math.ceil(num_samples / batch_size)
     best_validation_objective = math.inf
     best_epoch = None
+    epochs_without_improvement = 0
+    epochs_completed = 0
+    stopped_early = False
     output_path = Path(output_file)
 
     for epoch in range(total_epochs):
+        epochs_completed = epoch + 1
         nets.train()
         indices = np.random.default_rng(seed + epoch).permutation(num_samples)
         totals = {"v": 0.0, "q": 0.0, "policy": 0.0}
@@ -315,9 +321,10 @@ def train_iql_policy(
             f"Pi {totals['policy']/num_batches:.4f} | "
             f"validation_objective {validation_objective:.4f}"
         )
-        if validation_objective < best_validation_objective:
+        if validation_objective < best_validation_objective - early_stopping_min_delta:
             best_validation_objective = validation_objective
             best_epoch = epoch + 1
+            epochs_without_improvement = 0
             checkpoint = {
                 "checkpoint_schema_version": "aria-iql-checkpoint-v2",
                 "model_state_dict": nets.state_dict(),
@@ -334,20 +341,38 @@ def train_iql_policy(
                     "hyperparameters": {
                         "gamma": gamma, "tau": tau, "expectile": expectile,
                         "beta": beta, "learning_rate": lr,
+                        "early_stopping_patience": early_stopping_patience,
+                        "early_stopping_min_delta": early_stopping_min_delta,
                     },
                     "train_terminal_mismatches": train_mismatches,
                     "validation_terminal_mismatches": validation_mismatches,
                 },
             }
             _atomic_torch_save(checkpoint, output_path)
+        else:
+            epochs_without_improvement += 1
         scheduler_v.step()
         scheduler_q.step()
         scheduler_policy.step()
+        if (
+            early_stopping_patience is not None
+            and early_stopping_patience > 0
+            and epochs_without_improvement >= early_stopping_patience
+        ):
+            stopped_early = True
+            print(
+                f"Early stopping after epoch {epoch + 1}: validation objective "
+                f"did not improve by {early_stopping_min_delta} for "
+                f"{early_stopping_patience} epochs."
+            )
+            break
 
     result = {
         "checkpoint": str(output_path),
         "best_epoch": best_epoch,
         "best_validation_objective": best_validation_objective,
+        "epochs_completed": epochs_completed,
+        "stopped_early": stopped_early,
         "validation_belief_report": build_belief_report(validation_source),
         "evaluates_learned_policy": False,
         "policy_evaluation_limitation": (
@@ -368,6 +393,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--early-stopping-patience", type=int, default=10)
+    parser.add_argument("--early-stopping-min-delta", type=float, default=1e-4)
     parser.add_argument(
         "--allow-belief-gate-failure",
         action="store_true",
@@ -383,6 +410,8 @@ if __name__ == "__main__":
             total_epochs=args.epochs,
             batch_size=args.batch_size,
             seed=args.seed,
+            early_stopping_patience=args.early_stopping_patience,
+            early_stopping_min_delta=args.early_stopping_min_delta,
             enforce_belief_quality_gate=not args.allow_belief_gate_failure,
         )
     except (OSError, ValueError, RuntimeError) as error:
