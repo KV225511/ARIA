@@ -21,7 +21,7 @@ class LLMQuestionGenerator:
         """
         load_dotenv()
         self.ollama_host = ollama_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1")
+        self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
         self.keep_alive = (
             keep_alive
             if keep_alive is not None
