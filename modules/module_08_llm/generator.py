@@ -2,11 +2,31 @@ import httpx
 import json
 import logging
 import numpy as np
+import re
 
 logger = logging.getLogger(__name__)
 
 import os
 from dotenv import load_dotenv
+
+
+def normalize_ollama_keep_alive(value):
+    """Preserve duration strings while emitting numeric values as JSON numbers.
+
+    Environment variables are always strings. Ollama accepts numeric ``-1`` to
+    keep a model loaded, but the unitless JSON string ``"-1"`` is parsed as an
+    invalid duration by some Ollama versions.
+    """
+    if isinstance(value, bool):
+        raise ValueError("Ollama keep_alive cannot be a boolean")
+    if isinstance(value, (int, float)):
+        return value
+    normalized = str(value).strip()
+    if re.fullmatch(r"[+-]?\d+", normalized):
+        return int(normalized)
+    if re.fullmatch(r"[+-]?(?:\d+\.\d*|\.\d+)", normalized):
+        return float(normalized)
+    return normalized
 
 class LLMQuestionGenerator:
     def __init__(
@@ -15,6 +35,7 @@ class LLMQuestionGenerator:
         model=None,
         keep_alive=None,
         num_ctx=None,
+        allow_fallback=True,
     ):
         """
         Initializes the LLM Question Generator using a local Ollama instance.
@@ -22,9 +43,8 @@ class LLMQuestionGenerator:
         load_dotenv()
         self.ollama_host = ollama_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-        self.keep_alive = (
-            keep_alive
-            if keep_alive is not None
+        self.keep_alive = normalize_ollama_keep_alive(
+            keep_alive if keep_alive is not None
             else os.getenv("ARIA_OLLAMA_KEEP_ALIVE", "-1")
         )
         self.num_ctx = int(
@@ -32,6 +52,7 @@ class LLMQuestionGenerator:
             if num_ctx is not None
             else os.getenv("ARIA_OLLAMA_NUM_CTX", "4096")
         )
+        self.allow_fallback = bool(allow_fallback)
         self.api_endpoint = f"{self.ollama_host}/api/generate"
 
     async def generate_question(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None) -> str:
@@ -73,7 +94,9 @@ class LLMQuestionGenerator:
             
         except Exception as e:
             logger.error(f"Failed to fetch from Ollama at {self.ollama_host}: {e}")
-            return f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
+            if self.allow_fallback:
+                return f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
+            return ""
 
     async def generate_question_stream(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None):
         """
@@ -115,11 +138,11 @@ class LLMQuestionGenerator:
                         
         except Exception as e:
             logger.error(f"Failed to stream from Ollama at {self.ollama_host}: {e}")
-            if not chunk_yielded:
+            if not chunk_yielded and self.allow_fallback:
                 yield f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
             return
             
-        if not chunk_yielded:
+        if not chunk_yielded and self.allow_fallback:
             yield f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
 
     def _build_prompt(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None) -> str:

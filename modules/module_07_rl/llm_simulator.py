@@ -17,7 +17,10 @@ from pathlib import Path
 # Adjust imports to local module structure
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_SKILLS_COVERED
-from modules.module_08_llm.generator import LLMQuestionGenerator
+from modules.module_08_llm.generator import (
+    LLMQuestionGenerator,
+    normalize_ollama_keep_alive,
+)
 from modules.module_07_rl.data_loader import (
     get_random_pair, get_all_pdfs, RESUMES_DIR, JDS_DIR,
     get_specific_pair, is_valid_resume, is_valid_jd
@@ -31,7 +34,9 @@ from modules.module_07_rl.dataset_split import (
 
 # Settings
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_KEEP_ALIVE = os.getenv("ARIA_OLLAMA_KEEP_ALIVE", "-1")
+OLLAMA_KEEP_ALIVE = normalize_ollama_keep_alive(
+    os.getenv("ARIA_OLLAMA_KEEP_ALIVE", "-1")
+)
 OLLAMA_NUM_CTX = int(os.getenv("ARIA_OLLAMA_NUM_CTX", "4096"))
 OLLAMA_REQUEST_TIMEOUT = float(os.getenv("ARIA_OLLAMA_TIMEOUT", "300"))
 CANDIDATE_MODEL = os.getenv("ARIA_CANDIDATE_MODEL", "qwen2.5:7b")
@@ -565,7 +570,13 @@ async def simulate_episode(
         
         # Isolated env per task
         env = ARIAInterviewEnv("backend_developer")
-        interviewer = LLMQuestionGenerator(model=CANDIDATE_MODEL)
+        # Synthetic data must fail closed. A live-interview fallback question
+        # is useful for UX, but converting an Ollama outage into training data
+        # silently corrupts semantic labels.
+        interviewer = LLMQuestionGenerator(
+            model=CANDIDATE_MODEL,
+            allow_fallback=False,
+        )
         
         env.ontology.adapt_to_candidate(jd_text, resume_text)
         env.sync_ontology_nodes()
@@ -594,6 +605,7 @@ async def simulate_episode(
         )
         consecutive_evaluation_failures = 0
         consecutive_question_failures = 0
+        consecutive_answer_failures = 0
         while not done:
             action_idx, behavior_policy = select_behavior_action(env, rng)
             action_name = RL_ACTION_SPACE[action_idx]
@@ -628,7 +640,19 @@ async def simulate_episode(
             # 2. Candidate answers
             answer = await generate_llm_response(question, CANDIDATE_MODEL, system=system_prompt)
             if not answer or not answer.strip():
-                answer = "I'm not sure about that."
+                consecutive_answer_failures += 1
+                print(
+                    f"  [WARN] Episode episode_{ep}: candidate generation failed "
+                    f"({consecutive_answer_failures}/3)."
+                )
+                if consecutive_answer_failures >= 3:
+                    print(
+                        f"  [ERROR] Episode episode_{ep}: candidate generation "
+                        "repeatedly failed."
+                    )
+                    return []
+                continue
+            consecutive_answer_failures = 0
             history.append({"q": question, "a": answer})
             
             # 3. Evaluate
@@ -640,11 +664,6 @@ async def simulate_episode(
                 rubric_evidence,
                 evaluation_valid,
             ) = await evaluate_answer(question, answer)
-            if answer == "I'm not sure about that.":
-                sem_score, beh_score, cog_load = 0.1, 0.2, "ignorance"
-                evaluator_confidence = max(evaluator_confidence, 0.8)
-                rubric_evidence = rubric_evidence or ["Candidate explicitly did not know"]
-                evaluation_valid = True
             if not evaluation_valid:
                 consecutive_evaluation_failures += 1
                 history.pop()

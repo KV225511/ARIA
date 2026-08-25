@@ -70,6 +70,16 @@ $env:ARIA_OLLAMA_KEEP_ALIVE = "-1"
 $env:ARIA_OLLAMA_NUM_CTX = "4096"
 ```
 
+The simulator normalizes the environment string `"-1"` to numeric JSON `-1`
+before calling Ollama. Duration values such as `"5m"` remain strings. This is
+important because a unitless JSON string `"-1"` is rejected by some Ollama
+versions even though numeric `-1` is valid.
+
+Synthetic generation fails closed: question, candidate, or evaluator API
+failures cannot be converted into fallback answers or valid low semantic
+scores. After three consecutive failures the episode is discarded while other
+concurrent episodes continue, leaving the existing corpus intact.
+
 ## Measure before committing to a multi-day run
 
 The slow operation is synthetic episode generation, not IQL training. At an

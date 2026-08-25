@@ -20,7 +20,10 @@ from modules.module_07_rl.llm_simulator import (
     validate_append_provenance,
 )
 from modules.module_07_rl.dataset_split import split_by_resume_jd_group
-from modules.module_08_llm.generator import LLMQuestionGenerator
+from modules.module_08_llm.generator import (
+    LLMQuestionGenerator,
+    normalize_ollama_keep_alive,
+)
 
 
 def _terminal(ep, pair):
@@ -279,8 +282,16 @@ def test_question_generator_uses_memory_bounded_ollama_settings(monkeypatch):
     monkeypatch.setenv("ARIA_OLLAMA_KEEP_ALIVE", "-1")
     monkeypatch.setenv("ARIA_OLLAMA_NUM_CTX", "4096")
     generator = LLMQuestionGenerator(model="qwen2.5:7b")
-    assert generator.keep_alive == "-1"
+    assert generator.keep_alive == -1
     assert generator.num_ctx == 4096
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    (("-1", -1), ("0", 0), ("3600", 3600), ("5m", "5m"), ("-1m", "-1m")),
+)
+def test_keep_alive_environment_values_are_json_type_safe(raw, expected):
+    assert normalize_ollama_keep_alive(raw) == expected
 
 
 def test_direct_ollama_request_sends_context_and_keep_alive_settings():
@@ -308,7 +319,7 @@ def test_direct_ollama_request_sends_context_and_keep_alive_settings():
         result = asyncio.run(generate_llm_response("prompt", "qwen2.5:7b"))
 
     assert result == "answer"
-    assert captured["payload"]["keep_alive"] == "-1"
+    assert captured["payload"]["keep_alive"] == -1
     assert captured["payload"]["options"]["num_ctx"] == 4096
     assert captured["payload"]["stream"] is False
 
@@ -343,8 +354,31 @@ def test_question_generator_request_sends_context_and_keep_alive_settings():
         ))
 
     assert result == "What is an index?"
-    assert captured["payload"]["keep_alive"] == "-1"
+    assert captured["payload"]["keep_alive"] == -1
     assert captured["payload"]["options"]["num_ctx"] == 4096
+
+
+def test_synthetic_question_generation_disables_fallbacks():
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            raise RuntimeError("Ollama unavailable")
+
+    generator = LLMQuestionGenerator(
+        model="qwen2.5:7b",
+        allow_fallback=False,
+    )
+    with patch("modules.module_08_llm.generator.httpx.AsyncClient", return_value=Client()):
+        result = asyncio.run(generator.generate_question(
+            "probe_foundation", {"SQL": [0.3, 0.4, 0.3]}, "resume", []
+        ))
+
+    assert result == ""
 
 
 def test_capacity_report_rejects_dual_residency_for_eight_gb_weight_total():
