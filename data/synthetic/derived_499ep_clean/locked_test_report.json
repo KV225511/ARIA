@@ -1,0 +1,251 @@
+{
+  "schema_version": "aria-locked-test-report-v2",
+  "evaluation_type": "stored_belief_verdict",
+  "evaluates_learned_policy": false,
+  "test_metrics_unlocked": true,
+  "belief_config_hash": "4306e0069c218d8b451c3edc1b3fdce5dd32ed2f318df436435f147d0a4a0176",
+  "belief_config_file_hash": "2d2f986ed7caa987cf849157390622c7f420b97740b0503cd7d6886881fa1411",
+  "test_file_hash": "841b56035a2fd29cbe35e15028d3e906311bff064ae5c88d37b730b31b89dd65",
+  "raw_dataset_hash": "9dc82ed0957d3ffc129582a6f5a98a625e1d77593b68f76b9dc1c112c24342c3",
+  "split_manifest_hash": "79d5db2ca9edafb5d648c6c8abcd481873391ebadb6086d3bd70b9d1014afbba",
+  "state_schema_version": "aria-state-v2",
+  "state_feature_names": [
+    "global_p_beginner",
+    "global_p_mid",
+    "global_p_expert",
+    "assessment_entropy_normalized",
+    "mean_visited_entropy_normalized",
+    "skill_coverage_fraction",
+    "turn_fraction",
+    "focus_p_beginner",
+    "focus_p_mid",
+    "focus_p_expert",
+    "focus_ess_fraction",
+    "consecutive_focus_fraction",
+    "previous_semantic_score",
+    "previous_evidence_reliability",
+    "previous_behavior_score",
+    "previous_cognitive_low",
+    "previous_cognitive_anxiety",
+    "previous_cognitive_ignorance",
+    "previous_cognitive_confident_ignorance",
+    "previous_incongruence_score",
+    "previous_action_increase_difficulty",
+    "previous_action_decrease_difficulty",
+    "previous_action_ask_follow_up_same_topic",
+    "previous_action_switch_topic",
+    "previous_action_probe_foundation",
+    "previous_action_ask_behavioral",
+    "previous_action_ask_situational",
+    "previous_action_conclude_interview",
+    "semantic_available",
+    "behavior_available",
+    "cognitive_available",
+    "incongruence_available"
+  ],
+  "reward_schema_version": "aria-reward-v2",
+  "replay_schema_version": "aria-replay-v2",
+  "locked_test_gate": {
+    "gate": "locked_test",
+    "terminal_micro_f1": 0.9622641509433962,
+    "terminal_macro_f1": 0.9607843137254902,
+    "terminal_balanced_accuracy": 0.9629629629629629,
+    "terminal_true_label_counts": {
+      "2": 19,
+      "0": 18,
+      "1": 16
+    },
+    "terminal_prediction_counts": {
+      "2": 19,
+      "1": 18,
+      "0": 16
+    },
+    "missing_or_abstained_predictions": 0,
+    "per_class": {
+      "0": {
+        "precision": 1.0,
+        "recall": 0.8888888888888888,
+        "f1": 0.9411764705882353
+      },
+      "1": {
+        "precision": 0.8888888888888888,
+        "recall": 1.0,
+        "f1": 0.9411764705882353
+      },
+      "2": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    },
+    "ordinal_mae": 0.03773584905660377,
+    "confusion_matrix": [
+      [
+        16,
+        2,
+        0
+      ],
+      [
+        0,
+        16,
+        0
+      ],
+      [
+        0,
+        0,
+        19
+      ]
+    ],
+    "expected_calibration_error": 0.03519976291688738,
+    "brier_score": 0.08079478929525764,
+    "component_bootstrap_intervals": {
+      "available": false,
+      "reason": "fewer_than_two_identity_components"
+    },
+    "max_prediction_share": 0.3584905660377358,
+    "warnings": [],
+    "passes_quality_gates": true
+  },
+  "stored_belief_report": {
+    "evaluation_type": "stored_belief_verdict",
+    "evaluates_learned_policy": false,
+    "num_episodes": 53,
+    "total_transitions": 601,
+    "rl_metrics": {
+      "evaluation_type": "logged_behavior_trajectories",
+      "evaluates_learned_policy": false,
+      "logged_avg_episode_length": 11.339622641509434,
+      "logged_avg_cumulative_reward": 8.836576407657347,
+      "logged_action_entropy": 1.1122414776257723
+    },
+    "belief_verdict_metrics": {
+      "accuracy": 0.9622641509433962,
+      "macro_f1": 0.9607843137254902,
+      "micro_f1": 0.9622641509433962,
+      "precision": 0.9629629629629629,
+      "recall": 0.9629629629629629,
+      "balanced_accuracy": 0.9629629629629629,
+      "cohens_kappa": 0.9433760683760684,
+      "confusion_matrix": [
+        [
+          16,
+          2,
+          0
+        ],
+        [
+          0,
+          16,
+          0
+        ],
+        [
+          0,
+          0,
+          19
+        ]
+      ],
+      "ordinal_mae": 0.03773584905660377,
+      "abstention_count": 0,
+      "brier_score": 0.08079478929525764,
+      "expected_calibration_error": 0.03519976291688738,
+      "true_label_counts": {
+        "2": 19,
+        "0": 18,
+        "1": 16
+      },
+      "aria_label_counts": {
+        "2": 19,
+        "1": 18,
+        "0": 16
+      },
+      "rouge_L": 0.06942635471342344
+    },
+    "response_metrics": {
+      "accuracy": 0.9622641509433962,
+      "macro_f1": 0.9607843137254902,
+      "micro_f1": 0.9622641509433962,
+      "precision": 0.9629629629629629,
+      "recall": 0.9629629629629629,
+      "balanced_accuracy": 0.9629629629629629,
+      "cohens_kappa": 0.9433760683760684,
+      "confusion_matrix": [
+        [
+          16,
+          2,
+          0
+        ],
+        [
+          0,
+          16,
+          0
+        ],
+        [
+          0,
+          0,
+          19
+        ]
+      ],
+      "ordinal_mae": 0.03773584905660377,
+      "abstention_count": 0,
+      "brier_score": 0.08079478929525764,
+      "expected_calibration_error": 0.03519976291688738,
+      "true_label_counts": {
+        "2": 19,
+        "0": 18,
+        "1": 16
+      },
+      "aria_label_counts": {
+        "2": 19,
+        "1": 18,
+        "0": 16
+      },
+      "rouge_L": 0.06942635471342344
+    },
+    "overall_transitions_metrics": {
+      "accuracy": 0.5723793677204659,
+      "macro_f1": 0.6903403400381246,
+      "micro_f1": 0.6956521739130435,
+      "precision": 0.9094458707744972,
+      "recall": 0.6062396346220416,
+      "balanced_accuracy": 0.6062396346220416,
+      "cohens_kappa": 0.4625058723226557,
+      "confusion_matrix": [
+        [
+          72,
+          37,
+          1
+        ],
+        [
+          0,
+          127,
+          6
+        ],
+        [
+          0,
+          0,
+          145
+        ]
+      ],
+      "ordinal_mae": 0.78369384359401,
+      "abstention_count": 213,
+      "brier_score": null,
+      "expected_calibration_error": null,
+      "true_label_counts": {
+        "2": 190,
+        "0": 244,
+        "1": 167
+      },
+      "aria_label_counts": {
+        "null": 213,
+        "2": 152,
+        "1": 164,
+        "0": 72
+      },
+      "rouge_L": 0.0
+    },
+    "component_bootstrap_intervals": {
+      "available": false,
+      "reason": "fewer_than_two_identity_components"
+    }
+  },
+  "policy_evaluation_limitation": "Fixed offline trajectories cannot evaluate counterfactual IQL actions without fresh rollouts or logged behavior propensities."
+}

@@ -1,0 +1,29 @@
+{
+  "aggregation_temperature": 1.0,
+  "class_centers": [
+    0.2,
+    0.5,
+    0.8
+  ],
+  "class_prior": [
+    0.3333333333333333,
+    0.3333333333333333,
+    0.3333333333333333
+  ],
+  "class_scales": [
+    0.22,
+    0.22,
+    0.22
+  ],
+  "duplicate_question_multiplier": 0.25,
+  "fit_metadata": {},
+  "max_skill_effective_sample_size": 5.0,
+  "minimum_assessment_confidence": 0.5,
+  "minimum_effective_evidence": 2.0,
+  "minimum_skill_coverage": 3,
+  "posterior_floor": 0.0001,
+  "raw_dataset_hash": "",
+  "repeat_discount_power": 0.5,
+  "schema_version": "belief-v2",
+  "split_manifest_hash": ""
+}

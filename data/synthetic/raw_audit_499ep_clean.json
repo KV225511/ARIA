@@ -1,0 +1,54 @@
+{
+  "gate": "raw_evidence",
+  "num_transitions": 10964,
+  "num_episodes": 499,
+  "independent_identity_components": 3,
+  "terminal_true_label_counts": {
+    "0": 167,
+    "1": 166,
+    "2": 166
+  },
+  "semantic_scores_by_class": {
+    "0": {
+      "count": 4690,
+      "mean": 0.21554371002132197,
+      "std": 0.17369486733363226,
+      "min": 0.0,
+      "max": 0.95
+    },
+    "1": {
+      "count": 4092,
+      "mean": 0.5223240469208212,
+      "std": 0.15591404121734856,
+      "min": 0.1,
+      "max": 0.95
+    },
+    "2": {
+      "count": 2182,
+      "mean": 0.8414527956003666,
+      "std": 0.07343882218560312,
+      "min": 0.4,
+      "max": 0.95
+    }
+  },
+  "adjacent_standardized_effects": {
+    "0_vs_1": 1.8587782192548274,
+    "1_vs_2": 2.618694275308264
+  },
+  "invalid_evaluations": 0,
+  "missing_evaluation_validity": 0,
+  "invalid_semantic_scores": 0,
+  "missing_semantic_scores": 0,
+  "split_leaking_resumes": [],
+  "split_leaking_jds": [],
+  "renamed_duplicate_resumes": {},
+  "renamed_duplicate_jds": {},
+  "candidate_models": [
+    "qwen2.5:7b"
+  ],
+  "evaluator_models": [
+    "gemma3:4b"
+  ],
+  "warnings": [],
+  "passes_quality_gates": true
+}

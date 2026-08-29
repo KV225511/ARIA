@@ -1,0 +1,81 @@
+{
+  "num_episodes": 500,
+  "total_transitions": 6051,
+  "rl_metrics": {
+    "avg_episode_length": 12.102,
+    "avg_cumulative_reward": -1.2249681040419793,
+    "policy_entropy": 1.7030919317682265
+  },
+  "response_metrics": {
+    "accuracy": 0.392,
+    "macro_f1": 0.2465863398544392,
+    "micro_f1": 0.392,
+    "precision": 0.2192152959230227,
+    "recall": 0.36599326599326604,
+    "cohens_kappa": 0.05686718580336936,
+    "confusion_matrix": [
+      [
+        178,
+        2,
+        0
+      ],
+      [
+        146,
+        18,
+        1
+      ],
+      [
+        99,
+        56,
+        0
+      ]
+    ],
+    "true_label_counts": {
+      "1": 165,
+      "0": 180,
+      "2": 155
+    },
+    "aria_label_counts": {
+      "0": 423,
+      "1": 76,
+      "2": 1
+    },
+    "rouge_L": 0.005133990127427341
+  },
+  "overall_transitions_metrics": {
+    "accuracy": 0.4039001817881342,
+    "macro_f1": 0.2639294275701678,
+    "micro_f1": 0.4039001817881342,
+    "precision": 0.3676900144412591,
+    "recall": 0.36906189903944875,
+    "cohens_kappa": 0.06485604170340653,
+    "confusion_matrix": [
+      [
+        2171,
+        66,
+        6
+      ],
+      [
+        1696,
+        252,
+        23
+      ],
+      [
+        1115,
+        701,
+        21
+      ]
+    ],
+    "true_label_counts": {
+      "1": 1971,
+      "0": 2243,
+      "2": 1837
+    },
+    "aria_label_counts": {
+      "0": 4982,
+      "1": 1019,
+      "2": 50
+    },
+    "rouge_L": 0.0
+  }
+}

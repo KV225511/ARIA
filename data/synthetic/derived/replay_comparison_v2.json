@@ -1,0 +1,114 @@
+{
+  "belief_config_hash": "2a2b674cfa1e65ed60956b6427adf9b46f02f03b068cdb2a2332e9048ac489cc",
+  "belief_schema_version": "belief-v2",
+  "derived_transitions": 4380,
+  "raw_dataset_hash": "2915425da9919176d4fed93a9da7059e1b4b388150c445d5ecb07a07ff86fbc4",
+  "replay_schema_version": "aria-replay-v2",
+  "reward_schema_version": "aria-reward-v2",
+  "schema_version": "aria-replay-comparison-v2",
+  "split_manifest_hash": "bb21b07cff5fd3ff929db91117e51b356419c2009cd2975168d7514a83146f0d",
+  "splits": {
+    "test": {
+      "metrics_computed": false,
+      "status": "locked"
+    },
+    "train": {
+      "raw": {
+        "abstentions": 0,
+        "accuracy_micro_f1": 0.7666666666666667,
+        "num_episodes": 180,
+        "prediction_counts": {
+          "0": 19,
+          "1": 102,
+          "2": 59
+        },
+        "true_counts": {
+          "0": 60,
+          "1": 62,
+          "2": 58
+        }
+      },
+      "replayed": {
+        "abstentions": 20,
+        "accuracy_micro_f1": 0.7555555555555555,
+        "num_episodes": 180,
+        "prediction_counts": {
+          "0": 17,
+          "1": 84,
+          "2": 59,
+          "None": 20
+        },
+        "true_counts": {
+          "0": 60,
+          "1": 62,
+          "2": 58
+        }
+      }
+    },
+    "validation": {
+      "raw": {
+        "abstentions": 0,
+        "accuracy_micro_f1": 0.7777777777777778,
+        "num_episodes": 9,
+        "prediction_counts": {
+          "1": 4,
+          "2": 5
+        },
+        "true_counts": {
+          "0": 2,
+          "1": 3,
+          "2": 4
+        }
+      },
+      "replayed": {
+        "abstentions": 0,
+        "accuracy_micro_f1": 0.7777777777777778,
+        "num_episodes": 9,
+        "prediction_counts": {
+          "1": 4,
+          "2": 5
+        },
+        "true_counts": {
+          "0": 2,
+          "1": 3,
+          "2": 4
+        }
+      }
+    }
+  },
+  "state_feature_names": [
+    "global_p_beginner",
+    "global_p_mid",
+    "global_p_expert",
+    "assessment_entropy_normalized",
+    "mean_visited_entropy_normalized",
+    "skill_coverage_fraction",
+    "turn_fraction",
+    "focus_p_beginner",
+    "focus_p_mid",
+    "focus_p_expert",
+    "focus_ess_fraction",
+    "consecutive_focus_fraction",
+    "previous_semantic_score",
+    "previous_evidence_reliability",
+    "previous_behavior_score",
+    "previous_cognitive_low",
+    "previous_cognitive_anxiety",
+    "previous_cognitive_ignorance",
+    "previous_cognitive_confident_ignorance",
+    "previous_incongruence_score",
+    "previous_action_increase_difficulty",
+    "previous_action_decrease_difficulty",
+    "previous_action_ask_follow_up_same_topic",
+    "previous_action_switch_topic",
+    "previous_action_probe_foundation",
+    "previous_action_ask_behavioral",
+    "previous_action_ask_situational",
+    "previous_action_conclude_interview",
+    "semantic_available",
+    "behavior_available",
+    "cognitive_available",
+    "incongruence_available"
+  ],
+  "state_schema_version": "aria-state-v2"
+}

@@ -1,0 +1,56 @@
+{
+  "gate": "raw_evidence",
+  "num_transitions": 8443,
+  "num_episodes": 506,
+  "independent_identity_components": 3,
+  "terminal_true_label_counts": {
+    "0": 169,
+    "1": 169,
+    "2": 168
+  },
+  "semantic_scores_by_class": {
+    "0": {
+      "count": 3161,
+      "mean": 0.1731097753875356,
+      "std": 0.14783508997274983,
+      "min": 0.0,
+      "max": 0.95
+    },
+    "1": {
+      "count": 3084,
+      "mean": 0.34114785992217894,
+      "std": 0.24765982313401494,
+      "min": 0.1,
+      "max": 0.95
+    },
+    "2": {
+      "count": 2198,
+      "mean": 0.3896496815286624,
+      "std": 0.3694159804758408,
+      "min": 0.1,
+      "max": 0.95
+    }
+  },
+  "adjacent_standardized_effects": {
+    "0_vs_1": 0.82392102828227,
+    "1_vs_2": 0.1542254342816738
+  },
+  "invalid_evaluations": 0,
+  "missing_evaluation_validity": 0,
+  "invalid_semantic_scores": 0,
+  "missing_semantic_scores": 0,
+  "split_leaking_resumes": [],
+  "split_leaking_jds": [],
+  "renamed_duplicate_resumes": {},
+  "renamed_duplicate_jds": {},
+  "candidate_models": [
+    "qwen2.5:7b"
+  ],
+  "evaluator_models": [
+    "gemma3:4b"
+  ],
+  "warnings": [
+    "Adjacent semantic-score classes have negligible standardized separation."
+  ],
+  "passes_quality_gates": false
+}

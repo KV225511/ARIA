@@ -1,0 +1,24 @@
+{
+  "gate": "offline_rl_support",
+  "action_counts": {
+    "3": 2447,
+    "2": 381,
+    "0": 259,
+    "5": 130,
+    "6": 535,
+    "4": 284,
+    "1": 275,
+    "7": 390
+  },
+  "missing_actions": [],
+  "low_support_actions": [],
+  "nonterminal_reward": {
+    "count": 4311,
+    "mean": 0.8233787136491864,
+    "std": 0.8224385438139609,
+    "min": -1.25,
+    "max": 1.9625023972664586
+  },
+  "warnings": [],
+  "passes_quality_gates": true
+}

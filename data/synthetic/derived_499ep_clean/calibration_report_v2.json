@@ -1,0 +1,256 @@
+{
+  "belief_config_hash": "4306e0069c218d8b451c3edc1b3fdce5dd32ed2f318df436435f147d0a4a0176",
+  "belief_schema_version": "belief-v2",
+  "calibration": {
+    "bootstrap_stability": {
+      "center_mean": [
+        0.10029999999999861,
+        0.40389999999999454,
+        0.8500000000000146
+      ],
+      "center_std": [
+        0.003861346915261596,
+        0.019359493795034866,
+        1.4654943925052066e-14
+      ],
+      "ordered_fraction": 1.0,
+      "successful_samples": 1000
+    },
+    "config": {
+      "aggregation_temperature": 0.8,
+      "class_centers": [
+        0.1,
+        0.4,
+        0.85
+      ],
+      "class_prior": [
+        0.3333333333333333,
+        0.3384223918575064,
+        0.3282442748091603
+      ],
+      "class_scales": [
+        0.07297302378276506,
+        0.030000000000000002,
+        0.03
+      ],
+      "duplicate_question_multiplier": 0.25,
+      "fit_metadata": {
+        "bootstrap_stability": {
+          "center_mean": [
+            0.10029999999999861,
+            0.40389999999999454,
+            0.8500000000000146
+          ],
+          "center_std": [
+            0.003861346915261596,
+            0.019359493795034866,
+            1.4654943925052066e-14
+          ],
+          "ordered_fraction": 1.0,
+          "successful_samples": 1000
+        },
+        "episode_counts": {
+          "0": 130,
+          "1": 132,
+          "2": 128
+        },
+        "estimator": "episode_balanced_weighted_median_mad",
+        "fit_source": "training_split_only",
+        "pooled_scale": 0.03,
+        "replay_schema_version": "aria-replay-v2",
+        "reward_schema_version": "aria-reward-v2",
+        "state_feature_names": [
+          "global_p_beginner",
+          "global_p_mid",
+          "global_p_expert",
+          "assessment_entropy_normalized",
+          "mean_visited_entropy_normalized",
+          "skill_coverage_fraction",
+          "turn_fraction",
+          "focus_p_beginner",
+          "focus_p_mid",
+          "focus_p_expert",
+          "focus_ess_fraction",
+          "consecutive_focus_fraction",
+          "previous_semantic_score",
+          "previous_evidence_reliability",
+          "previous_behavior_score",
+          "previous_cognitive_low",
+          "previous_cognitive_anxiety",
+          "previous_cognitive_ignorance",
+          "previous_cognitive_confident_ignorance",
+          "previous_incongruence_score",
+          "previous_action_increase_difficulty",
+          "previous_action_decrease_difficulty",
+          "previous_action_ask_follow_up_same_topic",
+          "previous_action_switch_topic",
+          "previous_action_probe_foundation",
+          "previous_action_ask_behavioral",
+          "previous_action_ask_situational",
+          "previous_action_conclude_interview",
+          "semantic_available",
+          "behavior_available",
+          "cognitive_available",
+          "incongruence_available"
+        ],
+        "state_schema_version": "aria-state-v2",
+        "test_metrics_locked_at_freeze": true,
+        "validation_selection": {
+          "metrics": {
+            "abstention_rate": 0.0,
+            "brier_score": 0.05325640592595872,
+            "expected_calibration_error": 0.043576482793989506,
+            "macro_f1": 0.981981981981982,
+            "max_prediction_share": 0.3392857142857143,
+            "mean_confidence": 0.9385663743488676,
+            "micro_f1": 0.9821428571428571,
+            "num_episodes": 56,
+            "ordinal_mae": 0.017857142857142856,
+            "passes_collapse_gate": true,
+            "per_class_recall": {
+              "0": 0.9473684210526315,
+              "1": 1.0,
+              "2": 1.0
+            },
+            "prediction_counts": {
+              "0": 18,
+              "1": 19,
+              "2": 19
+            },
+            "skipped_episodes": 0,
+            "true_label_counts": {
+              "0": 19,
+              "1": 18,
+              "2": 19
+            }
+          },
+          "num_candidates": 81,
+          "objective": [
+            "collapse_gate",
+            "macro_f1",
+            "ordinal_mae",
+            "ece"
+          ]
+        }
+      },
+      "max_skill_effective_sample_size": 3.0,
+      "minimum_assessment_confidence": 0.5,
+      "minimum_effective_evidence": 2.0,
+      "minimum_skill_coverage": 3,
+      "posterior_floor": 0.0001,
+      "raw_dataset_hash": "9dc82ed0957d3ffc129582a6f5a98a625e1d77593b68f76b9dc1c112c24342c3",
+      "repeat_discount_power": 0.25,
+      "schema_version": "belief-v2",
+      "split_manifest_hash": "79d5db2ca9edafb5d648c6c8abcd481873391ebadb6086d3bd70b9d1014afbba"
+    },
+    "config_hash": "4306e0069c218d8b451c3edc1b3fdce5dd32ed2f318df436435f147d0a4a0176",
+    "num_candidates": 81,
+    "training_fit": {
+      "aggregation_temperature": 1.0,
+      "class_centers": [
+        0.1,
+        0.4,
+        0.85
+      ],
+      "class_prior": [
+        0.3333333333333333,
+        0.3384223918575064,
+        0.3282442748091603
+      ],
+      "class_scales": [
+        0.07297302378276506,
+        0.030000000000000002,
+        0.03
+      ],
+      "duplicate_question_multiplier": 0.25,
+      "fit_metadata": {
+        "episode_counts": {
+          "0": 130,
+          "1": 132,
+          "2": 128
+        },
+        "estimator": "episode_balanced_weighted_median_mad",
+        "fit_source": "training_split_only",
+        "pooled_scale": 0.03
+      },
+      "max_skill_effective_sample_size": 5.0,
+      "minimum_assessment_confidence": 0.5,
+      "minimum_effective_evidence": 2.0,
+      "minimum_skill_coverage": 3,
+      "posterior_floor": 0.0001,
+      "raw_dataset_hash": "9dc82ed0957d3ffc129582a6f5a98a625e1d77593b68f76b9dc1c112c24342c3",
+      "repeat_discount_power": 0.5,
+      "schema_version": "belief-v2",
+      "split_manifest_hash": "79d5db2ca9edafb5d648c6c8abcd481873391ebadb6086d3bd70b9d1014afbba"
+    },
+    "validation_metrics": {
+      "abstention_rate": 0.0,
+      "brier_score": 0.05325640592595872,
+      "expected_calibration_error": 0.043576482793989506,
+      "macro_f1": 0.981981981981982,
+      "max_prediction_share": 0.3392857142857143,
+      "mean_confidence": 0.9385663743488676,
+      "micro_f1": 0.9821428571428571,
+      "num_episodes": 56,
+      "ordinal_mae": 0.017857142857142856,
+      "passes_collapse_gate": true,
+      "per_class_recall": {
+        "0": 0.9473684210526315,
+        "1": 1.0,
+        "2": 1.0
+      },
+      "prediction_counts": {
+        "0": 18,
+        "1": 19,
+        "2": 19
+      },
+      "skipped_episodes": 0,
+      "true_label_counts": {
+        "0": 19,
+        "1": 18,
+        "2": 19
+      }
+    }
+  },
+  "raw_dataset_hash": "9dc82ed0957d3ffc129582a6f5a98a625e1d77593b68f76b9dc1c112c24342c3",
+  "replay_schema_version": "aria-replay-v2",
+  "reward_schema_version": "aria-reward-v2",
+  "schema_version": "aria-calibration-report-v2",
+  "split_manifest_hash": "79d5db2ca9edafb5d648c6c8abcd481873391ebadb6086d3bd70b9d1014afbba",
+  "state_feature_names": [
+    "global_p_beginner",
+    "global_p_mid",
+    "global_p_expert",
+    "assessment_entropy_normalized",
+    "mean_visited_entropy_normalized",
+    "skill_coverage_fraction",
+    "turn_fraction",
+    "focus_p_beginner",
+    "focus_p_mid",
+    "focus_p_expert",
+    "focus_ess_fraction",
+    "consecutive_focus_fraction",
+    "previous_semantic_score",
+    "previous_evidence_reliability",
+    "previous_behavior_score",
+    "previous_cognitive_low",
+    "previous_cognitive_anxiety",
+    "previous_cognitive_ignorance",
+    "previous_cognitive_confident_ignorance",
+    "previous_incongruence_score",
+    "previous_action_increase_difficulty",
+    "previous_action_decrease_difficulty",
+    "previous_action_ask_follow_up_same_topic",
+    "previous_action_switch_topic",
+    "previous_action_probe_foundation",
+    "previous_action_ask_behavioral",
+    "previous_action_ask_situational",
+    "previous_action_conclude_interview",
+    "semantic_available",
+    "behavior_available",
+    "cognitive_available",
+    "incongruence_available"
+  ],
+  "state_schema_version": "aria-state-v2",
+  "test_metrics_locked": true
+}

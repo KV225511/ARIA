@@ -1,0 +1,130 @@
+{
+  "best": {
+    "likelihood_sigma": 0.22,
+    "num_episodes": 8,
+    "micro_f1": 0.5,
+    "macro_f1": 0.2222222222222222,
+    "mean_confidence": 0.4530092757596101,
+    "skipped_episodes": 0,
+    "true_label_counts": {
+      "0": 1,
+      "1": 4,
+      "2": 3
+    },
+    "prediction_counts": {
+      "0": 0,
+      "1": 8,
+      "2": 0
+    }
+  },
+  "candidates": [
+    {
+      "likelihood_sigma": 0.12,
+      "num_episodes": 8,
+      "micro_f1": 0.5,
+      "macro_f1": 0.2222222222222222,
+      "mean_confidence": 0.5731903394818524,
+      "skipped_episodes": 0,
+      "true_label_counts": {
+        "0": 1,
+        "1": 4,
+        "2": 3
+      },
+      "prediction_counts": {
+        "0": 0,
+        "1": 8,
+        "2": 0
+      }
+    },
+    {
+      "likelihood_sigma": 0.16,
+      "num_episodes": 8,
+      "micro_f1": 0.5,
+      "macro_f1": 0.2222222222222222,
+      "mean_confidence": 0.5178839319269558,
+      "skipped_episodes": 0,
+      "true_label_counts": {
+        "0": 1,
+        "1": 4,
+        "2": 3
+      },
+      "prediction_counts": {
+        "0": 0,
+        "1": 8,
+        "2": 0
+      }
+    },
+    {
+      "likelihood_sigma": 0.2,
+      "num_episodes": 8,
+      "micro_f1": 0.5,
+      "macro_f1": 0.2222222222222222,
+      "mean_confidence": 0.47149758074714576,
+      "skipped_episodes": 0,
+      "true_label_counts": {
+        "0": 1,
+        "1": 4,
+        "2": 3
+      },
+      "prediction_counts": {
+        "0": 0,
+        "1": 8,
+        "2": 0
+      }
+    },
+    {
+      "likelihood_sigma": 0.22,
+      "num_episodes": 8,
+      "micro_f1": 0.5,
+      "macro_f1": 0.2222222222222222,
+      "mean_confidence": 0.4530092757596101,
+      "skipped_episodes": 0,
+      "true_label_counts": {
+        "0": 1,
+        "1": 4,
+        "2": 3
+      },
+      "prediction_counts": {
+        "0": 0,
+        "1": 8,
+        "2": 0
+      }
+    },
+    {
+      "likelihood_sigma": 0.26,
+      "num_episodes": 8,
+      "micro_f1": 0.5,
+      "macro_f1": 0.2222222222222222,
+      "mean_confidence": 0.4243508193708576,
+      "skipped_episodes": 0,
+      "true_label_counts": {
+        "0": 1,
+        "1": 4,
+        "2": 3
+      },
+      "prediction_counts": {
+        "0": 0,
+        "1": 8,
+        "2": 0
+      }
+    },
+    {
+      "likelihood_sigma": 0.3,
+      "num_episodes": 8,
+      "micro_f1": 0.5,
+      "macro_f1": 0.2222222222222222,
+      "mean_confidence": 0.40415018059081514,
+      "skipped_episodes": 0,
+      "true_label_counts": {
+        "0": 1,
+        "1": 4,
+        "2": 3
+      },
+      "prediction_counts": {
+        "0": 0,
+        "1": 8,
+        "2": 0
+      }
+    }
+  ]
+}
