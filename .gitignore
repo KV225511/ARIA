@@ -7,11 +7,10 @@ __pycache__/
 .mypy_cache/
 data/datasets/
 data/processed/
-data/synthetic/
 models/
 *.wav
 *.mp4
 *.pkl
 *.safetensors
 data/jds/
-data/resumes/
+data 
