@@ -5,7 +5,17 @@ from __future__ import annotations
 from modules.module_07_rl.rl_spec import REWARD_COEFFICIENTS
 
 
-REWARD_SCHEMA_VERSION = "aria-reward-v2"
+REWARD_SCHEMA_VERSION = "aria-reward-v3"
+
+
+def compute_stop_reward(invalid_action: bool = False) -> float:
+    """Return the immediate reward for a stop decision.
+
+    Outcome alignment is applied exactly once to the terminal stop transition.
+    A blocked stop is retained as an observable policy error, without inventing
+    evidence or advancing interview time.
+    """
+    return -0.5 if invalid_action else 0.0
 
 
 def compute_step_reward(

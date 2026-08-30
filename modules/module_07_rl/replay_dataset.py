@@ -15,11 +15,17 @@ from modules.module_06_belief.belief_config import BeliefModelConfig
 from modules.module_06_belief.belief_state import BeliefStateUpdater
 from modules.module_07_rl.dataset_split import (
     SPLIT_NAMES,
+    connected_identity_components,
     group_transitions_into_episodes,
     split_by_resume_jd_group,
 )
-from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION, compute_step_reward
-from modules.module_07_rl.rl_spec import RL_ACTION_SPACE, TERMINATION_ENTROPY_THRESHOLD
+from modules.module_07_rl.reward_model import (
+    REWARD_SCHEMA_VERSION,
+    compute_step_reward,
+    compute_stop_reward,
+)
+from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION, RL_ACTION_SPACE
+from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
 from modules.module_07_rl.state_builder import (
     STATE_SCHEMA_VERSION,
     STATE_FEATURE_NAMES,
@@ -30,7 +36,7 @@ from modules.module_07_rl.state_builder import (
 MIN_INTERVIEW_TURNS = 10
 MIN_SKILLS_COVERED = 5
 MAX_TURNS = 30
-REPLAY_SCHEMA_VERSION = "aria-replay-v2"
+REPLAY_SCHEMA_VERSION = "aria-replay-v3"
 
 
 def canonical_json_hash(value) -> str:
@@ -82,7 +88,7 @@ def _confidence(value) -> float:
     return float(np.clip(number, 0.0, 1.0))
 
 
-def _action_mask(turn_id, assessment, total_skills, config):
+def _action_mask(turn_id, assessment, total_skills, config, valid_evidence_count):
     mask = [1.0] * len(RL_ACTION_SPACE)
     required = min(
         max(MIN_SKILLS_COVERED, config.minimum_skill_coverage), total_skills
@@ -90,8 +96,7 @@ def _action_mask(turn_id, assessment, total_skills, config):
     can_conclude = (
         turn_id >= MIN_INTERVIEW_TURNS
         and len(assessment["visited_skills"]) >= required
-        and assessment["effective_evidence"] >= config.minimum_effective_evidence
-        and assessment["status"] == "classified"
+        and valid_evidence_count >= 5
     )
     mask[RL_ACTION_SPACE.index("conclude_interview")] = float(can_conclude)
     return mask, can_conclude
@@ -110,39 +115,73 @@ def replay_one_episode(
     current_skill = None
     consecutive_focus = 0
     previous = {}
-    stable_turns = 0
+    interview_turn_id = 0
+    valid_evidence_count = 0
     replayed = []
 
     for turn_index, source in enumerate(episode):
+        if source.get("transition_schema_version") != TRANSITION_SCHEMA_VERSION:
+            raise ValueError(
+                "Raw transition is not aria-transition-v3; regenerate it because "
+                "legacy action propensities cannot be reconstructed safely"
+            )
+        if source.get("action_schema_version") != ACTION_SCHEMA_VERSION:
+            raise ValueError("Raw transition uses an incompatible action schema")
         action_idx = int(source.get("action_idx", 0))
         if not 0 <= action_idx < len(RL_ACTION_SPACE):
             raise ValueError(f"Invalid action_idx in episode: {action_idx}")
+        source_mask = np.asarray(source.get("action_mask_before", []), dtype=float)
+        source_probabilities = np.asarray(
+            source.get("behavior_action_probs", []), dtype=float
+        )
+        if source_mask.shape != (len(RL_ACTION_SPACE),) or source_mask[action_idx] != 1.0:
+            raise ValueError("Raw transition selected a masked or unverified action")
+        if (
+            source_probabilities.shape != (len(RL_ACTION_SPACE),)
+            or not np.all(np.isfinite(source_probabilities))
+            or np.any(source_probabilities < 0.0)
+            or not np.isclose(source_probabilities.sum(), 1.0)
+            or not np.isclose(
+                float(source.get("behavior_action_probability", -1.0)),
+                source_probabilities[action_idx],
+            )
+        ):
+            raise ValueError("Raw transition has invalid behavior-policy propensities")
+        action_name = RL_ACTION_SPACE[action_idx]
         assessment_before = updater.get_aggregate_assessment()
         action_mask, can_conclude_before = _action_mask(
-            turn_index,
+            interview_turn_id,
             assessment_before,
             total_skills,
             config,
+            valid_evidence_count,
         )
         obs = build_policy_state(
             updater,
             total_skills=total_skills,
-            turn_id=turn_index,
+            turn_id=interview_turn_id,
             current_skill=current_skill,
             consecutive_focus_turns=consecutive_focus,
+            valid_evidence_count=valid_evidence_count,
             previous=previous,
         )
 
         target_skill = source.get("target_skill")
-        if not target_skill:
-            # Evidence-free turns remain replayable but cannot update competency.
-            target_skill = current_skill or "__unknown_skill__"
-        target_skill = updater.ensure_skill(target_skill)
-        old_entropy = updater._calculate_entropy(updater.get_belief(target_skill))
-        old_count = updater.get_evidence_count(target_skill)
-        old_ess = updater.get_effective_sample_size(target_skill)
-        valid = source.get("evaluation_valid") is not False
-        if valid and "semantic_score" in source:
+        valid = (
+            action_name != "conclude_interview"
+            and source.get("evaluation_valid") is True
+            and source.get("semantic_score") is not None
+        )
+        information_gain = 0.0
+        old_count = 0
+        if action_name != "conclude_interview":
+            if not target_skill:
+                target_skill = current_skill or "__unknown_skill__"
+            target_skill = updater.ensure_skill(target_skill)
+            old_entropy = updater._calculate_entropy(updater.get_belief(target_skill))
+            old_count = updater.get_evidence_count(target_skill)
+            old_ess = updater.get_effective_sample_size(target_skill)
+        if valid and source.get("semantic_score") is not None:
             try:
                 updater.update_belief(
                     target_skill,
@@ -156,49 +195,38 @@ def replay_one_episode(
                 )
             except (TypeError, ValueError):
                 valid = False
-        new_entropy = updater._calculate_entropy(updater.get_belief(target_skill))
-        new_ess = updater.get_effective_sample_size(target_skill)
-        information_gain = max(0.0, old_entropy - new_entropy) * max(new_ess - old_ess, 0.0)
+        if action_name != "conclude_interview":
+            interview_turn_id += 1
+            if valid:
+                valid_evidence_count += 1
+            new_entropy = updater._calculate_entropy(updater.get_belief(target_skill))
+            new_ess = updater.get_effective_sample_size(target_skill)
+            information_gain = max(0.0, old_entropy - new_entropy) * max(new_ess - old_ess, 0.0)
 
         assessment = updater.get_aggregate_assessment()
-        turn_id = turn_index + 1
         _, can_conclude = _action_mask(
-            turn_id,
+            interview_turn_id,
             assessment,
             total_skills,
             config,
+            valid_evidence_count,
         )
-        action_name = RL_ACTION_SPACE[action_idx]
-        invalid_action = action_name == "conclude_interview" and not can_conclude
-        reward = compute_step_reward(
-            information_gain,
-            first_skill_visit=old_count == 0,
-            previous_skill_count=old_count,
-            cognitive_load=source.get("cognitive_load", "low"),
-            invalid_action=invalid_action,
-        )
+        if action_name == "conclude_interview":
+            reward = compute_stop_reward(not can_conclude_before)
+        else:
+            reward = compute_step_reward(
+                information_gain,
+                first_skill_visit=old_count == 0,
+                previous_skill_count=old_count,
+                cognitive_load=source.get("cognitive_load", "low"),
+            )
 
-        assessment_entropy = updater.get_assessment_entropy()
-        stable = (
-            assessment["status"] == "classified"
-            and assessment["confidence"] >= max(
-                config.minimum_assessment_confidence, 0.80
-            )
-            and assessment_entropy < TERMINATION_ENTROPY_THRESHOLD
-        )
-        stable_turns = stable_turns + 1 if stable else 0
-        derived_done = can_conclude and (
-            action_name == "conclude_interview" or stable_turns >= 2
-        )
+        derived_done = action_name == "conclude_interview" and can_conclude_before
         source_done = bool(source.get("done"))
-        done = derived_done or source_done or turn_id >= MAX_TURNS
+        done = derived_done or (source_done and action_name != "conclude_interview") or interview_turn_id >= MAX_TURNS
         if derived_done:
-            termination_reason = (
-                "explicit_conclusion"
-                if action_name == "conclude_interview"
-                else "stable_confidence"
-            )
-        elif turn_id >= MAX_TURNS:
+            termination_reason = "explicit_conclusion"
+        elif interview_turn_id >= MAX_TURNS:
             termination_reason = "max_turns"
         elif source_done:
             termination_reason = "source_episode_end"
@@ -210,7 +238,7 @@ def replay_one_episode(
             * _confidence(source.get("stt_confidence", 1.0))
             * _confidence(source.get("modality_confidence", 1.0))
         ) if valid else 0.0
-        next_previous = {
+        next_previous = previous if action_name == "conclude_interview" else {
             "semantic_score": source.get("semantic_score") if valid else None,
             "evidence_reliability": reliability,
             "behavior_score": source.get("behavior_score"),
@@ -218,13 +246,17 @@ def replay_one_episode(
             "incongruence_score": source.get("incongruence_score"),
             "action_idx": action_idx,
         }
-        next_consecutive = consecutive_focus + 1 if current_skill == target_skill else 0
+        next_consecutive = (
+            consecutive_focus if action_name == "conclude_interview"
+            else consecutive_focus + 1 if current_skill == target_skill else 0
+        )
         next_obs = build_policy_state(
             updater,
             total_skills=total_skills,
-            turn_id=turn_id,
-            current_skill=target_skill,
+            turn_id=interview_turn_id,
+            current_skill=current_skill if action_name == "conclude_interview" else target_skill,
             consecutive_focus_turns=next_consecutive,
+            valid_evidence_count=valid_evidence_count,
             previous=next_previous,
         )
 
@@ -234,6 +266,7 @@ def replay_one_episode(
             "assessment_status", "aggregate_belief", "aggregate_confidence",
             "effective_evidence", "skills_covered", "evaluation_valid",
             "evidence_reliability", "information_gain", "action_mask",
+            "action_mask_before",
             "termination_reason",
         ):
             if name in source:
@@ -253,7 +286,17 @@ def replay_one_episode(
             "evaluation_valid": valid,
             "evidence_reliability": reliability,
             "information_gain": information_gain,
-            "action_mask": action_mask,
+            "action_mask_before": action_mask,
+            "action_mask": _action_mask(
+                interview_turn_id, assessment, total_skills, config, valid_evidence_count
+            )[0],
+            "valid_evidence_count": valid_evidence_count,
+            "transition_kind": (
+                "stop" if action_name == "conclude_interview" else "question"
+            ),
+            "action_name": action_name,
+            "action_schema_version": ACTION_SCHEMA_VERSION,
+            "transition_schema_version": TRANSITION_SCHEMA_VERSION,
             "termination_reason": termination_reason,
             "ontology_size": total_skills,
             "ontology_size_source": ontology_size_source,
@@ -267,7 +310,8 @@ def replay_one_episode(
             "replay_schema_version": REPLAY_SCHEMA_VERSION,
         })
         replayed.append(derived)
-        current_skill = target_skill
+        if action_name != "conclude_interview":
+            current_skill = target_skill
         consecutive_focus = next_consecutive
         previous = next_previous
         if done:
@@ -293,9 +337,18 @@ def create_split_manifest(transitions: list[dict], seed=42):
             "episodes": len(episodes),
             "resumes": sorted({str(item.get("resume_file")) for item in items}),
             "jds": sorted({str(item.get("jd_file")) for item in items}),
+            "resume_content_hashes": sorted({
+                str(item.get("resume_content_hash")) for item in items
+                if item.get("resume_content_hash")
+            }),
+            "jd_content_hashes": sorted({
+                str(item.get("jd_content_hash")) for item in items
+                if item.get("jd_content_hash")
+            }),
+            "identity_components": len(connected_identity_components(items)),
         }
     manifest = {
-        "schema_version": "aria-split-manifest-v2",
+        "schema_version": "aria-split-manifest-v3",
         "raw_dataset_hash": canonical_json_hash(transitions),
         "state_schema_version": STATE_SCHEMA_VERSION,
         "state_feature_names": list(STATE_FEATURE_NAMES),
@@ -305,6 +358,14 @@ def create_split_manifest(transitions: list[dict], seed=42):
         "assignments": assignments,
         "summary": split_summary,
     }
+    manifest["locked_test_assignment_hash"] = canonical_json_hash({
+        "episode_ids": sorted(
+            episode_id for episode_id, split_name in assignments.items()
+            if split_name == "test"
+        ),
+        "resume_content_hashes": split_summary["test"]["resume_content_hashes"],
+        "jd_content_hashes": split_summary["test"]["jd_content_hashes"],
+    })
     manifest["manifest_hash"] = canonical_json_hash(manifest)
     return manifest
 
@@ -328,7 +389,15 @@ def replay_dataset(transitions, config, split_manifest=None, unlock_test_report=
     if config.raw_dataset_hash and config.raw_dataset_hash != raw_hash:
         raise ValueError("Belief config raw_dataset_hash does not match replay input")
     manifest = split_manifest or create_split_manifest(transitions)
-    manifest_hash = manifest.get("manifest_hash") or canonical_json_hash(manifest)
+    stored_manifest_hash = manifest.get("manifest_hash")
+    unsigned_manifest = dict(manifest)
+    unsigned_manifest.pop("manifest_hash", None)
+    computed_manifest_hash = canonical_json_hash(unsigned_manifest)
+    if stored_manifest_hash and stored_manifest_hash != computed_manifest_hash:
+        raise ValueError("Split manifest content does not match its manifest_hash")
+    manifest_hash = stored_manifest_hash or computed_manifest_hash
+    if manifest.get("raw_dataset_hash") != raw_hash:
+        raise ValueError("Split manifest raw_dataset_hash does not match replay input")
     if config.split_manifest_hash and config.split_manifest_hash != manifest_hash:
         raise ValueError("Belief config split_manifest_hash does not match replay split")
     assignments = manifest["assignments"]
@@ -358,7 +427,7 @@ def replay_dataset(transitions, config, split_manifest=None, unlock_test_report=
                 derived_episode[-1].get("aria_label"),
             ))
     report = {
-        "schema_version": "aria-replay-comparison-v2",
+        "schema_version": "aria-replay-comparison-v3",
         "raw_dataset_hash": raw_hash,
         "split_manifest_hash": manifest_hash,
         "belief_config_hash": config.config_hash,
@@ -403,9 +472,9 @@ def replay_file(
         raise RuntimeError("Raw dataset changed during replay")
 
     output = Path(output_dir)
-    _atomic_json_write(output / "split_manifest_v2.json", manifest)
-    _atomic_json_write(output / "qwen_rl_dataset_belief_v2.json", replayed)
-    _atomic_json_write(output / "replay_comparison_v2.json", report)
+    _atomic_json_write(output / "split_manifest_v3.json", manifest)
+    _atomic_json_write(output / "qwen_rl_dataset_belief_v3.json", replayed)
+    _atomic_json_write(output / "replay_comparison_v3.json", report)
     for split_name in SPLIT_NAMES:
         _atomic_json_write(
             output / "splits" / f"{split_name}.json",
@@ -461,15 +530,15 @@ def prepare_calibrate_replay(
 
     output = Path(output_dir)
     config.save(output / "belief_model_v2.json")
-    _atomic_json_write(output / "split_manifest_v2.json", manifest)
-    _atomic_json_write(output / "qwen_rl_dataset_belief_v2.json", replayed)
-    _atomic_json_write(output / "replay_comparison_v2.json", comparison)
+    _atomic_json_write(output / "split_manifest_v3.json", manifest)
+    _atomic_json_write(output / "qwen_rl_dataset_belief_v3.json", replayed)
+    _atomic_json_write(output / "replay_comparison_v3.json", comparison)
     calibration_payload = {
         key: value.to_dict() if isinstance(value, BeliefModelConfig) else value
         for key, value in calibration.items()
     }
     calibration_report = {
-        "schema_version": "aria-calibration-report-v2",
+        "schema_version": "aria-calibration-report-v3",
         "raw_dataset_hash": raw_hash,
         "split_manifest_hash": manifest["manifest_hash"],
         "belief_config_hash": config.config_hash,
@@ -481,7 +550,7 @@ def prepare_calibrate_replay(
         "test_metrics_locked": True,
         "calibration": calibration_payload,
     }
-    _atomic_json_write(output / "calibration_report_v2.json", calibration_report)
+    _atomic_json_write(output / "calibration_report_v3.json", calibration_report)
     for split_name in SPLIT_NAMES:
         _atomic_json_write(
             output / "splits" / f"{split_name}.json",

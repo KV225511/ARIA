@@ -26,6 +26,11 @@ from modules.module_07_rl.data_loader import (
     get_specific_pair, is_valid_resume, is_valid_jd
 )
 from modules.module_07_rl.rl_spec import RL_ACTION_SPACE
+from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
+from modules.module_07_rl.ollama_client import BoundedOllamaClient
+from modules.module_07_rl.state_builder import STATE_SCHEMA_VERSION
+from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
 from modules.module_07_rl.dataset_split import (
     SPLIT_NAMES,
     group_transitions_into_episodes,
@@ -49,13 +54,18 @@ ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
 DEFAULT_SWEEP_EPISODES = 300
 MIN_RECOMMENDED_EPISODES = 200
 DATASET_SPLIT_RATIOS = (0.70, 0.15, 0.15)
-GENERATOR_SCHEMA_VERSION = "aria-simulator-v2-append"
+GENERATOR_SCHEMA_VERSION = "aria-simulator-v3"
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 async def generate_llm_response(
     prompt: str,
     model: str,
     system: str = "",
     temperature: float = 0.8,
+    client: BoundedOllamaClient | None = None,
 ) -> str:
     """Helper to call Ollama directly"""
     payload = {
@@ -69,9 +79,15 @@ async def generate_llm_response(
             "num_ctx": OLLAMA_NUM_CTX,
         },
     }
-    async with httpx.AsyncClient() as client:
+    if client is not None:
         try:
-            response = await client.post(
+            return (await client.generate(payload)).get("response", "").strip()
+        except Exception as e:
+            print(f"Ollama API Error: {e}")
+            return ""
+    async with httpx.AsyncClient() as transient_client:
+        try:
+            response = await transient_client.post(
                 f"{OLLAMA_HOST}/api/generate",
                 json=payload,
                 timeout=OLLAMA_REQUEST_TIMEOUT,
@@ -123,7 +139,11 @@ Return ONLY a valid JSON object without markdown fences, comments, or extra text
 """
 
 
-async def evaluate_answer(question: str, answer: str) -> tuple:
+async def evaluate_answer(
+    question: str,
+    answer: str,
+    client: BoundedOllamaClient | None = None,
+) -> tuple:
     """Return scores plus a validity flag without consulting persona labels."""
     prompt = build_evaluator_prompt(question, answer)
 
@@ -141,6 +161,7 @@ async def evaluate_answer(question: str, answer: str) -> tuple:
             prompt,
             EVALUATOR_MODEL,
             temperature=0.0,
+            client=client,
         )
         try:
             if "```json" in eval_text:
@@ -240,20 +261,30 @@ def build_split_safe_sweep_pairs(
     jds: list[Path],
     max_episodes: int,
     seed: int,
+    component_targets: tuple[int, int, int] = (20, 6, 6),
 ) -> list[tuple[str, str]]:
-    """Build disconnected resume/JD components sized for train/val/test.
+    """Build many disconnected resume/JD components for train/val/test.
 
     A full Cartesian sweep creates one giant bipartite component and therefore
     cannot be split without identity leakage. This builder partitions both
     document sets first, then samples (and, when needed, repeats) pairs only
     within the corresponding partition.
     """
+    if len(component_targets) != 3 or any(count <= 0 for count in component_targets):
+        raise ValueError("component_targets must contain three positive counts")
+    required_components = sum(component_targets)
+    if max_episodes < required_components:
+        raise ValueError(
+            f"At least {required_components} episodes are required to populate "
+            "every requested identity component"
+        )
     if max_episodes < 3:
         raise ValueError("At least three episodes are required for a three-way split")
-    if len(resumes) < 3 or len(jds) < 3:
+    if len(resumes) < required_components or len(jds) < required_components:
         raise ValueError(
-            "Leakage-safe sweep generation requires at least three resumes and "
-            "three job descriptions"
+            "Leakage-safe generation requires one unique resume and JD per "
+            f"identity component: requested {required_components}, available "
+            f"resumes={len(resumes)}, JDs={len(jds)}"
         )
 
     rng = random.Random(seed)
@@ -262,34 +293,57 @@ def build_split_safe_sweep_pairs(
     rng.shuffle(resumes)
     rng.shuffle(jds)
 
-    resume_counts = _three_way_counts(len(resumes))
-    jd_counts = _three_way_counts(len(jds))
     episode_counts = _three_way_counts(max_episodes)
+    if any(episodes < components for episodes, components in zip(
+        episode_counts, component_targets
+    )):
+        raise ValueError("Episode split is too small for the requested component targets")
 
-    def partitions(items, counts):
-        result = []
-        cursor = 0
-        for count in counts:
-            result.append(items[cursor:cursor + count])
-            cursor += count
-        return result
+    def component_pools(items, count):
+        pools = [[item] for item in items[:count]]
+        for index, item in enumerate(items[count:]):
+            pools[index % count].append(item)
+        return pools
 
-    resume_partitions = partitions(resumes, resume_counts)
-    jd_partitions = partitions(jds, jd_counts)
+    resume_cursor = 0
+    jd_cursor = 0
     episodes_to_run = []
-    for split_index, episode_count in enumerate(episode_counts):
-        combinations = list(itertools.product(
-            resume_partitions[split_index],
-            jd_partitions[split_index],
-        ))
-        rng.shuffle(combinations)
-        episodes_to_run.extend(
-            (resume.name, jd.name)
-            for resume, jd in itertools.islice(
-                itertools.cycle(combinations),
-                episode_count,
-            )
+    for split_index, (episode_count, component_count) in enumerate(zip(
+        episode_counts, component_targets
+    )):
+        remaining_splits = 3 - split_index
+        resume_take = component_count + max(
+            0, (len(resumes) - resume_cursor - sum(component_targets[split_index:]))
+            // remaining_splits
         )
+        jd_take = component_count + max(
+            0, (len(jds) - jd_cursor - sum(component_targets[split_index:]))
+            // remaining_splits
+        )
+        resume_items = resumes[resume_cursor:resume_cursor + resume_take]
+        jd_items = jds[jd_cursor:jd_cursor + jd_take]
+        resume_cursor += resume_take
+        jd_cursor += jd_take
+        if split_index == 2:
+            resume_items.extend(resumes[resume_cursor:])
+            jd_items.extend(jds[jd_cursor:])
+
+        resume_components = component_pools(resume_items, component_count)
+        jd_components = component_pools(jd_items, component_count)
+        base, remainder = divmod(episode_count, component_count)
+        for component_index in range(component_count):
+            component_episodes = base + int(component_index < remainder)
+            combinations = list(itertools.product(
+                resume_components[component_index],
+                jd_components[component_index],
+            ))
+            rng.shuffle(combinations)
+            episodes_to_run.extend(
+                (resume.name, jd.name)
+                for resume, jd in itertools.islice(
+                    itertools.cycle(combinations), component_episodes
+                )
+            )
 
     return episodes_to_run
 
@@ -388,6 +442,7 @@ def build_append_sweep_pairs(
     jds: list[Path],
     max_episodes: int,
     seed: int,
+    component_targets: tuple[int, int, int] = (20, 6, 6),
 ) -> tuple[list[tuple[str, str]], str]:
     """Plan an append without connecting identities across existing splits.
 
@@ -413,7 +468,11 @@ def build_append_sweep_pairs(
     if len(unused_resumes) >= 3 and len(unused_jds) >= 3:
         return (
             build_split_safe_sweep_pairs(
-                unused_resumes, unused_jds, max_episodes=max_episodes, seed=seed
+                unused_resumes,
+                unused_jds,
+                max_episodes=max_episodes,
+                seed=seed,
+                component_targets=component_targets,
             ),
             "new_identity_components",
         )
@@ -508,40 +567,67 @@ def get_action_one_hot(action, action_dim):
     return one_hot.tolist()
 
 
-def select_behavior_action(env: ARIAInterviewEnv, rng: random.Random) -> tuple[int, str]:
-    """Select actions from a reproducible heuristic/exploration mixture."""
-    exploration_roll = rng.random()
-
-    # Twenty percent uniform exploration preserves broad offline-RL support.
-    if exploration_roll < 0.20:
-        allowed = list(range(env.action_space.n))
-        if not env.can_conclude():
-            allowed.remove(ACTION_TO_INDEX["conclude_interview"])
-        return rng.choice(allowed), "uniform_exploration"
-
+def behavior_action_distribution(env: ARIAInterviewEnv) -> tuple[list[float], str]:
+    """Return the exact probability of every action under the behavior policy."""
+    epsilon = 0.25
+    stop_index = ACTION_TO_INDEX["conclude_interview"]
+    question_indices = list(range(stop_index))
     assessment = env.belief_updater.get_aggregate_assessment()
     coverage = len(assessment["visited_skills"])
     required_coverage = min(MIN_SKILLS_COVERED, env.num_nodes)
-
-    # Prioritize coverage before repeatedly probing already-observed skills.
     if coverage < required_coverage:
-        return ACTION_TO_INDEX["switch_topic"], "coverage_heuristic"
+        heuristic_indices = [ACTION_TO_INDEX["switch_topic"]]
+        policy_name = "coverage_heuristic"
+    else:
+        label = assessment["label"]
+        if label is None:
+            label = assessment["raw_label"]
+        candidates_by_label = {
+            0: ("probe_foundation", "decrease_difficulty", "switch_topic"),
+            1: ("ask_follow_up_same_topic", "ask_situational", "switch_topic"),
+            2: ("increase_difficulty", "ask_situational", "switch_topic"),
+        }
+        heuristic_indices = [ACTION_TO_INDEX[name] for name in candidates_by_label[label]]
+        policy_name = "belief_heuristic"
 
-    # Conclude only when the environment contract is met and the evidence is
-    # reasonably decisive; otherwise seek class-appropriate information.
-    if env.can_conclude() and assessment["confidence"] >= 0.72 and rng.random() < 0.35:
-        return ACTION_TO_INDEX["conclude_interview"], "confidence_heuristic"
+    question_probs = [epsilon / len(question_indices)] * len(question_indices)
+    for index in heuristic_indices:
+        question_probs[index] += (1.0 - epsilon) / len(heuristic_indices)
 
-    label = assessment["label"]
-    if label is None:
-        label = assessment["raw_label"]
-    candidates_by_label = {
-        0: ("probe_foundation", "decrease_difficulty", "switch_topic"),
-        1: ("ask_follow_up_same_topic", "ask_situational", "switch_topic"),
-        2: ("increase_difficulty", "ask_situational", "switch_topic"),
-    }
-    action_name = rng.choice(candidates_by_label[label])
-    return ACTION_TO_INDEX[action_name], "belief_heuristic"
+    probabilities = [0.0] * len(RL_ACTION_SPACE)
+    if env.can_conclude():
+        stop_probability = min(
+            0.15 + 0.05 * (env.turn_id - MIN_INTERVIEW_TURNS), 0.60
+        )
+        for index in question_indices:
+            probabilities[index] = (1.0 - stop_probability) * question_probs[index]
+        probabilities[stop_index] = stop_probability
+        policy_name = f"{policy_name}_with_stop"
+    else:
+        for index in question_indices:
+            probabilities[index] = question_probs[index]
+
+    total = sum(probabilities)
+    return [probability / total for probability in probabilities], policy_name
+
+
+def select_behavior_action(
+    env: ARIAInterviewEnv,
+    rng: random.Random,
+    include_probabilities: bool = False,
+):
+    probabilities, policy_name = behavior_action_distribution(env)
+    roll = rng.random()
+    cumulative = 0.0
+    action_idx = len(probabilities) - 1
+    for index, probability in enumerate(probabilities):
+        cumulative += probability
+        if roll < cumulative:
+            action_idx = index
+            break
+    if include_probabilities:
+        return action_idx, policy_name, probabilities
+    return action_idx, policy_name
 
 async def simulate_episode(
     ep: int,
@@ -553,6 +639,7 @@ async def simulate_episode(
     display_number: int | None = None,
     generation_run_id: str = "",
     generation_started_at: str = "",
+    ollama_client: BoundedOllamaClient | None = None,
 ) -> list:
     """Simulates a single episode, isolated to its own environment to avoid state conflicts."""
     async with semaphore:
@@ -576,6 +663,7 @@ async def simulate_episode(
         interviewer = LLMQuestionGenerator(
             model=CANDIDATE_MODEL,
             allow_fallback=False,
+            client=ollama_client,
         )
         
         env.ontology.adapt_to_candidate(jd_text, resume_text)
@@ -588,6 +676,9 @@ async def simulate_episode(
             raise ValueError(f"Unknown persona tier: {persona_tier}")
         rng = random.Random(seed + ep)
         system_prompt = build_candidate_system_prompt(persona_tier, resume_text)
+        resume_content_hash = _sha256_text(resume_text)
+        jd_content_hash = _sha256_text(jd_text)
+        candidate_system_prompt_hash = _sha256_text(system_prompt)
         print(f"  Persona: {persona_tier}")
         
 
@@ -607,14 +698,91 @@ async def simulate_episode(
         consecutive_question_failures = 0
         consecutive_answer_failures = 0
         while not done:
-            action_idx, behavior_policy = select_behavior_action(env, rng)
+            action_idx, behavior_policy, behavior_probabilities = select_behavior_action(
+                env, rng, include_probabilities=True
+            )
             action_name = RL_ACTION_SPACE[action_idx]
+            action_mask_before = env.get_action_mask().tolist()
+
+            # A stop decision is a terminal transition, not a synthetic Q&A
+            # turn. It therefore makes zero Ollama calls and adds no evidence.
+            if action_name == "conclude_interview":
+                next_obs, reward, terminated, truncated, info = env.step_with_scores(
+                    action_idx, None, None, None
+                )
+                assessment = env.belief_updater.get_aggregate_assessment()
+                aria_label = assessment["label"]
+                if aria_label is None:
+                    aria_label = assessment["raw_label"]
+                transition = {
+                    "obs": obs.tolist(),
+                    "action": get_action_one_hot(action_idx, env.action_space.n),
+                    "action_idx": action_idx,
+                    "action_name": action_name,
+                    "action_schema_version": ACTION_SCHEMA_VERSION,
+                    "action_mask_before": action_mask_before,
+                    "behavior_action_probs": behavior_probabilities,
+                    "behavior_action_probability": behavior_probabilities[action_idx],
+                    "reward": float(reward),
+                    "next_obs": next_obs.tolist(),
+                    "done": bool(terminated or truncated),
+                    "transition_kind": "stop",
+                    "termination_reason": info["termination_reason"],
+                    "resume_file": resume_name,
+                    "jd_file": jd_name,
+                    "resume_content_hash": resume_content_hash,
+                    "jd_content_hash": jd_content_hash,
+                    "true_label": episode_true_label,
+                    "aria_label": aria_label,
+                    "aggregate_belief": assessment["belief"].tolist(),
+                    "aggregate_confidence": assessment["confidence"],
+                    "skills_covered": len(assessment["visited_skills"]),
+                    "valid_evidence_count": env.valid_evidence_count,
+                    "target_skill": None,
+                    "semantic_score": None,
+                    "behavior_score": None,
+                    "cognitive_load": None,
+                    "evaluation_valid": None,
+                    "evaluator_confidence": None,
+                    "rubric_evidence": [],
+                    "behavior_policy": behavior_policy,
+                    "candidate_model": CANDIDATE_MODEL,
+                    "evaluator_model": EVALUATOR_MODEL,
+                    "simulation_seed": seed + ep,
+                    "episode_id": f"episode_{ep}",
+                    "generation_run_id": generation_run_id,
+                    "generation_started_at": generation_started_at,
+                    "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+                    "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+                    "state_schema_version": STATE_SCHEMA_VERSION,
+                    "reward_schema_version": REWARD_SCHEMA_VERSION,
+                    "ollama_num_ctx": OLLAMA_NUM_CTX,
+                    "ollama_keep_alive": OLLAMA_KEEP_ALIVE,
+                    "question": None,
+                    "candidate_answer": None,
+                    "question_prompt_hash": None,
+                    "candidate_system_prompt_hash": candidate_system_prompt_hash,
+                    "evaluator_prompt_hash": None,
+                    "jd_text": jd_text[:2000],
+                }
+                episode_transitions.append(transition)
+                obs = next_obs
+                done = transition["done"]
+                continue
 
             target_skill = env.select_target_skill(action_idx)
             
             belief_state = {k: v.tolist() for k, v in env.belief_updater.beliefs.items()}
             
             # 1. Interviewer generates question (pass persona experience for prompt calibration)
+            question_prompt_hash = _sha256_text(interviewer._build_prompt(
+                action_name,
+                belief_state,
+                resume_text[:1500],
+                history,
+                experience=interviewer_experience,
+                target_skill=target_skill,
+            ))
             question = await interviewer.generate_question(
                 action=action_name,
                 belief_state=belief_state,
@@ -638,7 +806,9 @@ async def simulate_episode(
             consecutive_question_failures = 0
             
             # 2. Candidate answers
-            answer = await generate_llm_response(question, CANDIDATE_MODEL, system=system_prompt)
+            answer = await generate_llm_response(
+                question, CANDIDATE_MODEL, system=system_prompt, client=ollama_client
+            )
             if not answer or not answer.strip():
                 consecutive_answer_failures += 1
                 print(
@@ -656,6 +826,7 @@ async def simulate_episode(
             history.append({"q": question, "a": answer})
             
             # 3. Evaluate
+            evaluator_prompt_hash = _sha256_text(build_evaluator_prompt(question, answer))
             (
                 sem_score,
                 beh_score,
@@ -663,7 +834,7 @@ async def simulate_episode(
                 evaluator_confidence,
                 rubric_evidence,
                 evaluation_valid,
-            ) = await evaluate_answer(question, answer)
+            ) = await evaluate_answer(question, answer, client=ollama_client)
             if not evaluation_valid:
                 consecutive_evaluation_failures += 1
                 history.pop()
@@ -702,16 +873,24 @@ async def simulate_episode(
                 "obs": obs.tolist(),
                 "action": get_action_one_hot(action_idx, env.action_space.n),
                 "action_idx": int(action_idx),
+                "action_name": action_name,
+                "action_schema_version": ACTION_SCHEMA_VERSION,
+                "action_mask_before": action_mask_before,
+                "behavior_action_probs": behavior_probabilities,
+                "behavior_action_probability": behavior_probabilities[action_idx],
                 "reward": float(reward),
                 "next_obs": next_obs.tolist(),
                 "done": bool(done),
                 "resume_file": resume_name,
                 "jd_file": jd_name,
+                "resume_content_hash": resume_content_hash,
+                "jd_content_hash": jd_content_hash,
                 "true_label": true_label,
                 "aria_label": aria_label,
                 "aggregate_belief": assessment["belief"].tolist(),
                 "aggregate_confidence": assessment["confidence"],
                 "skills_covered": len(assessment["visited_skills"]),
+                "valid_evidence_count": env.valid_evidence_count,
                 "target_skill": target_skill,
                 "semantic_score": float(sem_score),
                 "behavior_score": float(beh_score),
@@ -727,9 +906,18 @@ async def simulate_episode(
                 "generation_run_id": generation_run_id,
                 "generation_started_at": generation_started_at,
                 "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+                "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+                "state_schema_version": STATE_SCHEMA_VERSION,
+                "reward_schema_version": REWARD_SCHEMA_VERSION,
+                "transition_kind": "question",
+                "termination_reason": info["termination_reason"],
                 "ollama_num_ctx": OLLAMA_NUM_CTX,
                 "ollama_keep_alive": OLLAMA_KEEP_ALIVE,
                 "question": question,
+                "candidate_answer": answer,
+                "question_prompt_hash": question_prompt_hash,
+                "candidate_system_prompt_hash": candidate_system_prompt_hash,
+                "evaluator_prompt_hash": evaluator_prompt_hash,
                 "jd_text": jd_text[:2000]
             }
             episode_transitions.append(transition)
@@ -744,7 +932,10 @@ async def simulate_episode(
 async def run_simulation(
     sweep: bool = False,
     max_episodes: int = DEFAULT_SWEEP_EPISODES,
-    max_concurrent: int = 2,
+    max_concurrent: int = 4,
+    candidate_request_concurrency: int = 3,
+    evaluator_request_concurrency: int = 2,
+    identity_component_targets: tuple[int, int, int] = (20, 6, 6),
     seed: int = 42,
     dataset_file: str | Path = DATASET_FILE,
     append: bool = False,
@@ -757,6 +948,8 @@ async def run_simulation(
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
     if max_concurrent <= 0:
         raise ValueError("max_concurrent must be positive")
+    if candidate_request_concurrency <= 0 or evaluator_request_concurrency <= 0:
+        raise ValueError("Ollama request concurrency limits must be positive")
     if append and replace_existing:
         raise ValueError("Choose --append or --replace-existing, not both")
     if CANDIDATE_MODEL == EVALUATOR_MODEL:
@@ -822,6 +1015,7 @@ async def run_simulation(
                 jds,
                 max_episodes=max_episodes,
                 seed=seed,
+                component_targets=identity_component_targets,
             )
             print(f"Append identity mode: {append_mode}")
             if append_mode == "existing_identity_partitions":
@@ -836,6 +1030,7 @@ async def run_simulation(
                 jds,
                 max_episodes=max_episodes,
                 seed=seed,
+                component_targets=identity_component_targets,
             )
 
         print(
@@ -848,6 +1043,14 @@ async def run_simulation(
         episodes_to_run = [None] * num_eps
 
     semaphore = asyncio.Semaphore(max_concurrent)
+    ollama_client = BoundedOllamaClient(
+        OLLAMA_HOST,
+        {
+            CANDIDATE_MODEL: candidate_request_concurrency,
+            EVALUATOR_MODEL: evaluator_request_concurrency,
+        },
+        timeout=OLLAMA_REQUEST_TIMEOUT,
+    )
     total_eps = len(episodes_to_run)
     final_episode_target = len(group_transitions_into_episodes(existing)) + total_eps
     if final_episode_target < MIN_RECOMMENDED_EPISODES:
@@ -868,6 +1071,40 @@ async def run_simulation(
         f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}"
     )
     generation_run_id = hashlib.sha256(run_material.encode("utf-8")).hexdigest()[:16]
+    manifest_path = dataset_path.parent / "manifests" / f"{generation_run_id}.json"
+    run_manifest = {
+        "generation_run_id": generation_run_id,
+        "status": "running",
+        "generation_started_at": generation_started_at,
+        "source_dataset_hash": source_hash,
+        "simulation_seed": seed,
+        "start_episode_index": start_index,
+        "planned_episodes": total_eps,
+        "identity_component_targets": list(identity_component_targets),
+        "planned_document_pairs": [
+            None if pair is None else {"resume_file": pair[0], "jd_file": pair[1]}
+            for pair in episodes_to_run
+        ],
+        "persona_schedule": [
+            PERSONA_TIERS[(start_index + order) % len(PERSONA_TIERS)]
+            for order in range(total_eps)
+        ],
+        "candidate_model": CANDIDATE_MODEL,
+        "evaluator_model": EVALUATOR_MODEL,
+        "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+        "state_schema_version": STATE_SCHEMA_VERSION,
+        "action_schema_version": ACTION_SCHEMA_VERSION,
+        "reward_schema_version": REWARD_SCHEMA_VERSION,
+        "ollama_host": OLLAMA_HOST,
+        "ollama_num_ctx": OLLAMA_NUM_CTX,
+        "ollama_keep_alive": OLLAMA_KEEP_ALIVE,
+        "episode_worker_concurrency": max_concurrent,
+        "candidate_request_concurrency": candidate_request_concurrency,
+        "evaluator_request_concurrency": evaluator_request_concurrency,
+        "single_model_residency": True,
+    }
+    _atomic_json_write(manifest_path, run_manifest)
     print(
         f"Generation run {generation_run_id}: adding {total_eps} episodes with "
         f"global IDs episode_{start_index}..episode_{start_index + total_eps - 1}."
@@ -886,6 +1123,7 @@ async def run_simulation(
                 display_number=order + 1,
                 generation_run_id=generation_run_id,
                 generation_started_at=generation_started_at,
+                ollama_client=ollama_client,
             )
             return order, transitions, None
         except Exception as error:
@@ -928,6 +1166,8 @@ async def run_simulation(
             f"ETA={_format_duration(eta)}."
         )
 
+    await ollama_client.aclose()
+
     dataset = list(existing)
     for completed_order in sorted(completed):
         dataset.extend(completed[completed_order])
@@ -937,6 +1177,14 @@ async def run_simulation(
         f"Combined dataset has {len(group_transitions_into_episodes(dataset))} "
         f"episodes and {len(dataset)} transitions at {dataset_path}."
     )
+    run_manifest.update({
+        "status": "complete" if completed else "failed",
+        "completed_episodes": len(completed),
+        "failed_episodes": {str(order): message for order, message in failed.items()},
+        "combined_transition_count": len(dataset),
+        "generation_finished_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _atomic_json_write(manifest_path, run_manifest)
     if not completed:
         raise RuntimeError(
             "No new episodes completed successfully; the existing dataset was preserved"
@@ -959,8 +1207,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_concurrent",
         type=int,
-        default=2,
-        help="Concurrent episodes (2 recommended for an 8 GB RTX 4060 Laptop GPU)",
+        default=4,
+        help="Concurrent episode workers (API calls remain separately bounded)",
+    )
+    parser.add_argument("--candidate-request-concurrency", type=int, default=3)
+    parser.add_argument("--evaluator-request-concurrency", type=int, default=2)
+    parser.add_argument(
+        "--identity-components",
+        type=int,
+        nargs=3,
+        metavar=("TRAIN", "VALIDATION", "TEST"),
+        default=(20, 6, 6),
+        help="Independent resume/JD component targets for each split",
     )
     parser.add_argument("--seed", type=int, default=42, help="Simulation seed")
     parser.add_argument("--dataset-file", default=str(DATASET_FILE))
@@ -984,6 +1242,9 @@ if __name__ == "__main__":
             sweep=args.sweep,
             max_episodes=args.max_episodes,
             max_concurrent=args.max_concurrent,
+            candidate_request_concurrency=args.candidate_request_concurrency,
+            evaluator_request_concurrency=args.evaluator_request_concurrency,
+            identity_component_targets=tuple(args.identity_components),
             seed=args.seed,
             dataset_file=args.dataset_file,
             append=args.append,

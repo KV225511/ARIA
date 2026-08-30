@@ -6,15 +6,17 @@ from config.settings import TERMINATION_ENTROPY_THRESHOLD
 
 # Shared constants for RL Formulation
 
-# State-v2 is fixed and ontology/JD permutation invariant. The canonical ordered
+# State-v3 is fixed and ontology/JD permutation invariant. The canonical ordered
 # names live in state_builder.STATE_FEATURE_NAMES; keeping that definition in
 # one place prevents the schema documentation from drifting from replay.
 RL_STATE_SCHEMA = {
-    "schema_version": "aria-state-v2",
-    "dimensions": 32,
+    "schema_version": "aria-state-v3",
+    "dimensions": 33,
     "feature_names_source": "modules.module_07_rl.state_builder.STATE_FEATURE_NAMES",
     "action_mask_in_state": False,
 }
+
+ACTION_SCHEMA_VERSION = "aria-action-v3"
 
 RL_ACTION_SPACE = [
     "increase_difficulty",       # 0

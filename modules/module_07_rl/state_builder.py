@@ -8,12 +8,12 @@ import numpy as np
 from modules.module_07_rl.rl_spec import RL_ACTION_SPACE
 
 
-STATE_SCHEMA_VERSION = "aria-state-v2"
+STATE_SCHEMA_VERSION = "aria-state-v3"
 COGNITIVE_LABELS = ("low", "anxiety", "ignorance", "confident_ignorance")
 STATE_FEATURE_NAMES = (
     "global_p_beginner", "global_p_mid", "global_p_expert",
     "assessment_entropy_normalized", "mean_visited_entropy_normalized",
-    "skill_coverage_fraction", "turn_fraction",
+    "skill_coverage_fraction", "turn_fraction", "valid_evidence_fraction",
     "focus_p_beginner", "focus_p_mid", "focus_p_expert",
     "focus_ess_fraction", "consecutive_focus_fraction",
     "previous_semantic_score", "previous_evidence_reliability",
@@ -44,6 +44,7 @@ def build_policy_state(
     turn_id: int,
     current_skill: str | None = None,
     consecutive_focus_turns: int = 0,
+    valid_evidence_count: int = 0,
     previous: dict | None = None,
 ) -> np.ndarray:
     """Build a fixed state using only information available before the action."""
@@ -76,6 +77,7 @@ def build_policy_state(
         updater.get_mean_visited_entropy() / np.log(3.0),
         min(visited / denominator, 1.0),
         min(max(turn_id, 0) / 30.0, 1.0),
+        min(max(valid_evidence_count, 0) / 30.0, 1.0),
         *focus_belief,
         min(focus_ess / updater.config.max_skill_effective_sample_size, 1.0),
         min(max(consecutive_focus_turns, 0) / 10.0, 1.0),

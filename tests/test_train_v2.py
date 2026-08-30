@@ -10,11 +10,15 @@ from modules.module_07_rl.state_builder import (
     STATE_SCHEMA_VERSION,
 )
 from modules.module_07_rl.train import train_iql_policy, validate_replayed_dataset
+from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
+from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
 
 
 def _transition(index, split):
     label = index % 3
     action = index % 8
+    is_stop = action == 7
     state = [0.0] * STATE_DIM
     state[label] = 1.0
     return {
@@ -24,11 +28,11 @@ def _transition(index, split):
         "dataset_split": split,
         "true_label": label,
         "aria_label": label,
-        "semantic_score": (0.1, 0.5, 0.9)[label],
-        "behavior_score": 0.5,
-        "cognitive_load": "low",
-        "evaluator_confidence": 1.0,
-        "evaluation_valid": True,
+        "semantic_score": None if is_stop else (0.1, 0.5, 0.9)[label],
+        "behavior_score": None if is_stop else 0.5,
+        "cognitive_load": None if is_stop else "low",
+        "evaluator_confidence": None if is_stop else 1.0,
+        "evaluation_valid": None if is_stop else True,
         "action_idx": action,
         "obs": state,
         "next_obs": state,
@@ -37,6 +41,13 @@ def _transition(index, split):
         "state_schema_version": STATE_SCHEMA_VERSION,
         "state_feature_names": list(STATE_FEATURE_NAMES),
         "belief_config_hash": BeliefModelConfig().config_hash,
+        "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+        "action_schema_version": ACTION_SCHEMA_VERSION,
+        "reward_schema_version": REWARD_SCHEMA_VERSION,
+        "transition_kind": "stop" if is_stop else "question",
+        "action_mask_before": [1.0] * 8,
+        "behavior_action_probs": [1.0 / 8.0] * 8,
+        "behavior_action_probability": 1.0 / 8.0,
     }
 
 
@@ -73,7 +84,7 @@ def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
         seed=7,
     )
     checkpoint = torch.load(checkpoint_file, map_location="cpu", weights_only=False)
-    assert checkpoint["checkpoint_schema_version"] == "aria-iql-checkpoint-v2"
+    assert checkpoint["checkpoint_schema_version"] == "aria-iql-checkpoint-v3"
     assert checkpoint["state_schema_version"] == STATE_SCHEMA_VERSION
     assert checkpoint["belief_config_hash"] == config.config_hash
     assert result["evaluates_learned_policy"] is False

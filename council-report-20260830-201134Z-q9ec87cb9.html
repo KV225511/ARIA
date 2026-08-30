@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Council — Should ARIA pipeline v3 be approved for the 600-episode generation run?</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #1a1a1a;
+      background: #f5f5f0;
+      padding: 2rem 1rem;
+    }
+
+    .container { max-width: 800px; margin: 0 auto; }
+
+    /* Header */
+    .header {
+      background: #fff;
+      border: 1px solid #e0e0d8;
+      border-radius: 8px;
+      padding: 1.5rem 2rem;
+      margin-bottom: 1.5rem;
+    }
+    .header h1 { font-size: 1.25rem; font-weight: 600; color: #2d5a88; margin-bottom: 0.25rem; }
+    .header .meta { font-size: 0.8rem; color: #888; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+    .badge {
+      background: #e8f0fb;
+      color: #2d5a88;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge.codex { background: #e8f4ea; color: #2a7a3a; }
+    .badge.mode-quick { background: #fff3e0; color: #b36a00; }
+    .badge.mode-deep { background: #f3e5f5; color: #6a1b9a; }
+
+    /* Confidence header */
+    .confidence-block {
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.875rem;
+      border-left: 4px solid;
+    }
+    .confidence-high { background: #f0faf0; border-color: #4caf50; }
+    .confidence-medium { background: #fff8e1; border-color: #ff9800; }
+    .confidence-low { background: #fff5f5; border-color: #f44336; color: #c62828; }
+    .confidence-block strong { display: block; margin-bottom: 0.25rem; }
+
+    /* Section cards */
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0d8;
+      border-radius: 8px;
+      margin-bottom: 1.25rem;
+      overflow: hidden;
+    }
+    .card-title {
+      padding: 0.875rem 1.5rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #666;
+      border-bottom: 1px solid #e0e0d8;
+      background: #fafaf8;
+    }
+    .card-body { padding: 1.25rem 1.5rem; }
+
+    /* Question */
+    .question-text {
+      background: #f8f8f5;
+      border-left: 3px solid #2d5a88;
+      padding: 0.875rem 1rem;
+      border-radius: 0 4px 4px 0;
+      font-size: 0.95rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Bias flags */
+    .bias-flags {
+      margin-top: 0.875rem;
+      padding: 0.75rem 1rem;
+      background: #fffde7;
+      border: 1px solid #f9e200;
+      border-radius: 6px;
+      font-size: 0.8rem;
+    }
+    .bias-flags strong { display: block; margin-bottom: 0.25rem; color: #856900; }
+
+    /* Verdict */
+    .verdict h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 1.25rem 0 0.5rem;
+      color: #2d5a88;
+      padding-top: 1rem;
+      border-top: 1px solid #e8e8e0;
+    }
+    .verdict h2:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+    .verdict p { margin-bottom: 0.75rem; }
+    .verdict ul { padding-left: 1.5rem; margin-bottom: 0.75rem; }
+    .verdict li { margin-bottom: 0.4rem; }
+    .verdict strong { font-weight: 600; }
+
+    /* Dissent ledger */
+    .dissent-ledger {
+      margin-top: 1.25rem;
+      padding: 1rem;
+      background: #fff5f5;
+      border: 1px solid #ffcdd2;
+      border-radius: 6px;
+    }
+    .dissent-ledger strong { display: block; margin-bottom: 0.5rem; color: #b71c1c; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .dissent-ledger ul { padding-left: 1.25rem; font-size: 0.9rem; }
+    .dissent-ledger li { margin-bottom: 0.4rem; }
+
+    /* Agreement grid */
+    .grid-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .grid-table th {
+      padding: 0.4rem 0.75rem;
+      text-align: center;
+      background: #f0f4fa;
+      color: #2d5a88;
+      font-weight: 600;
+      border: 1px solid #dde4f0;
+    }
+    .grid-table th:first-child { text-align: left; min-width: 160px; }
+    .grid-table td {
+      padding: 0.4rem 0.75rem;
+      border: 1px solid #e8e8e0;
+      text-align: center;
+    }
+    .grid-table td:first-child { text-align: left; font-size: 0.8rem; color: #333; }
+    .dot { color: #2d5a88; font-size: 1.1rem; }
+
+    /* RICE table */
+    .rice-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .rice-table th { padding: 0.4rem 0.75rem; background: #f0f4fa; color: #2d5a88; font-weight: 600; border: 1px solid #dde4f0; text-align: left; }
+    .rice-table td { padding: 0.4rem 0.75rem; border: 1px solid #e8e8e0; vertical-align: top; }
+    .rice-score { font-weight: 700; color: #2d5a88; }
+    .status-draft { color: #f57c00; font-weight: 600; font-size: 0.75rem; }
+
+    /* Decision science matrix */
+    .ds-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .ds-table th { padding: 0.4rem 0.6rem; background: #f0f4fa; color: #2d5a88; font-weight: 600; border: 1px solid #dde4f0; }
+    .ds-table td { padding: 0.4rem 0.6rem; border: 1px solid #e8e8e0; vertical-align: top; }
+    .dominant { background: #f0faf0; }
+    .dominated { background: #f8f8f8; color: #999; }
+
+    /* Advisor details */
+    details { margin-bottom: 0.5rem; }
+    details summary {
+      cursor: pointer;
+      padding: 0.6rem 1rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::before { content: "▶"; font-size: 0.7rem; transition: transform 0.15s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    details .detail-body {
+      padding: 0.875rem 1rem 0.875rem 1.5rem;
+      font-size: 0.875rem;
+      border-left: 3px solid #e0e0d8;
+      margin-left: 0.5rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Advisor color coding */
+    .advisor-red-team summary { border-left: 3px solid #e53935; background: #fff5f5; }
+    .advisor-red-team .detail-body { border-left-color: #e53935; }
+    .advisor-first-principles summary { border-left: 3px solid #1e88e5; background: #f0f4fb; }
+    .advisor-first-principles .detail-body { border-left-color: #1e88e5; }
+    .advisor-expansionist summary { border-left: 3px solid #43a047; background: #f0faf0; }
+    .advisor-expansionist .detail-body { border-left-color: #43a047; }
+    .advisor-outsider summary { border-left: 3px solid #fb8c00; background: #fff8f0; }
+    .advisor-outsider .detail-body { border-left-color: #fb8c00; }
+    .advisor-executor summary { border-left: 3px solid #8e24aa; background: #f8f0fb; }
+    .advisor-executor .detail-body { border-left-color: #8e24aa; }
+
+    /* Confidence inline badges */
+    .conf-high { color: #2e7d32; font-weight: 600; }
+    .conf-medium { color: #e65100; font-weight: 600; }
+    .conf-low { color: #c62828; font-weight: 600; }
+
+    /* Debate section */
+    .debate-callout {
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 1rem;
+      font-size: 0.875rem;
+    }
+    .debate-side { margin-bottom: 0.875rem; }
+    .debate-side strong { display: block; margin-bottom: 0.25rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .prosecutor strong { color: #b71c1c; }
+    .defender strong { color: #1b5e20; }
+
+    /* Footer */
+    footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e0e0d8;
+      font-size: 0.75rem;
+      color: #aaa;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>LLM Council</h1>
+    <div class="meta">
+      <span>2026-08-30T20:11:34Z</span>
+      <span class="badge mode-standard">Standard</span>
+      
+    </div>
+  </div>
+
+  <!-- Confidence block -->
+  <div class="confidence-block confidence-high"><strong>Council confidence: high (5/5 advisors high)</strong><div>Dominant assumption: a bounded canary can remain immutably quarantined until independent production-contract validation.</div><div>Breakers: clean predeclared legality/replay/evaluator/cost thresholds permit full generation; quarantine bypass or persistent semantic discrepancies force broader remediation or redesign.</div></div>
+
+  <!-- Question -->
+  <div class="card">
+    <div class="card-title">Question</div>
+    <div class="card-body">
+      <div class="question-text">DECISION: Should ARIA pipeline v3 be approved now for an expensive 600-episode Ollama synthetic-data run and subsequent learned-policy evaluation, or blocked until correctness and validation gaps are fixed?
+
+CONTEXT: Review-only. Strengths include a legality-gated no-op stop action, consistent 33D state, normalized logged propensities, fail-closed legacy replay, and raw/split hash checks. Concerns span Ollama residency assumptions; split target drift; suppressed audit warnings and weak training gates; discarded IQL masks; incomplete replay semantics; locked-evaluator integrity; mutable model identity; PII; unused reward terms; and unfinished WIS/DR/FQE, policy rollouts, baselines, and release manifest. The locked-evaluator fixture is stale and was omitted from the earlier 233-pass subset.
+
+STAKES: A bad approval can spend compute on an invalid corpus and support illegal learned actions or misleading evaluation. An overbroad block delays useful generation and can trigger unnecessary redesign.
+
+OPTIONS: A) proceed now; B) targeted fixes plus deterministic canary; C) redesign; D) stage-separated authorization for generation, admission, training, evaluation, and release.
+
+PRIOR: No prior council journal entry found.</div>
+      <div class="bias-flags"><strong>Pre-council bias scan</strong>Loaded framing may overstate failure cost; the question initially conflated lifecycle stages; exact quotas and residency need formal acceptance criteria; one review plus a stale fixture can reinforce confirmation bias. These are signals, not verdicts.</div>
+    </div>
+  </div>
+
+  <!-- Verdict -->
+  <div class="card">
+    <div class="card-title">Council Verdict</div>
+    <div class="card-body verdict">
+      <h2>Where the council agrees</h2>
+<ul>
+<li><strong>Do not authorize the 600-episode run today.</strong> All five advisors require targeted fixes and a bounded canary.</li>
+<li><strong>Use stage-specific authorization.</strong> Generation, corpus admission, training, evaluation, and release need independent gates.</li>
+<li><strong>Freeze the contract before heavy spend.</strong> Pin model/config/code digests, schemas, split policy, action semantics, evaluator identity, hashes, and promotion rules.</li>
+<li><strong>Make the canary deterministic and measurable.</strong> It must stay quarantined and have declared stop, rollback, and promotion thresholds.</li>
+</ul>
+<h2>Where the council clashes</h2>
+<p>The Red Team treats mask handling, replay, evaluator integrity, OPE, and baselines as generation blockers. The majority defers genuinely downstream work unless it participates in generation or admission. The debate resolves this operationally: production-mask replay, independent evaluator disagreement, illegal-action mass, replay semantics, PII controls, immutable identity, and unbypassable quarantine are admission invariants. WIS/DR/FQE, baselines, fresh rollouts, mask-aware IQL, and release validation remain mandatory before learned-policy claims, but do not all need to block quarantined evidence generation.</p>
+<h2>Blind spots</h2>
+<p>The project lacks measured run economics, canary power, artifact-custody rules, thresholds, rollback/deletion rehearsal, and named owners with stop authority. Exact split counts may be tolerances rather than invariants; residency is primarily operational unless it changes model identity or determinism.</p>
+<h2>Recommendation</h2>
+<p>Block the 600-episode run for targeted corpus-integrity fixes and a deterministic synthetic-free adversarial canary; do not redesign yet. Approve full generation only after digest-pinned provenance, PII controls, fail-closed replay/audit checks, production-mask replay, independent evaluator validation, declared split tolerances, and unbypassable promotion rules pass. Keep training and evaluation separately blocked until mask-aware learning, locked evaluation, OPE, baselines, rollouts, and release-manifest gates pass.</p>
+<h2>One thing to do first</h2>
+<p>Write and freeze the machine-checkable invariant-to-stage contract assigning every gate a metric, threshold, evidence artifact, owner, stop authority, and promotion decision.</p>
+      <div class="dissent-ledger"><strong>Dissent Ledger</strong><ul>
+<li>A deterministic schema-valid canary can reproduce corrupted behavior when suspect mask, evaluator, replay, or split contracts participate; reproducibility alone is not validity.</li>
+<li>Repair and bind the authoritative locked fixture before canary admission, with adversaries for premature termination, reordered turns, and illegal-action mass.</li>
+<li>Require zero invariant violations, replay agreement, independent evaluator thresholds, lineage, and rollback/deletion rehearsal; quarantine must be technical.</li>
+<li>Run the raw evidence gate before calibration, and keep omitted audit warnings, collapsed thresholds, unused rewards, residency uncertainty, and PII visible as stage-level risks.</li>
+</ul></div>
+    </div>
+  </div>
+
+  <!-- Agreement grid -->
+  <div class="card"><div class="card-title">Agreement Grid</div><div class="card-body"><table class="grid-table"><tr><th>Position</th><th>Red</th><th>First</th><th>Expand</th><th>Outside</th><th>Execute</th></tr>
+<tr><td>Reject full run now</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td></tr>
+<tr><td>Stage-specific gates</td><td></td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td></tr>
+<tr><td>Deterministic canary</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td></tr>
+<tr><td>No broad redesign yet</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td><td class="dot">●</td></tr>
+</table></div></div>
+
+  <!-- RICE table -->
+  <div class="card"><div class="card-title">RICE Analysis</div><div class="card-body"><table class="rice-table"><tr><th>Option</th><th>Reach</th><th>Impact</th><th>Confidence</th><th>Effort</th><th>Score</th></tr>
+<tr><td>Proceed now</td><td>XL</td><td>L</td><td>30%</td><td>0.5 pw</td><td class="rice-score">2.4</td></tr>
+<tr><td>Fix all + canary</td><td>XL</td><td>H</td><td>80%</td><td>3 pw</td><td class="rice-score">3.2</td></tr>
+<tr><td>Broad redesign</td><td>XL</td><td>H</td><td>40%</td><td>10 pw</td><td class="rice-score">0.48</td></tr>
+<tr class="dominant"><td>Stage-separated gates</td><td>XL</td><td>H</td><td>85%</td><td>1.5 pw pre-run</td><td class="rice-score">6.8</td></tr>
+</table><p class="status-draft">DRAFT — blocked on authoritative contract, run economics, and canary evidence.</p></div></div>
+
+  <!-- Decision science matrix -->
+  
+
+  <!-- Debate (collapsible, only if ran) -->
+  <div class="card"><div class="card-title">Debate Round — consensus 4.6/5</div><div class="card-body"><div class="debate-callout">
+<div class="debate-side prosecutor"><strong>Prosecutor</strong>A reproducible canary can certify garbage if generation or admission depends on stale mask/evaluator contracts. Replay through the production mask and an independently version-locked evaluator; any illegal-action mass or disagreement defeats stage separation.</div>
+<div class="debate-side defender"><strong>Defender</strong>Conceded those as admission metrics. Immutable quarantine separates evidence generation from promotion, but only if bypass is impossible. If generation invokes stale contracts, repair and version-lock them before 600 episodes; otherwise require zero promotion on discrepancy.</div>
+</div></div></div>
+
+  <!-- Advisor responses (collapsed by default) -->
+  <div class="card">
+    <div class="card-title">Advisor Responses</div>
+    <div class="card-body">
+      <details class="advisor-red-team"><summary>Red Team <span class="conf-high">high</span></summary><div class="detail-body">Full generation can create an expensive, internally consistent but invalid corpus. Schema checks do not cover mask legality, replay semantics, evaluator isolation, mutable tags, PII, or weak gates. Block the run, enforce machine-checkable stage gates, then use a fixed-seed canary. Redesign only if the canary reveals architectural failure.</div></details>
+<details class="advisor-first-principles"><summary>First Principles <span class="conf-high">high</span></summary><div class="detail-body">Approval is not one binary decision. Authorize by irreversible stage: fix corpus-critical issues, canary, then generation; training and evaluation stay independently blocked. Classify each discrepancy by expected loss and reversibility; exact split counts may be tolerances.</div></details>
+<details class="advisor-expansionist"><summary>Expansionist <span class="conf-high">high</span></summary><div class="detail-body">Use three-key stage authorization, a synthetic-free adversarial trajectory pilot, and optionally a paired generator bake-off. Keep artifacts quarantined and define explicit promotion rules. This maintains momentum without allowing downstream issues to overblock or contaminate generation.</div></details>
+<details class="advisor-outsider"><summary>Outsider <span class="conf-high">high</span></summary><div class="detail-body">Aerospace flight-test lens: freeze configuration, prove instrumentation, fly a bounded sortie, inspect telemetry, then widen the envelope. Mutable provenance, PII, replay invariants, audit visibility, and resource behavior threaten the corpus; OPE and release controls are later qualification gates.</div></details>
+<details class="advisor-executor"><summary>Executor <span class="conf-high">high</span></summary><div class="detail-body">OODA stage: Decide. Stage gates score 6.8 versus fix-all 3.2, proceed-now 2.4, and redesign 0.48. Missing inputs: authoritative generation contract, actual run/regeneration economics, and a deterministic canary result.</div></details>
+    </div>
+  </div>
+
+  <!-- Peer reviews (collapsed) -->
+  <div class="card">
+    <div class="card-title">Peer Reviews</div>
+    <div class="card-body">
+      <details><summary>Reviewer 1</summary><div class="detail-body">Strongest B; it ties failures to artifact validity. Weakness: it overblocks generation with downstream defects. Miss: measurable promotion criteria. CONSENSUS STRENGTH: 5.</div></details>
+<details><summary>Reviewer 2</summary><div class="detail-body">Strongest C; it assigns blockers to irreversible stages. Weakness: no canary size or thresholds. Miss: statistical power and expected-loss economics. CONSENSUS STRENGTH: 5.</div></details>
+<details><summary>Reviewer 3</summary><div class="detail-body">Strongest C; it separates pre-generation and downstream blockers. Weakness: subjective success criteria. Miss: owners and stop authority. CONSENSUS STRENGTH: 5.</div></details>
+<details><summary>Reviewer 4</summary><div class="detail-body">Strongest C; lifecycle separation is useful. Weakness: risk laundering without immutable definitions. Miss: custody, lineage, retention/deletion. CONSENSUS STRENGTH: 4.</div></details>
+<details><summary>Reviewer 5</summary><div class="detail-body">Strongest C; expected-loss framing is proportional. Weakness: teams can relabel risks reversible. Miss: binding invariant-to-stage matrix. CONSENSUS STRENGTH: 4.</div></details>
+    </div>
+  </div>
+
+  <footer>LLM Council &middot; Mode: Standard &middot; SHA: 9ec87cb9 &middot; <a href="council-transcript-20260830-201134Z-q9ec87cb9.md">Full transcript</a></footer>
+
+</div>
+</body>
+</html>
+
+

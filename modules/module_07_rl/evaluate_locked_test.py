@@ -71,7 +71,7 @@ def evaluate_locked_test(
         raise ValueError("Locked test split hash does not match frozen config")
 
     report = {
-        "schema_version": "aria-locked-test-report-v2",
+        "schema_version": "aria-locked-test-report-v3",
         "evaluation_type": "stored_belief_verdict",
         "evaluates_learned_policy": False,
         "test_metrics_unlocked": True,
@@ -87,13 +87,16 @@ def evaluate_locked_test(
         "locked_test_gate": audit_locked_test(transitions),
         "stored_belief_report": build_belief_report(transitions),
         "policy_evaluation_limitation": (
-            "Fixed offline trajectories cannot evaluate counterfactual IQL actions "
-            "without fresh rollouts or logged behavior propensities."
+            "This report evaluates the frozen belief verdict only. Logged v3 "
+            "propensities support a separate OPE report, and final policy release "
+            "requires fresh learned-policy rollouts."
         ),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
-    temporary.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    # Class metrics may mix integer labels with an abstention key; sorting
+    # heterogeneous JSON keys raises in Python 3.
+    temporary.write_text(json.dumps(report, indent=2), encoding="utf-8")
     temporary.replace(output_path)
     return report
 

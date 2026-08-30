@@ -36,6 +36,7 @@ class LLMQuestionGenerator:
         keep_alive=None,
         num_ctx=None,
         allow_fallback=True,
+        client=None,
     ):
         """
         Initializes the LLM Question Generator using a local Ollama instance.
@@ -53,6 +54,7 @@ class LLMQuestionGenerator:
             else os.getenv("ARIA_OLLAMA_NUM_CTX", "4096")
         )
         self.allow_fallback = bool(allow_fallback)
+        self.client = client
         self.api_endpoint = f"{self.ollama_host}/api/generate"
 
     async def generate_question(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None) -> str:
@@ -86,11 +88,15 @@ class LLMQuestionGenerator:
         }
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(self.api_endpoint, json=payload, timeout=300.0)
-                response.raise_for_status()
-                data = response.json()
+            if self.client is not None:
+                data = await self.client.generate(payload)
                 return data.get("response", "").strip()
+            else:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(self.api_endpoint, json=payload, timeout=300.0)
+                    response.raise_for_status()
+                    data = response.json()
+                    return data.get("response", "").strip()
             
         except Exception as e:
             logger.error(f"Failed to fetch from Ollama at {self.ollama_host}: {e}")
@@ -164,7 +170,7 @@ class LLMQuestionGenerator:
             "probe_foundation": "Ask about the fundamental internal mechanisms or mathematical/computational theory behind the concept.",
             "ask_behavioral": "Ask a STAR-method behavioral question: 'Tell me about a time you handled...'",
             "ask_situational": "Present a realistic workplace engineering challenge: 'Suppose our system experiences... how would you diagnose and fix it?'",
-            "conclude_interview": "Ask a final concluding question inviting them to summarize their key strengths or discuss engineering trade-offs."
+            "conclude_interview": "Stop the interview. This action must never be sent to the question generator."
         }
         
         belief_summary = []

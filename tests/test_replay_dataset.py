@@ -1,8 +1,11 @@
 from copy import deepcopy
 import json
+import pytest
 
 from modules.module_06_belief.belief_config import BeliefModelConfig
 from modules.module_07_rl.replay_dataset import replay_dataset
+from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
 from modules.module_07_rl.state_builder import (
     STATE_DIM,
     STATE_FEATURE_NAMES,
@@ -31,6 +34,11 @@ def _raw_episode(index, label, score):
             "next_obs": [1 / 3] * 6 + [0.0] * 144 + [1.0, 0.1],
             "done": turn == 1,
             "question": f"Question {turn}",
+            "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+            "action_schema_version": ACTION_SCHEMA_VERSION,
+            "action_mask_before": [1.0] * 7 + [0.0],
+            "behavior_action_probs": [1.0 / 7.0] * 7 + [0.0],
+            "behavior_action_probability": 1.0 / 7.0,
         }
         for turn in range(2)
     ]
@@ -53,6 +61,16 @@ def test_replay_is_deterministic_and_does_not_mutate_raw_data():
     assert json.dumps(raw, sort_keys=True) == snapshot
 
 
+def test_replay_rejects_a_tampered_locked_split_manifest():
+    raw = _raw_dataset()
+    _, manifest, _ = replay_dataset(raw, BeliefModelConfig())
+    tampered = deepcopy(manifest)
+    episode_id = next(iter(tampered["assignments"]))
+    tampered["assignments"][episode_id] = "test"
+    with pytest.raises(ValueError, match="manifest_hash"):
+        replay_dataset(raw, BeliefModelConfig(), tampered)
+
+
 def test_replay_builds_versioned_fixed_states_and_preserves_raw_fields():
     replayed, _, report = replay_dataset(_raw_dataset(), BeliefModelConfig())
     assert replayed
@@ -67,8 +85,8 @@ def test_first_state_does_not_include_future_evidence():
     raw = _raw_dataset()
     changed = deepcopy(raw)
     changed[1]["semantic_score"] = 0.0
-    first, manifest, _ = replay_dataset(raw, BeliefModelConfig())
-    second, _, _ = replay_dataset(changed, BeliefModelConfig(), manifest)
+    first, _, _ = replay_dataset(raw, BeliefModelConfig())
+    second, _, _ = replay_dataset(changed, BeliefModelConfig())
     assert first[0]["obs"] == second[0]["obs"]
 
 

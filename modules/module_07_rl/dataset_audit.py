@@ -113,11 +113,15 @@ def audit_raw_evidence(
     true_counts = Counter(
         int(item["true_label"]) for item in terminal if item.get("true_label") in (0, 1, 2)
     )
-    invalid = sum(item.get("evaluation_valid") is False for item in transitions)
-    missing_validity = sum("evaluation_valid" not in item for item in transitions)
+    question_transitions = [
+        item for item in transitions
+        if item.get("transition_kind") != "stop" and item.get("action_idx") != 7
+    ]
+    invalid = sum(item.get("evaluation_valid") is False for item in question_transitions)
+    missing_validity = sum("evaluation_valid" not in item for item in question_transitions)
     nonfinite_scores = 0
     missing_scores = 0
-    for transition in transitions:
+    for transition in question_transitions:
         if "semantic_score" not in transition:
             missing_scores += 1
             continue
@@ -329,6 +333,41 @@ def audit_offline_rl_support(transitions: list[dict]):
         bool(item.get("terminal_outcome_reward_applied")) and "base_reward" not in item
         for item in transitions
     )
+    invalid_masks = 0
+    illegal_selected_actions = 0
+    invalid_propensities = 0
+    inconsistent_selected_propensities = 0
+    invalid_stop_transitions = 0
+    for item in transitions:
+        action_idx = item.get("action_idx")
+        mask = np.asarray(item.get("action_mask_before", []), dtype=float)
+        probabilities = np.asarray(item.get("behavior_action_probs", []), dtype=float)
+        if mask.shape != (8,) or not np.all(np.isin(mask, (0.0, 1.0))):
+            invalid_masks += 1
+        elif isinstance(action_idx, int) and 0 <= action_idx < 8 and mask[action_idx] != 1.0:
+            illegal_selected_actions += 1
+        if (
+            probabilities.shape != (8,)
+            or not np.all(np.isfinite(probabilities))
+            or np.any(probabilities < 0.0)
+            or not np.isclose(probabilities.sum(), 1.0)
+        ):
+            invalid_propensities += 1
+        elif isinstance(action_idx, int) and 0 <= action_idx < 8:
+            try:
+                logged = float(item["behavior_action_probability"])
+            except (KeyError, TypeError, ValueError):
+                inconsistent_selected_propensities += 1
+            else:
+                if logged <= 0.0 or not np.isclose(logged, probabilities[action_idx]):
+                    inconsistent_selected_propensities += 1
+        if action_idx == 7 and (
+            item.get("transition_kind") != "stop"
+            or not item.get("done")
+            or item.get("semantic_score") is not None
+            or item.get("obs") != item.get("next_obs")
+        ):
+            invalid_stop_transitions += 1
     warnings = []
     if missing_actions:
         warnings.append("Offline dataset has no support for one or more actions.")
@@ -338,12 +377,23 @@ def audit_offline_rl_support(transitions: list[dict]):
         warnings.append("Non-terminal reward variance is nearly flat.")
     if duplicate_terminal_shaping:
         warnings.append("Terminal reward metadata is inconsistent with single application.")
+    if invalid_masks or illegal_selected_actions:
+        warnings.append("Pre-action masks are missing, malformed, or contradict selected actions.")
+    if invalid_propensities or inconsistent_selected_propensities:
+        warnings.append("Behavior-policy propensities are missing, malformed, or inconsistent.")
+    if invalid_stop_transitions:
+        warnings.append("Stop transitions are non-terminal or contain fabricated evidence/state changes.")
     return {
         "gate": "offline_rl_support",
         "action_counts": dict(action_counts),
         "missing_actions": missing_actions,
         "low_support_actions": low_support_actions,
         "nonterminal_reward": _summary(nonterminal_rewards),
+        "invalid_action_masks": invalid_masks,
+        "illegal_selected_actions": illegal_selected_actions,
+        "invalid_behavior_propensities": invalid_propensities,
+        "inconsistent_selected_propensities": inconsistent_selected_propensities,
+        "invalid_stop_transitions": invalid_stop_transitions,
         "warnings": warnings,
         "passes_quality_gates": not warnings,
     }

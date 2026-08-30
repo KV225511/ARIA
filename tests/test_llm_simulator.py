@@ -19,7 +19,11 @@ from modules.module_07_rl.llm_simulator import (
     run_simulation,
     validate_append_provenance,
 )
-from modules.module_07_rl.dataset_split import split_by_resume_jd_group
+from modules.module_07_rl.ollama_client import BoundedOllamaClient
+from modules.module_07_rl.dataset_split import (
+    connected_identity_components,
+    split_by_resume_jd_group,
+)
 from modules.module_08_llm.generator import (
     LLMQuestionGenerator,
     normalize_ollama_keep_alive,
@@ -113,6 +117,7 @@ def test_sweep_pairs_produce_three_leakage_safe_splits():
         [Path(f"jd-{index}.pdf") for index in range(12)],
         max_episodes=300,
         seed=42,
+        component_targets=(1, 1, 1),
     )
     transitions = [
         {
@@ -140,6 +145,26 @@ def test_sweep_pairs_produce_three_leakage_safe_splits():
         assert identities["validation"].isdisjoint(identities["test"])
 
 
+def test_production_pair_plan_builds_32_independent_identity_components():
+    pairs = build_split_safe_sweep_pairs(
+        [Path(f"resume-{index}.pdf") for index in range(40)],
+        [Path(f"jd-{index}.pdf") for index in range(40)],
+        max_episodes=600,
+        seed=42,
+    )
+    transitions = [
+        {
+            "episode_id": f"episode-{index}",
+            "resume_file": resume,
+            "jd_file": jd,
+            "done": True,
+        }
+        for index, (resume, jd) in enumerate(pairs)
+    ]
+    assert len(pairs) == 600
+    assert len(connected_identity_components(transitions)) == 32
+
+
 @pytest.mark.parametrize("total", range(3, 101))
 def test_three_way_counts_are_nonempty_and_exact(total):
     counts = _three_way_counts(total)
@@ -155,6 +180,7 @@ def test_split_pair_planning_remains_identity_disjoint(seed, max_episodes):
         [Path(f"jd-{index}.pdf") for index in range(10)],
         max_episodes=max_episodes,
         seed=seed,
+        component_targets=(1, 1, 1),
     )
     transitions = [
         {
@@ -199,7 +225,8 @@ def test_append_uses_unused_documents_as_new_identity_components():
     original_resumes = [Path(f"resume-{index}.pdf") for index in range(6)]
     original_jds = [Path(f"jd-{index}.pdf") for index in range(9)]
     original_pairs = build_split_safe_sweep_pairs(
-        original_resumes, original_jds, max_episodes=30, seed=42
+        original_resumes, original_jds, max_episodes=30, seed=42,
+        component_targets=(1, 1, 1),
     )
     existing = [
         {
@@ -215,7 +242,8 @@ def test_append_uses_unused_documents_as_new_identity_components():
     all_resumes = original_resumes + [Path(f"new-resume-{index}.pdf") for index in range(3)]
     all_jds = original_jds + [Path(f"new-jd-{index}.pdf") for index in range(3)]
     appended, mode = build_append_sweep_pairs(
-        existing, all_resumes, all_jds, max_episodes=30, seed=43
+        existing, all_resumes, all_jds, max_episodes=30, seed=43,
+        component_targets=(1, 1, 1),
     )
     assert mode == "new_identity_components"
     assert len(appended) == 30
@@ -227,7 +255,8 @@ def test_append_fallback_does_not_cross_existing_identity_partitions():
     resumes = [Path(f"resume-{index}.pdf") for index in range(6)]
     jds = [Path(f"jd-{index}.pdf") for index in range(9)]
     original_pairs = build_split_safe_sweep_pairs(
-        resumes, jds, max_episodes=30, seed=42
+        resumes, jds, max_episodes=30, seed=42,
+        component_targets=(1, 1, 1),
     )
     existing = [
         {
@@ -239,7 +268,8 @@ def test_append_fallback_does_not_cross_existing_identity_partitions():
         for index, (resume, jd) in enumerate(original_pairs)
     ]
     appended, mode = build_append_sweep_pairs(
-        existing, resumes, jds, max_episodes=30, seed=43
+        existing, resumes, jds, max_episodes=30, seed=43,
+        component_targets=(1, 1, 1),
     )
     assert mode == "existing_identity_partitions"
     combined = existing + [
@@ -322,6 +352,93 @@ def test_direct_ollama_request_sends_context_and_keep_alive_settings():
     assert captured["payload"]["keep_alive"] == -1
     assert captured["payload"]["options"]["num_ctx"] == 4096
     assert captured["payload"]["stream"] is False
+
+
+def test_shared_ollama_client_enforces_per_model_request_limit():
+    active = 0
+    maximum_active = 0
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": "ok"}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def post(self, *args, **kwargs):
+            nonlocal active, maximum_active
+            active += 1
+            maximum_active = max(maximum_active, active)
+            await asyncio.sleep(0.005)
+            active -= 1
+            return Response()
+
+        async def aclose(self):
+            return None
+
+    async def exercise():
+        with patch("modules.module_07_rl.ollama_client.httpx.AsyncClient", Client):
+            client = BoundedOllamaClient(
+                "http://localhost:11434", {"candidate": 2}
+            )
+            await asyncio.gather(*(
+                client.generate({"model": "candidate", "prompt": str(index)})
+                for index in range(8)
+            ))
+            await client.aclose()
+
+    asyncio.run(exercise())
+    assert maximum_active == 2
+
+
+def test_shared_ollama_client_never_overlaps_distinct_model_phases():
+    active_models = {}
+    overlap_detected = False
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": "ok"}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def post(self, *args, **kwargs):
+            nonlocal overlap_detected
+            model = kwargs["json"]["model"]
+            active_models[model] = active_models.get(model, 0) + 1
+            overlap_detected = overlap_detected or len(active_models) > 1
+            await asyncio.sleep(0.005)
+            active_models[model] -= 1
+            if active_models[model] == 0:
+                del active_models[model]
+            return Response()
+
+        async def aclose(self):
+            return None
+
+    async def exercise():
+        with patch("modules.module_07_rl.ollama_client.httpx.AsyncClient", Client):
+            client = BoundedOllamaClient(
+                "http://localhost:11434", {"candidate": 3, "evaluator": 2}
+            )
+            await asyncio.gather(*(
+                client.generate({"model": model, "prompt": str(index)})
+                for index, model in enumerate(
+                    ["candidate", "evaluator", "candidate", "evaluator"] * 2
+                )
+            ))
+            await client.aclose()
+
+    asyncio.run(exercise())
+    assert overlap_detected is False
 
 
 def test_question_generator_request_sends_context_and_keep_alive_settings():
@@ -461,6 +578,7 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
             sweep=True,
             max_episodes=3,
             max_concurrent=2,
+            identity_component_targets=(1, 1, 1),
             seed=43,
             dataset_file=dataset_file,
             append=True,
@@ -487,6 +605,7 @@ def test_plain_sweep_refuses_to_overwrite_existing_dataset(tmp_path):
         asyncio.run(run_simulation(
             sweep=True,
             max_episodes=3,
+            identity_component_targets=(1, 1, 1),
             dataset_file=dataset_file,
             check_ollama_capacity=False,
         ))
@@ -521,6 +640,7 @@ def test_episode_exception_is_isolated_and_other_results_are_checkpointed(tmp_pa
             sweep=True,
             max_episodes=3,
             max_concurrent=2,
+            identity_component_targets=(1, 1, 1),
             dataset_file=dataset_file,
             append=True,
             check_ollama_capacity=False,
@@ -557,6 +677,7 @@ def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
                 sweep=True,
                 max_episodes=3,
                 max_concurrent=2,
+                identity_component_targets=(1, 1, 1),
                 dataset_file=dataset_file,
                 append=True,
                 check_ollama_capacity=False,
@@ -594,6 +715,7 @@ def test_run_never_exceeds_requested_episode_concurrency(tmp_path):
             sweep=True,
             max_episodes=6,
             max_concurrent=2,
+            identity_component_targets=(1, 1, 1),
             dataset_file=dataset_file,
             check_ollama_capacity=False,
         ))

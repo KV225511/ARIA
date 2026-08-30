@@ -10,8 +10,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from modules.module_05_ontology.graph import SkillOntologyGraph
 from modules.module_06_belief.belief_config import BeliefModelConfig
 from modules.module_06_belief.belief_state import BeliefStateUpdater
-from modules.module_07_rl.rl_spec import RL_ACTION_SPACE, REWARD_COEFFICIENTS, TERMINATION_ENTROPY_THRESHOLD
-from modules.module_07_rl.reward_model import compute_step_reward
+from modules.module_07_rl.rl_spec import RL_ACTION_SPACE
+from modules.module_07_rl.reward_model import compute_step_reward, compute_stop_reward
 from modules.module_07_rl.state_builder import STATE_DIM, build_action_mask, build_policy_state
 
 MAX_NODES = 50
@@ -61,7 +61,7 @@ class ARIAInterviewEnv(gym.Env):
         self.consecutive_turns_on_node = 0
         self.last_target_skill = None
         self.previous_evidence = {}
-        self.stable_assessment_turns = 0
+        self.valid_evidence_count = 0
         return self._get_obs(), {}
         
     def _get_obs(self):
@@ -72,6 +72,7 @@ class ARIAInterviewEnv(gym.Env):
             turn_id=self.turn_id,
             current_skill=current_skill,
             consecutive_focus_turns=self.consecutive_turns_on_node,
+            valid_evidence_count=self.valid_evidence_count,
             previous=self.previous_evidence,
         )
         
@@ -130,13 +131,10 @@ class ARIAInterviewEnv(gym.Env):
             max(MIN_SKILLS_COVERED, self.belief_config.minimum_skill_coverage),
             self.num_nodes,
         )
-        assessment = self.belief_updater.get_aggregate_assessment()
         return (
             self.turn_id >= MIN_INTERVIEW_TURNS
             and len(self.belief_updater.get_visited_skills()) >= required_coverage
-            and assessment["effective_evidence"]
-            >= self.belief_config.minimum_effective_evidence
-            and assessment["status"] == "classified"
+            and self.valid_evidence_count >= 5
         )
 
     def get_action_mask(self):
@@ -150,6 +148,9 @@ class ARIAInterviewEnv(gym.Env):
         # In a real setup, this triggers the LLM to ask a question, and waits for candidate signals.
         # Here, we mock the candidate signals based on the action taken.
         
+        if action_name == "conclude_interview":
+            return self.step_with_scores(action_idx, None, None, None)
+
         semantic_score = np.random.uniform(0.3, 0.9)
         behavior_score = np.random.uniform(0.3, 0.9)
         cog_load = np.random.choice(['low', 'anxiety', 'ignorance'])
@@ -173,8 +174,44 @@ class ARIAInterviewEnv(gym.Env):
         question_fingerprint=None,
         incongruence_score=None,
     ):
-        self.turn_id += 1
+        if not isinstance(action_idx, (int, np.integer)) or not 0 <= int(action_idx) < len(RL_ACTION_SPACE):
+            raise ValueError(f"Invalid action index: {action_idx}")
+        action_idx = int(action_idx)
         action_name = RL_ACTION_SPACE[action_idx]
+        action_mask_before = self.get_action_mask().tolist()
+
+        # Stop is a decision, not a question. It must never create evidence,
+        # mutate beliefs, select a skill, or consume an interview turn.
+        if action_name == "conclude_interview":
+            conclusion_allowed = self.can_conclude()
+            assessment = self.belief_updater.get_aggregate_assessment()
+            return self._get_obs(), compute_stop_reward(not conclusion_allowed), bool(
+                conclusion_allowed
+            ), False, {
+                "info_gain": 0.0,
+                "action": action_name,
+                "target_skill": None,
+                "conclusion_allowed": conclusion_allowed,
+                "conclude_blocked": not conclusion_allowed,
+                "skills_covered": len(assessment["visited_skills"]),
+                "valid_evidence_count": self.valid_evidence_count,
+                "aggregate_belief": assessment["belief"].tolist(),
+                "aggregate_label": assessment["label"],
+                "aggregate_raw_label": assessment["raw_label"],
+                "aggregate_confidence": assessment["confidence"],
+                "effective_evidence": assessment["effective_evidence"],
+                "assessment_status": assessment["status"],
+                "termination_reason": (
+                    "explicit_conclusion" if conclusion_allowed else None
+                ),
+                "action_mask_before": action_mask_before,
+                "action_mask": self.get_action_mask().tolist(),
+            }
+
+        if semantic_score is None or behavior_score is None or cog_load is None:
+            raise ValueError("Question actions require complete evaluator scores")
+
+        self.turn_id += 1
         target_skill = target_skill or self.select_target_skill(action_idx)
         if target_skill not in self.belief_updater.beliefs:
             raise ValueError(f"Unknown target skill: {target_skill}")
@@ -195,43 +232,25 @@ class ARIAInterviewEnv(gym.Env):
             modality_confidence=modality_confidence,
             question_fingerprint=question_fingerprint,
         )
+        self.valid_evidence_count += 1
         new_target_entropy = self.belief_updater._calculate_entropy(
             self.belief_updater.get_belief(target_skill)
         )
         new_ess = self.belief_updater.get_effective_sample_size(target_skill)
         effective_increment = max(new_ess - old_ess, 0.0)
         info_gain = max(0.0, old_target_entropy - new_target_entropy) * effective_increment
-        conclusion_allowed = self.can_conclude()
-        invalid_action = action_name == "conclude_interview" and not conclusion_allowed
         reward = compute_step_reward(
             info_gain,
             first_skill_visit=old_count == 0,
             previous_skill_count=old_count,
             cognitive_load=cog_load,
-            invalid_action=invalid_action,
+            invalid_action=False,
         )
 
         assessment = self.belief_updater.get_aggregate_assessment()
-        assessment_entropy = self.belief_updater.get_assessment_entropy()
-        stable = (
-            assessment["status"] == "classified"
-            and assessment["confidence"] >= max(
-                self.belief_config.minimum_assessment_confidence, 0.80
-            )
-            and assessment_entropy < TERMINATION_ENTROPY_THRESHOLD
-        )
-        self.stable_assessment_turns = self.stable_assessment_turns + 1 if stable else 0
-        terminated = conclusion_allowed and (
-            action_name == "conclude_interview" or self.stable_assessment_turns >= 2
-        )
+        conclusion_allowed = self.can_conclude()
+        terminated = False
         termination_reason = None
-        if terminated:
-            termination_reason = (
-                "explicit_conclusion"
-                if action_name == "conclude_interview"
-                else "stable_confidence"
-            )
-            
         truncated = False
         if self.turn_id >= MAX_TURNS: # Hard limit
             truncated = True
@@ -265,6 +284,7 @@ class ARIAInterviewEnv(gym.Env):
             "conclusion_allowed": conclusion_allowed,
             "conclude_blocked": action_name == "conclude_interview" and not conclusion_allowed,
             "skills_covered": len(assessment["visited_skills"]),
+            "valid_evidence_count": self.valid_evidence_count,
             "aggregate_belief": assessment["belief"].tolist(),
             "aggregate_label": assessment["label"],
             "aggregate_raw_label": assessment["raw_label"],
@@ -272,6 +292,7 @@ class ARIAInterviewEnv(gym.Env):
             "effective_evidence": assessment["effective_evidence"],
             "assessment_status": assessment["status"],
             "termination_reason": termination_reason,
+            "action_mask_before": action_mask_before,
             "action_mask": self.get_action_mask().tolist(),
         }
 

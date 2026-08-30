@@ -31,6 +31,12 @@ from modules.module_07_rl.state_builder import (
     STATE_FEATURE_NAMES,
     STATE_SCHEMA_VERSION,
 )
+from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
+from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import (
+    REQUIRED_POLICY_FIELDS,
+    TRANSITION_SCHEMA_VERSION,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -38,7 +44,7 @@ DEFAULT_DERIVED_DIR = PROJECT_ROOT / "data" / "synthetic" / "derived"
 DEFAULT_TRAIN_FILE = DEFAULT_DERIVED_DIR / "splits" / "train.json"
 DEFAULT_VALIDATION_FILE = DEFAULT_DERIVED_DIR / "splits" / "validation.json"
 DEFAULT_CONFIG_FILE = DEFAULT_DERIVED_DIR / "belief_model_v2.json"
-DEFAULT_CHECKPOINT = Path(__file__).with_name("aria_iql_belief_v2.pth")
+DEFAULT_CHECKPOINT = Path(__file__).with_name("aria_iql_belief_v3.pth")
 
 
 class IQLNetworks(nn.Module):
@@ -91,7 +97,8 @@ def validate_replayed_dataset(dataset, config, expected_split):
     required = {
         "obs", "next_obs", "action_idx", "reward", "done",
         "state_schema_version", "state_feature_names", "belief_config_hash",
-        "dataset_split",
+        "dataset_split", "transition_schema_version", "action_schema_version",
+        "reward_schema_version", *REQUIRED_POLICY_FIELDS,
     }
     for index, transition in enumerate(dataset):
         missing = required - transition.keys()
@@ -99,6 +106,12 @@ def validate_replayed_dataset(dataset, config, expected_split):
             raise ValueError(f"Transition {index} is missing {sorted(missing)}")
         if transition["state_schema_version"] != STATE_SCHEMA_VERSION:
             raise ValueError(f"Transition {index} uses an incompatible state schema")
+        if transition["transition_schema_version"] != TRANSITION_SCHEMA_VERSION:
+            raise ValueError(f"Transition {index} uses an incompatible transition schema")
+        if transition["action_schema_version"] != ACTION_SCHEMA_VERSION:
+            raise ValueError(f"Transition {index} uses an incompatible action schema")
+        if transition["reward_schema_version"] != REWARD_SCHEMA_VERSION:
+            raise ValueError(f"Transition {index} uses an incompatible reward schema")
         if tuple(transition["state_feature_names"]) != STATE_FEATURE_NAMES:
             raise ValueError(f"Transition {index} uses incompatible state feature semantics")
         if transition["belief_config_hash"] != config.config_hash:
@@ -112,6 +125,36 @@ def validate_replayed_dataset(dataset, config, expected_split):
         action_idx = transition["action_idx"]
         if not isinstance(action_idx, int) or not 0 <= action_idx < len(RL_ACTION_SPACE):
             raise ValueError(f"Transition {index} has invalid action_idx")
+        action_mask = np.asarray(transition["action_mask_before"], dtype=float)
+        behavior_probs = np.asarray(transition["behavior_action_probs"], dtype=float)
+        expected_shape = (len(RL_ACTION_SPACE),)
+        if action_mask.shape != expected_shape or not np.all(
+            np.isin(action_mask, (0.0, 1.0))
+        ):
+            raise ValueError(f"Transition {index} has an invalid pre-action mask")
+        if action_mask[action_idx] != 1.0:
+            raise ValueError(f"Transition {index} selected an action masked as illegal")
+        if behavior_probs.shape != expected_shape or not np.all(
+            np.isfinite(behavior_probs)
+        ) or np.any(behavior_probs < 0.0) or not np.isclose(behavior_probs.sum(), 1.0):
+            raise ValueError(f"Transition {index} has invalid behavior propensities")
+        selected_probability = float(transition["behavior_action_probability"])
+        if selected_probability <= 0.0 or not np.isclose(
+            selected_probability, behavior_probs[action_idx]
+        ):
+            raise ValueError(f"Transition {index} has inconsistent selected propensity")
+        expected_kind = "stop" if action_idx == RL_ACTION_SPACE.index(
+            "conclude_interview"
+        ) else "question"
+        if transition["transition_kind"] != expected_kind:
+            raise ValueError(f"Transition {index} has inconsistent transition_kind")
+        if expected_kind == "stop":
+            if not transition["done"]:
+                raise ValueError(f"Transition {index} contains a non-terminal legal stop")
+            if transition.get("semantic_score") is not None:
+                raise ValueError(f"Transition {index} stop action contains synthetic evidence")
+            if not np.allclose(transition["obs"], transition["next_obs"]):
+                raise ValueError(f"Transition {index} stop action mutates policy state")
         reward = float(transition["reward"])
         if not math.isfinite(reward):
             raise ValueError(f"Transition {index} has non-finite reward")
@@ -326,7 +369,7 @@ def train_iql_policy(
             best_epoch = epoch + 1
             epochs_without_improvement = 0
             checkpoint = {
-                "checkpoint_schema_version": "aria-iql-checkpoint-v2",
+                "checkpoint_schema_version": "aria-iql-checkpoint-v3",
                 "model_state_dict": nets.state_dict(),
                 "state_schema_version": STATE_SCHEMA_VERSION,
                 "state_feature_names": list(STATE_FEATURE_NAMES),
@@ -376,8 +419,9 @@ def train_iql_policy(
         "validation_belief_report": build_belief_report(validation_source),
         "evaluates_learned_policy": False,
         "policy_evaluation_limitation": (
-            "Fixed offline trajectories cannot evaluate counterfactual IQL actions "
-            "without fresh rollouts or logged behavior propensities."
+            "The v3 corpus logs propensities for offline policy evaluation, but "
+            "this training command does not run OPE; final release still requires "
+            "fresh learned-policy rollouts."
         ),
     }
     print(json.dumps(result, indent=2))
