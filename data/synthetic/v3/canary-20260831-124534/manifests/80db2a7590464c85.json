@@ -1,0 +1,156 @@
+{
+  "generation_run_id": "80db2a7590464c85",
+  "status": "complete",
+  "generation_started_at": "2026-08-31T08:05:14.425732+00:00",
+  "source_dataset_hash": "new-corpus",
+  "simulation_seed": 42,
+  "start_episode_index": 0,
+  "planned_episodes": 24,
+  "identity_component_targets": [
+    4,
+    2,
+    2
+  ],
+  "planned_document_pairs": [
+    {
+      "resume_file": "resume_0035.pdf",
+      "jd_file": "Job Description for Campus.pdf"
+    },
+    {
+      "resume_file": "resume_0603.pdf",
+      "jd_file": "Intern - Software Engineering.pdf"
+    },
+    {
+      "resume_file": "resume_1655.pdf",
+      "jd_file": "AD_26M_20-_20JD_20.pdf"
+    },
+    {
+      "resume_file": "resume_0184.pdf",
+      "jd_file": "Job Description for Campus.pdf"
+    },
+    {
+      "resume_file": "resume_1506.pdf",
+      "jd_file": "Job Description for Campus.pdf"
+    },
+    {
+      "resume_file": "resume_2523.pdf",
+      "jd_file": "Gartner_Campus JD_Intern - IT (LAUNCH) - Rotational Development Program 2025-26  - Internship (Chennai).pdf"
+    },
+    {
+      "resume_file": "resume_1958.pdf",
+      "jd_file": "Gartner_Campus JD_Intern - IT (LAUNCH) - Rotational Development Program 2025-26  - Internship (Chennai).pdf"
+    },
+    {
+      "resume_file": "resume_0702.pdf",
+      "jd_file": "JD_PE_DVP.pdf"
+    },
+    {
+      "resume_file": "resume_0252.pdf",
+      "jd_file": "Intern - Aladdin Data.pdf"
+    },
+    {
+      "resume_file": "resume_1789.pdf",
+      "jd_file": "Job Description Electrical Engineering  (1) (1).pdf"
+    },
+    {
+      "resume_file": "resume_1887.pdf",
+      "jd_file": "Cyber Security Engineering - JD.pdf"
+    },
+    {
+      "resume_file": "resume_2898.pdf",
+      "jd_file": "Job Description Electrical Engineering  (1) (1).pdf"
+    },
+    {
+      "resume_file": "resume_2256.pdf",
+      "jd_file": "Linux Driver Intern JD.pdf"
+    },
+    {
+      "resume_file": "resume_1912.pdf",
+      "jd_file": "Talview Software Developer Internship.pdf"
+    },
+    {
+      "resume_file": "resume_2328.pdf",
+      "jd_file": "CSG - Undergraduate Intern.pdf"
+    },
+    {
+      "resume_file": "resume_1457.pdf",
+      "jd_file": "Python C# .Net - JD.pdf"
+    },
+    {
+      "resume_file": "resume_2404.pdf",
+      "jd_file": "Talview Software Developer Internship.pdf"
+    },
+    {
+      "resume_file": "resume_0704.pdf",
+      "jd_file": "JD - JAVA ST (June 2026) (1).pdf"
+    },
+    {
+      "resume_file": "resume_0760.pdf",
+      "jd_file": "MBD.pdf"
+    },
+    {
+      "resume_file": "resume_0684.pdf",
+      "jd_file": "Embedded_Software_Intern_JD.pdf"
+    },
+    {
+      "resume_file": "resume_1351.pdf",
+      "jd_file": "Motor - DVP.pdf"
+    },
+    {
+      "resume_file": "resume_0586.pdf",
+      "jd_file": "Job Description - AI Engineer.pdf"
+    },
+    {
+      "resume_file": "resume_0837.pdf",
+      "jd_file": "Powertrain.pdf"
+    },
+    {
+      "resume_file": "resume_2923.pdf",
+      "jd_file": "Hardware Design - General.pdf"
+    }
+  ],
+  "persona_schedule": [
+    "BEGINNER",
+    "MID",
+    "EXPERT",
+    "BEGINNER",
+    "MID",
+    "EXPERT",
+    "BEGINNER",
+    "MID",
+    "EXPERT",
+    "BEGINNER",
+    "MID",
+    "EXPERT",
+    "BEGINNER",
+    "MID",
+    "EXPERT",
+    "BEGINNER",
+    "MID",
+    "EXPERT",
+    "BEGINNER",
+    "MID",
+    "EXPERT",
+    "BEGINNER",
+    "MID",
+    "EXPERT"
+  ],
+  "candidate_model": "qwen2.5:7b",
+  "evaluator_model": "gemma3:4b",
+  "generator_schema_version": "aria-simulator-v3",
+  "transition_schema_version": "aria-transition-v3",
+  "state_schema_version": "aria-state-v3",
+  "action_schema_version": "aria-action-v3",
+  "reward_schema_version": "aria-reward-v3",
+  "ollama_host": "http://localhost:11434",
+  "ollama_num_ctx": 4096,
+  "ollama_keep_alive": 0,
+  "episode_worker_concurrency": 2,
+  "candidate_request_concurrency": 1,
+  "evaluator_request_concurrency": 1,
+  "single_model_residency": true,
+  "completed_episodes": 24,
+  "failed_episodes": {},
+  "combined_transition_count": 330,
+  "generation_finished_at": "2026-08-31T09:50:04.874077+00:00"
+}

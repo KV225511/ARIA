@@ -16,7 +16,7 @@ from pathlib import Path
 
 # Adjust imports to local module structure
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_SKILLS_COVERED
+from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_SKILLS_COVERED, MIN_INTERVIEW_TURNS
 from modules.module_08_llm.generator import (
     LLMQuestionGenerator,
     normalize_ollama_keep_alive,

@@ -1,0 +1,84 @@
+{
+  "gate": "raw_evidence",
+  "num_transitions": 330,
+  "num_episodes": 24,
+  "independent_identity_components": 1,
+  "terminal_true_label_counts": {
+    "0": 8,
+    "1": 8,
+    "2": 8
+  },
+  "semantic_scores_by_class": {
+    "0": {
+      "count": 108,
+      "mean": 0.19305555555555556,
+      "std": 0.14945244712154193,
+      "min": 0.0,
+      "max": 0.6
+    },
+    "1": {
+      "count": 105,
+      "mean": 0.5461904761904762,
+      "std": 0.16193697158598439,
+      "min": 0.4,
+      "max": 0.95
+    },
+    "2": {
+      "count": 93,
+      "mean": 0.8446236559139784,
+      "std": 0.06369549771879518,
+      "min": 0.7,
+      "max": 0.95
+    }
+  },
+  "adjacent_standardized_effects": {
+    "0_vs_1": 2.2663033394723047,
+    "1_vs_2": 2.4253764401138844
+  },
+  "invalid_evaluations": 0,
+  "missing_evaluation_validity": 0,
+  "invalid_semantic_scores": 0,
+  "missing_semantic_scores": 0,
+  "split_leaking_resumes": [],
+  "split_leaking_jds": [],
+  "renamed_duplicate_resumes": {
+    "6d4a15652ddb2c3205291327873fdf70719f7fbd0d12513c48138fb4f44cdad2": [
+      "resume_0035.pdf",
+      "resume_0184.pdf",
+      "resume_0252.pdf",
+      "resume_0586.pdf",
+      "resume_0603.pdf",
+      "resume_0684.pdf",
+      "resume_0702.pdf",
+      "resume_0704.pdf",
+      "resume_0760.pdf",
+      "resume_0837.pdf",
+      "resume_1351.pdf",
+      "resume_1457.pdf",
+      "resume_1506.pdf",
+      "resume_1655.pdf",
+      "resume_1789.pdf",
+      "resume_1887.pdf",
+      "resume_1912.pdf",
+      "resume_1958.pdf",
+      "resume_2256.pdf",
+      "resume_2328.pdf",
+      "resume_2404.pdf",
+      "resume_2523.pdf",
+      "resume_2898.pdf",
+      "resume_2923.pdf"
+    ]
+  },
+  "renamed_duplicate_jds": {},
+  "candidate_models": [
+    "qwen2.5:7b"
+  ],
+  "evaluator_models": [
+    "gemma3:4b"
+  ],
+  "warnings": [
+    "Dataset has 1 independent identity components; at least 3 are required.",
+    "Renamed duplicate resume or JD documents were detected by content hash."
+  ],
+  "passes_quality_gates": false
+}

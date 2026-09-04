@@ -5,6 +5,8 @@ import pytest
 from modules.module_06_belief.belief_config import BeliefModelConfig
 from modules.module_07_rl.evaluate_locked_test import evaluate_locked_test
 from modules.module_07_rl.replay_dataset import replay_dataset
+from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
 
 
 def _raw_dataset():
@@ -17,6 +19,7 @@ def _raw_dataset():
                 "resume_file": f"resume-{index}.pdf",
                 "jd_file": f"jd-{index}.pdf",
                 "true_label": label,
+                "aria_label": 1,
                 "target_skill": "Python",
                 "semantic_score": (0.1, 0.5, 0.9)[label],
                 "behavior_score": 0.5,
@@ -24,9 +27,15 @@ def _raw_dataset():
                 "evaluator_confidence": 1.0,
                 "evaluation_valid": True,
                 "action_idx": 3,
+                "action": [0, 0, 0, 1, 0, 0, 0, 0],
                 "reward": -0.1,
                 "done": turn == 1,
                 "question": f"Question {turn}",
+                "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+                "action_schema_version": ACTION_SCHEMA_VERSION,
+                "action_mask_before": [1.0] * 7 + [0.0],
+                "behavior_action_probs": [1.0 / 7.0] * 7 + [0.0],
+                "behavior_action_probability": 1.0 / 7.0,
             })
     return transitions
 
