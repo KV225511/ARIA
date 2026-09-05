@@ -20,6 +20,7 @@ from modules.module_07_rl.llm_simulator import (
     validate_append_provenance,
 )
 from modules.module_07_rl.ollama_client import BoundedOllamaClient
+from modules.module_07_rl.data_loader import ResumeDocument
 from modules.module_07_rl.dataset_split import (
     connected_identity_components,
     split_by_resume_jd_group,
@@ -583,6 +584,7 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
             dataset_file=dataset_file,
             append=True,
             check_ollama_capacity=False,
+            resume_source="pdf",
         ))
 
     assert len(combined) == 6
@@ -608,6 +610,7 @@ def test_plain_sweep_refuses_to_overwrite_existing_dataset(tmp_path):
             identity_component_targets=(1, 1, 1),
             dataset_file=dataset_file,
             check_ollama_capacity=False,
+            resume_source="pdf",
         ))
 
     assert dataset_file.read_bytes() == original_bytes
@@ -644,6 +647,7 @@ def test_episode_exception_is_isolated_and_other_results_are_checkpointed(tmp_pa
             dataset_file=dataset_file,
             append=True,
             check_ollama_capacity=False,
+            resume_source="pdf",
         ))
 
     assert len(combined) == 5
@@ -681,6 +685,7 @@ def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
                 dataset_file=dataset_file,
                 append=True,
                 check_ollama_capacity=False,
+                resume_source="pdf",
             ))
 
     assert dataset_file.read_bytes() == original_bytes
@@ -718,6 +723,109 @@ def test_run_never_exceeds_requested_episode_concurrency(tmp_path):
             identity_component_targets=(1, 1, 1),
             dataset_file=dataset_file,
             check_ollama_capacity=False,
+            resume_source="pdf",
         ))
 
     assert maximum_active == 2
+
+
+def test_csv_sweep_records_resume_source_manifest(tmp_path):
+    dataset_file = tmp_path / "dataset.json"
+    resumes = [
+        ResumeDocument(
+            source_id=f"opensporks:{index}",
+            prompt_text="technical resume\n--- END OF DOCUMENT ---",
+            content_hash=f"resume-hash-{index}",
+            category="ENGINEERING",
+            source_type="opensporks_csv",
+            source_file_hash="csv-hash",
+        )
+        for index in range(3)
+    ]
+    jds = [Path(f"jd-{index}.pdf") for index in range(3)]
+
+    async def fake_episode(ep, pair, total_eps, semaphore, **kwargs):
+        assert kwargs["resume_source"] == "csv"
+        assert kwargs["resume_categories"] == ("ENGINEERING",)
+        return [_terminal(ep, pair)]
+
+    with (
+        patch(
+            "modules.module_07_rl.llm_simulator.get_valid_jd_documents",
+            return_value=(jds, {
+                "pdf_files": 3,
+                "filename_excluded_files": [],
+                "unreadable_files": [],
+                "duplicate_content_groups": [],
+                "unique_readable_content_hashes": 3,
+            }),
+        ),
+        patch("modules.module_07_rl.llm_simulator.get_resume_documents", return_value=resumes),
+        patch(
+            "modules.module_07_rl.llm_simulator.get_resume_source_manifest",
+            return_value={
+                "source_type": "opensporks_csv",
+                "source_file_hash": "csv-hash",
+                "selected_categories": ["ENGINEERING"],
+                "selected_resume_count": 3,
+                "unique_content_hashes": 3,
+            },
+        ),
+        patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fake_episode),
+    ):
+        combined = asyncio.run(run_simulation(
+            sweep=True,
+            max_episodes=3,
+            max_concurrent=2,
+            identity_component_targets=(1, 1, 1),
+            dataset_file=dataset_file,
+            replace_existing=True,
+            check_ollama_capacity=False,
+            resume_source="csv",
+            resume_csv_path=tmp_path / "clean.csv",
+            resume_categories=("ENGINEERING",),
+        ))
+
+    assert len(combined) == 3
+    manifest_path = next((tmp_path / "manifests").glob("*.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["resume_source"]["source_type"] == "opensporks_csv"
+    assert manifest["resume_source"]["source_file_hash"] == "csv-hash"
+    assert all(
+        item["resume_file"].startswith("opensporks:")
+        for item in manifest["planned_document_pairs"]
+    )
+
+
+def test_csv_append_requires_matching_source_hash():
+    existing = [{
+        "candidate_model": "qwen2.5:7b",
+        "evaluator_model": "gemma3:4b",
+        "resume_source_type": "opensporks_csv",
+        "resume_source_file_hash": "old-hash",
+    }]
+
+    with pytest.raises(ValueError, match="CSV hash differs"):
+        validate_append_provenance(
+            existing,
+            "qwen2.5:7b",
+            "gemma3:4b",
+            resume_source_type="opensporks_csv",
+            resume_source_file_hash="new-hash",
+        )
+
+
+def test_csv_append_rejects_missing_source_provenance():
+    existing = [{
+        "candidate_model": "qwen2.5:7b",
+        "evaluator_model": "gemma3:4b",
+    }]
+
+    with pytest.raises(ValueError, match="lack cleaned-CSV source provenance"):
+        validate_append_provenance(
+            existing,
+            "qwen2.5:7b",
+            "gemma3:4b",
+            resume_source_type="opensporks_csv",
+            resume_source_file_hash="new-hash",
+        )

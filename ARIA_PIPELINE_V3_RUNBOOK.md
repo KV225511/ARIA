@@ -8,8 +8,13 @@ belief-model experiments only; it must not be used to train the v3 policy.
 
 ## Required inputs
 
-- At least 32 independently sourced resumes and 32 independently sourced job
-  descriptions for the default `20/6/6` train/validation/test component plan.
+- The cleaned OpenSporks resume source at
+  `data/external/opensporks/Resume/Resume.cleaned.csv`. It must contain unique
+  `Resume_text_hash` values and bounded `Resume_prompt` values.
+- At least 32 independently sourced, valid job descriptions for the default
+  `20/6/6` train/validation/test component plan. The current filename
+  exclusion policy is applied before this count; generation fails closed if
+  fewer than 32 remain.
 - Ollama with distinct candidate and evaluator models installed.
 - Enough disk space for the raw corpus, immutable manifests, derived replay,
   checkpoints, and reports.
@@ -17,12 +22,38 @@ belief-model experiments only; it must not be used to train the v3 policy.
 
 ## 1. Generate raw v3 evidence
 
+Run the input preflight before contacting Ollama:
+
+```powershell
+python -m modules.module_07_rl.generation_preflight --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --identity-components 20 6 6 --output data/synthetic/v3/reports/input_preflight.json
+```
+
+Do not start generation unless `passes_preflight` is true. The preflight
+validates cleaned-resume hashes, selected categories, extractable JD text,
+duplicate JD content, and the unique-document counts required by the component
+plan.
+
+Before the production run, use a three-component canary:
+
+```powershell
+python -m modules.module_07_rl.generation_preflight --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --identity-components 1 1 1 --output data/synthetic/v3/reports/input_preflight_canary.json
+python -m modules.module_07_rl.llm_simulator --sweep --max_episodes 3 --max_concurrent 3 --candidate-request-concurrency 3 --evaluator-request-concurrency 2 --identity-components 1 1 1 --seed 42 --resume-source csv --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --replace-existing --dataset-file data/synthetic/v3/canary/qwen_rl_dataset.json
+```
+
+Audit the canary structurally before scaling. Canary metrics are diagnostic and
+do not satisfy the production episode-count or held-out evaluation gates.
+
 Run the simulator with an explicit replacement path for a new corpus. The
 production target is 600 episodes and 32 independent identity components.
 
 ```powershell
-python -m modules.module_07_rl.llm_simulator --sweep --max_episodes 600 --max_concurrent 4 --candidate-request-concurrency 3 --evaluator-request-concurrency 2 --identity-components 20 6 6 --seed 42 --replace-existing --dataset-file data/synthetic/v3/qwen_rl_dataset.json
+python -m modules.module_07_rl.llm_simulator --sweep --max_episodes 600 --max_concurrent 4 --candidate-request-concurrency 3 --evaluator-request-concurrency 2 --identity-components 20 6 6 --seed 42 --resume-source csv --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --replace-existing --dataset-file data/synthetic/v3/qwen_rl_dataset.json
 ```
+
+CSV generation uses `Resume_prompt` for the model context and
+`Resume_text_hash` for leakage-safe identity grouping. The generation manifest
+records the cleaned CSV hash, selected categories, selected row count, and
+unique content-hash count. `Resume_html` is never loaded into model prompts.
 
 The episode-worker limit controls document/environment work. The two request
 limits control actual Ollama calls. The shared client permits parallel calls

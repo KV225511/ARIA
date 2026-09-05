@@ -1,0 +1,45 @@
+{
+  "schema_version": "aria-generation-preflight-v1",
+  "required_identity_components": 3,
+  "identity_component_targets": [
+    1,
+    1,
+    1
+  ],
+  "resume_source": {
+    "source_type": "opensporks_csv",
+    "source_file": "data/external/opensporks/Resume/Resume.cleaned.csv",
+    "source_file_hash": "6f6782a90e9ffc52a407575a904282d9104c9c625e38c31a58ccd03fb14dd169",
+    "selected_categories": [
+      "ENGINEERING",
+      "INFORMATION-TECHNOLOGY"
+    ],
+    "selected_resume_count": 238,
+    "unique_content_hashes": 238
+  },
+  "job_descriptions": {
+    "pdf_files": 32,
+    "filename_excluded_files": [
+      "Internship (Mechanical).pdf",
+      "JD - Assistant Manager (NEEV) (1).pdf",
+      "JD - Technical Sales and Application Specialist - Fresher - Biotechnology (1).pdf",
+      "JD - Technical Sales and Service Engineer - Freshers(0-1 year) Biomedical.pdf",
+      "Job Description BDA (2).pdf",
+      "Linux Driver Intern JD.pdf"
+    ],
+    "unreadable_files": [],
+    "duplicate_content_groups": [],
+    "unique_readable_content_hashes": 26
+  },
+  "shortfall": {
+    "unique_resumes": 0,
+    "unique_readable_jds": 0
+  },
+  "checks": {
+    "enough_unique_resumes": true,
+    "enough_unique_readable_jds": true,
+    "no_duplicate_jd_content": true,
+    "no_unreadable_selected_jds": true
+  },
+  "passes_preflight": true
+}

@@ -22,8 +22,19 @@ from modules.module_08_llm.generator import (
     normalize_ollama_keep_alive,
 )
 from modules.module_07_rl.data_loader import (
-    get_random_pair, get_all_pdfs, RESUMES_DIR, JDS_DIR,
-    get_specific_pair, is_valid_resume, is_valid_jd
+    DEFAULT_CLEANED_RESUME_CSV,
+    DEFAULT_RESUME_CATEGORIES,
+    JDS_DIR,
+    RESUMES_DIR,
+    ResumeDocument,
+    get_all_pdfs,
+    get_resume_documents,
+    get_resume_source_manifest,
+    get_valid_jd_documents,
+    is_valid_resume,
+    is_valid_jd,
+    load_random_pair,
+    load_specific_pair,
 )
 from modules.module_07_rl.rl_spec import RL_ACTION_SPACE
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
@@ -257,7 +268,7 @@ def _three_way_counts(total: int, ratios=DATASET_SPLIT_RATIOS) -> list[int]:
 
 
 def build_split_safe_sweep_pairs(
-    resumes: list[Path],
+    resumes: list[Path | ResumeDocument],
     jds: list[Path],
     max_episodes: int,
     seed: int,
@@ -401,6 +412,8 @@ def validate_append_provenance(
     candidate_model: str,
     evaluator_model: str,
     allow_model_mix: bool = False,
+    resume_source_type: str | None = None,
+    resume_source_file_hash: str | None = None,
 ) -> None:
     if candidate_model == evaluator_model:
         raise ValueError("Candidate and evaluator models must remain distinct")
@@ -425,6 +438,34 @@ def validate_append_provenance(
             f"candidate={candidate_model}, evaluator={evaluator_model}. "
             "Use --allow-model-mix only after accepting distribution-shift risk."
         )
+    if transitions and resume_source_type == "opensporks_csv":
+        missing_source_metadata = sum(
+            not item.get("resume_source_type") or not item.get("resume_source_file_hash")
+            for item in transitions
+        )
+        if missing_source_metadata:
+            raise ValueError(
+                "Existing transitions lack cleaned-CSV source provenance; "
+                "append is not permitted"
+            )
+        existing_source_types = {
+            str(item["resume_source_type"]) for item in transitions
+        }
+        existing_source_hashes = {
+            str(item["resume_source_file_hash"]) for item in transitions
+        }
+        if existing_source_types != {resume_source_type}:
+            raise ValueError(
+                "Append resume source type differs from the existing corpus: "
+                f"existing={sorted(existing_source_types)}, requested={resume_source_type}"
+            )
+        if (
+            resume_source_file_hash
+            and existing_source_hashes != {resume_source_file_hash}
+        ):
+            raise ValueError(
+                "Append cleaned resume CSV hash differs from the existing corpus"
+            )
 
 
 def _partition_extra_paths(paths: list[Path], seed: int) -> dict[str, list[Path]]:
@@ -438,7 +479,7 @@ def _partition_extra_paths(paths: list[Path], seed: int) -> dict[str, list[Path]
 
 def build_append_sweep_pairs(
     existing_transitions: list[dict],
-    resumes: list[Path],
+    resumes: list[Path | ResumeDocument],
     jds: list[Path],
     max_episodes: int,
     seed: int,
@@ -640,14 +681,31 @@ async def simulate_episode(
     generation_run_id: str = "",
     generation_started_at: str = "",
     ollama_client: BoundedOllamaClient | None = None,
+    resume_source: str = "csv",
+    resume_csv_path: str | Path = DEFAULT_CLEANED_RESUME_CSV,
+    resume_categories: tuple[str, ...] | list[str] | None = DEFAULT_RESUME_CATEGORIES,
 ) -> list:
     """Simulates a single episode, isolated to its own environment to avoid state conflicts."""
     async with semaphore:
         if pair is not None:
             resume_name, jd_name = pair
-            resume_text, jd_text, _, _ = get_specific_pair(resume_name, jd_name)
+            loaded_pair = load_specific_pair(
+                resume_name,
+                jd_name,
+                resume_source=resume_source,
+                resume_csv_path=resume_csv_path,
+                resume_categories=resume_categories,
+            )
         else:
-            resume_text, jd_text, resume_name, jd_name = get_random_pair()
+            loaded_pair = load_random_pair(
+                resume_source=resume_source,
+                resume_csv_path=resume_csv_path,
+                resume_categories=resume_categories,
+            )
+        resume_text = loaded_pair.resume_text
+        jd_text = loaded_pair.jd_text
+        resume_name = loaded_pair.resume_id
+        jd_name = loaded_pair.jd_id
             
         display_number = display_number if display_number is not None else ep + 1
         print(
@@ -676,8 +734,9 @@ async def simulate_episode(
             raise ValueError(f"Unknown persona tier: {persona_tier}")
         rng = random.Random(seed + ep)
         system_prompt = build_candidate_system_prompt(persona_tier, resume_text)
-        resume_content_hash = _sha256_text(resume_text)
-        jd_content_hash = _sha256_text(jd_text)
+        resume_content_hash = loaded_pair.resume_content_hash
+        jd_content_hash = loaded_pair.jd_content_hash
+        resume_prompt_hash = loaded_pair.resume_prompt_hash
         candidate_system_prompt_hash = _sha256_text(system_prompt)
         print(f"  Persona: {persona_tier}")
         
@@ -732,6 +791,10 @@ async def simulate_episode(
                     "jd_file": jd_name,
                     "resume_content_hash": resume_content_hash,
                     "jd_content_hash": jd_content_hash,
+                    "resume_prompt_hash": resume_prompt_hash,
+                    "resume_source_type": loaded_pair.resume_source_type,
+                    "resume_category": loaded_pair.resume_category,
+                    "resume_source_file_hash": loaded_pair.resume_source_file_hash,
                     "true_label": episode_true_label,
                     "aria_label": aria_label,
                     "aggregate_belief": assessment["belief"].tolist(),
@@ -885,6 +948,10 @@ async def simulate_episode(
                 "jd_file": jd_name,
                 "resume_content_hash": resume_content_hash,
                 "jd_content_hash": jd_content_hash,
+                "resume_prompt_hash": resume_prompt_hash,
+                "resume_source_type": loaded_pair.resume_source_type,
+                "resume_category": loaded_pair.resume_category,
+                "resume_source_file_hash": loaded_pair.resume_source_file_hash,
                 "true_label": true_label,
                 "aria_label": aria_label,
                 "aggregate_belief": assessment["belief"].tolist(),
@@ -943,6 +1010,9 @@ async def run_simulation(
     allow_model_mix: bool = False,
     gpu_vram_gb: float = 8.0,
     check_ollama_capacity: bool = True,
+    resume_source: str = "csv",
+    resume_csv_path: str | Path = DEFAULT_CLEANED_RESUME_CSV,
+    resume_categories: tuple[str, ...] | list[str] | None = DEFAULT_RESUME_CATEGORIES,
 ):
     dataset_path = Path(dataset_file)
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
@@ -952,8 +1022,23 @@ async def run_simulation(
         raise ValueError("Ollama request concurrency limits must be positive")
     if append and replace_existing:
         raise ValueError("Choose --append or --replace-existing, not both")
+    if resume_source not in {"pdf", "csv"}:
+        raise ValueError("resume_source must be 'pdf' or 'csv'")
     if CANDIDATE_MODEL == EVALUATOR_MODEL:
         raise ValueError("Candidate and evaluator models must remain distinct")
+    if resume_source == "csv":
+        resume_manifest = get_resume_source_manifest(
+            resume_source,
+            resume_csv_path,
+            resume_categories,
+        )
+    else:
+        resume_manifest = {
+            "source_type": "pdf_directory",
+            "source_directory": str(RESUMES_DIR.resolve()),
+            "selected_categories": None,
+            "source_file_hash": None,
+        }
     if check_ollama_capacity:
         capacity = await report_ollama_capacity(gpu_vram_gb)
         if not capacity["full_dual_gpu_residency_feasible"]:
@@ -977,6 +1062,8 @@ async def run_simulation(
             CANDIDATE_MODEL,
             EVALUATOR_MODEL,
             allow_model_mix=allow_model_mix,
+            resume_source_type=resume_manifest["source_type"],
+            resume_source_file_hash=resume_manifest.get("source_file_hash"),
         )
         backup = _backup_before_append(dataset_path)
         if backup:
@@ -987,6 +1074,8 @@ async def run_simulation(
             CANDIDATE_MODEL,
             EVALUATOR_MODEL,
             allow_model_mix=allow_model_mix,
+            resume_source_type=resume_manifest["source_type"],
+            resume_source_file_hash=resume_manifest.get("source_file_hash"),
         )
         backup = _backup_before_append(dataset_path)
         if backup:
@@ -998,15 +1087,29 @@ async def run_simulation(
     )
             
     if sweep:
-        all_jds = get_all_pdfs(JDS_DIR)
-        all_resumes = get_all_pdfs(RESUMES_DIR)
+        if resume_source == "csv":
+            jds, jd_manifest = get_valid_jd_documents(JDS_DIR)
+            resumes = get_resume_documents(
+                resume_source,
+                resume_csv_path,
+                resume_categories,
+            )
+        else:
+            all_jds = get_all_pdfs(JDS_DIR)
+            jds = [j for j in all_jds if is_valid_jd(j)]
+            jd_manifest = {
+                "pdf_files": len(all_jds),
+                "unique_readable_content_hashes": None,
+            }
+            all_resumes = get_all_pdfs(RESUMES_DIR)
+            resumes = [path for path in all_resumes if is_valid_resume(path)]
+            resume_manifest["selected_resume_count"] = len(resumes)
+            resume_manifest["unique_content_hashes"] = None
 
-        # Apply the same blocklists as get_random_pair()
-        jds = [j for j in all_jds if is_valid_jd(j)]
-        resumes = [r for r in all_resumes if is_valid_resume(r)]
-
-        print(f"Sweep pool: {len(resumes)} valid resumes x {len(jds)} valid JDs "
-              f"(filtered from {len(all_resumes)} resumes / {len(all_jds)} JDs)")
+        print(
+            f"Sweep pool: {len(resumes)} valid {resume_source} resumes x "
+            f"{len(jds)} valid JDs (filtered from {jd_manifest['pdf_files']} JDs)"
+        )
 
         if append and existing:
             episodes_to_run, append_mode = build_append_sweep_pairs(
@@ -1066,9 +1169,24 @@ async def run_simulation(
         if dataset_path.exists() and existing else "new-corpus"
     )
     generation_started_at = datetime.now(timezone.utc).isoformat()
+    planned_pairs_hash = _sha256_text(json.dumps(
+        episodes_to_run,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ))
+    document_sources_hash = _sha256_text(json.dumps(
+        {
+            "resume_source": resume_manifest,
+            "job_description_source": jd_manifest if sweep else None,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ))
     run_material = (
         f"{source_hash}|{seed}|{start_index}|{total_eps}|"
-        f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}"
+        f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}|"
+        f"{document_sources_hash}|{planned_pairs_hash}"
     )
     generation_run_id = hashlib.sha256(run_material.encode("utf-8")).hexdigest()[:16]
     manifest_path = dataset_path.parent / "manifests" / f"{generation_run_id}.json"
@@ -1080,6 +1198,8 @@ async def run_simulation(
         "simulation_seed": seed,
         "start_episode_index": start_index,
         "planned_episodes": total_eps,
+        "planned_pairs_hash": planned_pairs_hash,
+        "document_sources_hash": document_sources_hash,
         "identity_component_targets": list(identity_component_targets),
         "planned_document_pairs": [
             None if pair is None else {"resume_file": pair[0], "jd_file": pair[1]}
@@ -1103,6 +1223,8 @@ async def run_simulation(
         "candidate_request_concurrency": candidate_request_concurrency,
         "evaluator_request_concurrency": evaluator_request_concurrency,
         "single_model_residency": True,
+        "resume_source": resume_manifest,
+        "job_description_source": jd_manifest if sweep else None,
     }
     _atomic_json_write(manifest_path, run_manifest)
     print(
@@ -1124,6 +1246,9 @@ async def run_simulation(
                 generation_run_id=generation_run_id,
                 generation_started_at=generation_started_at,
                 ollama_client=ollama_client,
+                resume_source=resume_source,
+                resume_csv_path=resume_csv_path,
+                resume_categories=resume_categories,
             )
             return order, transitions, None
         except Exception as error:
@@ -1223,6 +1348,23 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42, help="Simulation seed")
     parser.add_argument("--dataset-file", default=str(DATASET_FILE))
     parser.add_argument(
+        "--resume-source",
+        choices=("csv", "pdf"),
+        default="csv",
+        help="Resume input source; CLI generation defaults to the cleaned CSV",
+    )
+    parser.add_argument(
+        "--resume-csv",
+        default=str(DEFAULT_CLEANED_RESUME_CSV),
+        help="Path to the cleaned resume CSV when --resume-source=csv",
+    )
+    parser.add_argument(
+        "--resume-categories",
+        nargs="+",
+        default=list(DEFAULT_RESUME_CATEGORIES),
+        help="Allowed cleaned-CSV resume categories",
+    )
+    parser.add_argument(
         "--append",
         action="store_true",
         help="Append max_episodes new episodes with backup and atomic checkpoints",
@@ -1252,6 +1394,9 @@ if __name__ == "__main__":
             allow_model_mix=args.allow_model_mix,
             gpu_vram_gb=args.gpu_vram_gb,
             check_ollama_capacity=not args.skip_ollama_capacity_check,
+            resume_source=args.resume_source,
+            resume_csv_path=args.resume_csv,
+            resume_categories=tuple(args.resume_categories),
         ))
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
         parser.exit(1, f"[ERROR] {error}\n")
