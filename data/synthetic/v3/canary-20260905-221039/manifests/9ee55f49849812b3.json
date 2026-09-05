@@ -1,0 +1,76 @@
+{
+  "generation_run_id": "9ee55f49849812b3",
+  "status": "running",
+  "generation_started_at": "2026-09-05T16:40:59.823735+00:00",
+  "source_dataset_hash": "new-corpus",
+  "simulation_seed": 42,
+  "start_episode_index": 0,
+  "planned_episodes": 3,
+  "planned_pairs_hash": "cb797d4060523774204ea240e204fb90fbb664701d7d43d63830a48508607cf4",
+  "document_sources_hash": "8fcae37ed81b67980d8dca67fc91ff9e8b980ebdb6eed50cb07f8ec1b671b352",
+  "identity_component_targets": [
+    1,
+    1,
+    1
+  ],
+  "planned_document_pairs": [
+    {
+      "resume_file": "opensporks:25797445",
+      "jd_file": "JD_PE_DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:35172961",
+      "jd_file": "JD_Battery DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:40018190",
+      "jd_file": "JD - Intern - Quality & Engineering - Zetwerk Electronics (1).pdf"
+    }
+  ],
+  "persona_schedule": [
+    "BEGINNER",
+    "MID",
+    "EXPERT"
+  ],
+  "candidate_model": "qwen2.5:7b",
+  "evaluator_model": "gemma3:4b",
+  "generator_schema_version": "aria-simulator-v3",
+  "transition_schema_version": "aria-transition-v3",
+  "state_schema_version": "aria-state-v3",
+  "action_schema_version": "aria-action-v3",
+  "reward_schema_version": "aria-reward-v3",
+  "ollama_host": "http://localhost:11434",
+  "ollama_num_ctx": 4096,
+  "ollama_keep_alive": 0,
+  "episode_worker_concurrency": 3,
+  "candidate_request_concurrency": 3,
+  "evaluator_request_concurrency": 2,
+  "single_model_residency": true,
+  "resume_source": {
+    "source_type": "opensporks_csv",
+    "source_file": "data/external/opensporks/Resume/Resume.cleaned.csv",
+    "source_file_hash": "f5845c5cd65d8b5814bf61aaf45ab97c804a191cc5333aedf6b41970c2d12720",
+    "selected_categories": [
+      "ENGINEERING",
+      "INFORMATION-TECHNOLOGY"
+    ],
+    "selected_resume_count": 238,
+    "unique_content_hashes": 238
+  },
+  "job_description_source": {
+    "pdf_files": 39,
+    "filename_excluded_files": [
+      "AMVI_Foods_Food_Technologist_JD.pdf",
+      "Internship (Mechanical).pdf",
+      "JD - Assistant Manager (NEEV) (1).pdf",
+      "JD - Technical Sales and Application Specialist - Fresher - Biotechnology (1).pdf",
+      "JD - Technical Sales and Service Engineer - Freshers(0-1 year) Biomedical.pdf",
+      "Job Description BDA (2).pdf",
+      "Job Description_Biomedical - eInfochips (An Arrow Company) 2027.pdf",
+      "Linux Driver Intern JD.pdf"
+    ],
+    "unreadable_files": [],
+    "duplicate_content_groups": [],
+    "unique_readable_content_hashes": 31
+  }
+}

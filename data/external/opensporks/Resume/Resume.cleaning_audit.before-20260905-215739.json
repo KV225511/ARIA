@@ -1,0 +1,79 @@
+{
+  "schema_version": "aria-resume-cleaning-v1",
+  "source_file": "Resume.csv",
+  "source_sha256": "6ff8e30d7a54c36d12d9a2e75d87e9af38f0e41c8f6b0a3df9d497c88682172a",
+  "output_file": "Resume.cleaned.csv",
+  "output_sha256": "6f6782a90e9ffc52a407575a904282d9104c9c625e38c31a58ccd03fb14dd169",
+  "source_rows": 2484,
+  "retained_rows": 2475,
+  "excluded_rows": 9,
+  "exclusions": {
+    "blank_or_short": 1,
+    "duplicate_normalized_text": 2,
+    "encoding_replacement_character": 6
+  },
+  "contact_redaction": {
+    "email_rows": 19,
+    "email_matches": 36,
+    "phone_rows": 68,
+    "phone_matches": 158
+  },
+  "instruction_review": {
+    "rows_reviewed": 2,
+    "decision": "retained_as_benign_employment_language"
+  },
+  "prompt_limiting": {
+    "character_limit": 8000,
+    "truncated_rows": 340,
+    "maximum_output_prompt_characters": 7999
+  },
+  "category_counts": {
+    "ACCOUNTANT": 117,
+    "ADVOCATE": 117,
+    "AGRICULTURE": 63,
+    "APPAREL": 97,
+    "ARTS": 103,
+    "AUTOMOBILE": 36,
+    "AVIATION": 116,
+    "BANKING": 115,
+    "BPO": 22,
+    "BUSINESS-DEVELOPMENT": 119,
+    "CHEF": 118,
+    "CONSTRUCTION": 112,
+    "CONSULTANT": 115,
+    "DESIGNER": 107,
+    "DIGITAL-MEDIA": 96,
+    "ENGINEERING": 118,
+    "FINANCE": 116,
+    "FITNESS": 117,
+    "HEALTHCARE": 115,
+    "HR": 109,
+    "INFORMATION-TECHNOLOGY": 120,
+    "PUBLIC-RELATIONS": 110,
+    "SALES": 115,
+    "TEACHER": 102
+  },
+  "output_columns": [
+    "ID",
+    "Resume_str",
+    "Resume_prompt",
+    "Category",
+    "Resume_text_hash",
+    "Prompt_truncated",
+    "Original_character_count",
+    "Clean_character_count",
+    "Prompt_character_count",
+    "Email_redactions",
+    "Phone_redactions"
+  ],
+  "assertions": {
+    "all_ids_present": true,
+    "all_text_at_least_minimum_length": true,
+    "all_text_hashes_unique": true,
+    "no_replacement_characters": true,
+    "no_email_patterns": true,
+    "no_phone_patterns": true,
+    "all_prompts_within_limit": true
+  },
+  "passes_all_assertions": true
+}

@@ -9,7 +9,7 @@
   "resume_source": {
     "source_type": "opensporks_csv",
     "source_file": "data/external/opensporks/Resume/Resume.cleaned.csv",
-    "source_file_hash": "6f6782a90e9ffc52a407575a904282d9104c9c625e38c31a58ccd03fb14dd169",
+    "source_file_hash": "f5845c5cd65d8b5814bf61aaf45ab97c804a191cc5333aedf6b41970c2d12720",
     "selected_categories": [
       "ENGINEERING",
       "INFORMATION-TECHNOLOGY"
@@ -18,18 +18,20 @@
     "unique_content_hashes": 238
   },
   "job_descriptions": {
-    "pdf_files": 32,
+    "pdf_files": 39,
     "filename_excluded_files": [
+      "AMVI_Foods_Food_Technologist_JD.pdf",
       "Internship (Mechanical).pdf",
       "JD - Assistant Manager (NEEV) (1).pdf",
       "JD - Technical Sales and Application Specialist - Fresher - Biotechnology (1).pdf",
       "JD - Technical Sales and Service Engineer - Freshers(0-1 year) Biomedical.pdf",
       "Job Description BDA (2).pdf",
+      "Job Description_Biomedical - eInfochips (An Arrow Company) 2027.pdf",
       "Linux Driver Intern JD.pdf"
     ],
     "unreadable_files": [],
     "duplicate_content_groups": [],
-    "unique_readable_content_hashes": 26
+    "unique_readable_content_hashes": 31
   },
   "shortfall": {
     "unique_resumes": 0,
