@@ -1,5 +1,10 @@
 # ARIA Dataset Generation and Training Runbook
 
+> **Superseded:** Do not execute this legacy v2 workflow. Use
+> [`ARIA_V3_OPERATOR_RUNBOOK.md`](ARIA_V3_OPERATOR_RUNBOOK.md), which is aligned
+> with the cleaned CSV resume source, current v3 gates, and Krissh's repository
+> path.
+
 This runbook restores the clean 200-episode corpus, verifies the Ollama fix,
 appends 300 valid episodes using `qwen2.5:7b` and `gemma3:4b`, calibrates the
 belief model, trains IQL, and evaluates the locked test split.
