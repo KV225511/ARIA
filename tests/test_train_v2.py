@@ -20,6 +20,12 @@ from modules.module_07_rl.transition_schema import (
     GENERATOR_SCHEMA_VERSION,
     TRANSITION_SCHEMA_VERSION,
 )
+from modules.module_05_ontology.grounding import (
+    GROUNDING_POLICY_VERSION,
+    GROUNDING_SCHEMA_VERSION,
+    ROLE_PROFILE_SCHEMA_VERSION,
+    grounding_contract_hash,
+)
 
 
 def _transition(index, split):
@@ -54,12 +60,21 @@ def _transition(index, split):
         "reward_schema_version": REWARD_SCHEMA_VERSION,
         "transition_kind": "stop" if is_stop else "question",
         "role_profile_hash": "profile-hash",
-        "role_profile_schema_version": "aria-role-profile-v1",
-        "grounding_contract_hash": "grounding-contract-hash",
+        "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
+        "grounding_contract_hash": grounding_contract_hash(),
         "ontology_hash": "ontology-hash",
         "target_skill_id": None if is_stop else "python",
-        "question_grounding_schema_version": "aria-question-grounding-v1",
+        "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
         "question_grounding_valid": None if is_stop else True,
+        "question_grounding": None if is_stop else {
+            "schema_version": GROUNDING_SCHEMA_VERSION,
+            "grounding_policy_version": GROUNDING_POLICY_VERSION,
+            "target_skill_id": "python",
+            "role_profile_hash": "profile-hash",
+            "decision": "accept",
+            "valid": True,
+            "reasons": [],
+        },
         "question_generation_attempts": None if is_stop else 1,
         "llm_question_generation_attempts": None if is_stop else 1,
         "deterministic_question_generation_attempts": None if is_stop else 0,
