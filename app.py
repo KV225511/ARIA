@@ -17,6 +17,7 @@ from modules.module_07_rl.environment import ARIAInterviewEnv
 from modules.module_08_llm.generator import LLMQuestionGenerator
 from modules.module_05_ontology.grounding import (
     grounding_packet,
+    normalize_generated_question,
     validate_grounded_question,
 )
 from modules.module_09_tts.engine import TTSAvatarBaseline
@@ -150,7 +151,7 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
     rejected: list[list[str]] = []
     for _ in range(3):
         correction = "; ".join(rejected[-1]) if rejected else None
-        question = await llm_gen.generate_question(
+        raw_question = await llm_gen.generate_question(
             action=action,
             belief_state=belief,
             resume=session["resume"],
@@ -161,6 +162,7 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
             grounding_context=context,
             correction=correction,
         )
+        question = normalize_generated_question(raw_question)
         result = validate_grounded_question(question, context, session["history"])
         if result["valid"]:
             session["current_target"] = target

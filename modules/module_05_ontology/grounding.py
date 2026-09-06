@@ -12,6 +12,7 @@ import unicodedata
 
 ROLE_PROFILE_SCHEMA_VERSION = "aria-role-profile-v1"
 GROUNDING_SCHEMA_VERSION = "aria-question-grounding-v1"
+GROUNDING_POLICY_VERSION = "aria-grounding-policy-v2"
 MIN_GROUNDED_SKILLS = 5
 
 
@@ -147,6 +148,7 @@ def grounding_contract_hash() -> str:
     payload = {
         "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
         "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
+        "grounding_policy_version": GROUNDING_POLICY_VERSION,
         "minimum_grounded_skills": MIN_GROUNDED_SKILLS,
         "catalog": [asdict(item) for item in _CATALOG],
     }
@@ -310,11 +312,13 @@ def validate_role_profile(profile: RoleProfile, jd_text: str) -> None:
 def grounding_packet(profile: RoleProfile, target: GroundedSkill) -> dict:
     return {
         "schema_version": GROUNDING_SCHEMA_VERSION,
+        "grounding_policy_version": GROUNDING_POLICY_VERSION,
         "role_title": profile.role_title,
         "role_domain": profile.role_domain,
         "role_profile_hash": profile.profile_hash,
         "target_skill_id": target.skill_id,
         "target_skill": target.canonical_name,
+        "target_aliases": list(target.aliases),
         "target_definition": target.definition,
         "target_priority": target.priority,
         "support_type": target.support_type,
@@ -342,26 +346,140 @@ def build_pairing_record(profile: RoleProfile) -> dict:
     }
 
 
+def normalize_generated_question(value: str) -> str:
+    """Remove presentation-only wrappers without repairing semantic defects."""
+    text = (value or "").strip()
+    fenced = re.fullmatch(
+        r"```(?:text|markdown)?\s*(.*?)\s*```",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if fenced:
+        text = fenced.group(1).strip()
+
+    quote_pairs = (("\"", "\""), ("'", "'"), ("“", "”"), ("‘", "’"))
+    for opening, closing in quote_pairs:
+        if len(text) >= 2 and text.startswith(opening) and text.endswith(closing):
+            text = text[len(opening):-len(closing)].strip()
+            break
+
+    text = re.sub(
+        r"^(?:interview\s+)?question\s*:\s*",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+    for opening, closing in quote_pairs:
+        if len(text) >= 2 and text.startswith(opening) and text.endswith(closing):
+            text = text[len(opening):-len(closing)].strip()
+            break
+    return " ".join(text.split())
+
+
+_QUESTION_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[+#.][A-Za-z0-9+#.]*)*")
+_SUPPORT_STOP_WORDS = {
+    "and", "application", "approach", "behaviour", "behavior", "context",
+    "creation", "data", "design", "development", "execution", "for", "from",
+    "handling", "implementation", "into", "model", "monitoring", "operations",
+    "performance", "planning", "process", "runtime", "selection", "system",
+    "technical", "testing", "that", "the", "this", "through", "use", "using",
+    "validation", "with", "work",
+}
+_REQUEST_VERBS = (
+    "analyze", "compare", "define", "describe", "design", "diagnose", "discuss",
+    "evaluate", "explain", "identify", "outline", "show", "walk me through",
+)
+
+
+def _token_form(token: str) -> str:
+    """Apply conservative inflection folding without conflating technical terms."""
+    value = token.casefold().rstrip(".")
+    if len(value) > 4 and value.endswith("ies"):
+        return value[:-3] + "y"
+    if len(value) > 4 and value.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return value[:-2]
+    if len(value) > 3 and value.endswith("s") and not value.endswith("ss"):
+        return value[:-1]
+    return value
+
+
+def _support_tokens(values: list[str] | tuple[str, ...]) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        for match in _QUESTION_TOKEN_PATTERN.finditer(str(value)):
+            raw = match.group(0)
+            folded = _token_form(raw)
+            is_short_technical = (
+                any(character.isdigit() for character in raw)
+                or any(character in "+#." for character in raw)
+                or raw == "C"
+            )
+            if (
+                folded not in _SUPPORT_STOP_WORDS
+                and (len(folded) >= 3 or is_short_technical)
+            ):
+                tokens.add(folded)
+    return tokens
+
+
+def _interrogative_reasons(question: str) -> list[str]:
+    if not question:
+        return ["question must be a non-empty interrogative"]
+    question_marks = question.count("?")
+    if question_marks > 1:
+        return ["question must contain exactly one assessment request"]
+    if question_marks == 1:
+        if question.rstrip().endswith("?"):
+            return []
+        return ["question contains trailing text after the interrogative"]
+
+    lowered = question.casefold().strip()
+    request_pattern = (
+        r"^(?:(?:given|consider|assuming|suppose)\b.{0,300},\s*)?"
+        r"(?:please\s+)?(?:"
+        + "|".join(re.escape(verb) for verb in _REQUEST_VERBS)
+        + r")\b"
+    )
+    # Imperative assessment prompts such as "Given this failure, describe ..."
+    # are valid interview questions even when a local model ends them with a period.
+    if re.search(request_pattern, lowered):
+        return []
+    return ["question must be a non-empty interrogative"]
+
+
+def _is_contextual_skill(target_skill_id: str, other: SkillDefinition) -> bool:
+    target = _CATALOG_BY_ID.get(target_skill_id)
+    if target is None or target.domain != other.domain:
+        return False
+    target_links = {target.skill_id, *target.prerequisites}
+    other_links = {other.skill_id, *other.prerequisites}
+    return bool(target_links & other_links)
+
+
 def validate_grounded_question(question: str, packet: dict, history: list[dict]) -> dict:
     normalized = " ".join((question or "").split())
-    reasons: list[str] = []
-    if not normalized or not normalized.endswith("?"):
-        reasons.append("question must be a non-empty interrogative")
+    reasons = _interrogative_reasons(normalized)
     if len(normalized) > 500:
         reasons.append("question exceeds 500 characters")
     prior = {" ".join(str(item.get("q", "")).casefold().split()) for item in history}
     if normalized.casefold() in prior:
         reasons.append("question duplicates accepted history")
 
-    target_terms = [packet.get("target_skill", ""), *packet.get("jd_evidence", [])]
-    tokens = {
-        token for value in target_terms
-        for token in re.findall(r"[a-z0-9+#.]+", str(value).casefold())
-        if len(token) >= 3 and token not in {"and", "the", "with", "using", "testing"}
-    }
-    question_tokens = set(re.findall(r"[a-z0-9+#.]+", normalized.casefold()))
+    target_terms = [
+        packet.get("target_skill", ""),
+        *packet.get("target_aliases", []),
+        packet.get("target_definition", ""),
+        *packet.get("jd_evidence", []),
+    ]
+    tokens = _support_tokens(target_terms)
+    question_tokens = _support_tokens([normalized])
     overlap = sorted(tokens & question_tokens)
-    if not overlap:
+    target_aliases = [packet.get("target_skill", ""), *packet.get("target_aliases", [])]
+    target_mentioned = any(
+        alias and _pattern(str(alias)).search(normalized) for alias in target_aliases
+    )
+    if not target_mentioned and len(overlap) < 2:
         reasons.append("question has no lexical support from the target or JD evidence")
 
     allowed_skill_ids = set(packet.get("allowed_skill_ids", ()))
@@ -370,15 +488,22 @@ def validate_grounded_question(question: str, packet: dict, history: list[dict])
         "test and validation", "component selection", "design improvements",
     }
     off_profile_skills = []
+    contextual_skills = []
+    target_skill_id = str(packet.get("target_skill_id", ""))
     for definition in _CATALOG:
         if definition.skill_id in allowed_skill_ids:
             continue
         aliases = (definition.canonical_name, *definition.aliases)
-        if any(
+        mentioned = any(
             alias.casefold() not in generic_aliases
             and _pattern(alias).search(normalized)
             for alias in aliases
-        ):
+        )
+        if not mentioned:
+            continue
+        if target_mentioned and _is_contextual_skill(target_skill_id, definition):
+            contextual_skills.append(definition.skill_id)
+        else:
             off_profile_skills.append(definition.skill_id)
     if off_profile_skills:
         reasons.append(
@@ -397,9 +522,11 @@ def validate_grounded_question(question: str, packet: dict, history: list[dict])
 
     return {
         "schema_version": GROUNDING_SCHEMA_VERSION,
+        "grounding_policy_version": GROUNDING_POLICY_VERSION,
         "decision": "accept" if not reasons else "reject",
         "valid": not reasons,
         "reasons": reasons,
         "supporting_terms": overlap,
         "off_profile_skill_ids": sorted(set(off_profile_skills)),
+        "contextual_skill_ids": sorted(set(contextual_skills)),
     }

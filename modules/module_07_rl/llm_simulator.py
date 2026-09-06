@@ -50,6 +50,7 @@ from modules.module_05_ontology.grounding import (
     build_pairing_record,
     grounding_contract_hash,
     grounding_packet,
+    normalize_generated_question,
     validate_grounded_question,
 )
 from modules.module_07_rl.dataset_split import (
@@ -735,6 +736,7 @@ async def simulate_episode(
     resume_source: str = "csv",
     resume_csv_path: str | Path = DEFAULT_CLEANED_RESUME_CSV,
     resume_categories: tuple[str, ...] | list[str] | None = DEFAULT_RESUME_CATEGORIES,
+    failure_diagnostics: dict[int, dict] | None = None,
 ) -> list:
     """Simulates a single episode, isolated to its own environment to avoid state conflicts."""
     async with semaphore:
@@ -807,6 +809,22 @@ async def simulate_episode(
         resume_prompt_hash = loaded_pair.resume_prompt_hash
         candidate_system_prompt_hash = _sha256_text(system_prompt)
         print(f"  Persona: {persona_tier}")
+        episode_diagnostic = {
+            "episode_id": f"episode_{ep}",
+            "display_number": display_number,
+            "resume_file": resume_name,
+            "jd_file": jd_name,
+            "persona_tier": persona_tier,
+            "role_profile_hash": role_profile.profile_hash,
+            "role_profile": role_profile.to_dict(),
+            "pairing_record": pairing_record,
+            "ontology_hash": ontology_hash,
+            "ontology_nodes": ontology_nodes,
+            "rejected_question_attempts": [],
+            "status": "running",
+        }
+        if failure_diagnostics is not None:
+            failure_diagnostics[ep] = episode_diagnostic
         
 
         history = []
@@ -945,7 +963,7 @@ async def simulate_episode(
                     correction=correction,
                 )
                 question_prompt_hash = _sha256_text(question_prompt)
-                question = await interviewer.generate_question(
+                raw_question = await interviewer.generate_question(
                     action=action_name,
                     belief_state=belief_state,
                     resume=resume_text,
@@ -956,17 +974,48 @@ async def simulate_episode(
                     grounding_context=question_grounding,
                     correction=correction,
                 )
+                question = normalize_generated_question(raw_question)
                 grounding_result = validate_grounded_question(
                     question, question_grounding, history
                 )
                 if grounding_result["valid"]:
                     break
+                episode_diagnostic["rejected_question_attempts"].append({
+                    "turn": env.turn_id,
+                    "action_idx": action_idx,
+                    "action": action_name,
+                    "target_skill": target_skill,
+                    "target_skill_id": target_metadata.skill_id,
+                    "retry_number": question_attempt,
+                    "raw_generated_question": raw_question,
+                    "normalized_question": question,
+                    "validation_reasons": list(grounding_result["reasons"]),
+                    "validation_result": grounding_result,
+                    "question_prompt_hash": question_prompt_hash,
+                })
                 rejected_question_reasons.append(grounding_result["reasons"])
             if not grounding_result or not grounding_result["valid"]:
+                episode_diagnostic.update({
+                    "status": "failed",
+                    "failure_stage": "question_grounding",
+                    "failure_turn": env.turn_id,
+                    "failure_action": action_name,
+                    "failure_target_skill": target_skill,
+                    "failure_target_skill_id": target_metadata.skill_id,
+                    "failure_reason": "question grounding failed after 3 attempts",
+                })
                 print(
                     f"  [ERROR] Episode episode_{ep}: grounding failed for "
                     f"action '{action_name}' after 3 attempts."
                 )
+                for attempt in episode_diagnostic["rejected_question_attempts"][-3:]:
+                    print(
+                        "    "
+                        f"attempt={attempt['retry_number']} "
+                        f"target={attempt['target_skill_id']} "
+                        f"reasons={attempt['validation_reasons']} "
+                        f"raw={attempt['raw_generated_question']!r}"
+                    )
                 return []
             
             # 2. Candidate answers
@@ -985,6 +1034,15 @@ async def simulate_episode(
                     f"({answer_attempt}/3); retrying the same action, target, and question."
                 )
             if not answer or not answer.strip():
+                episode_diagnostic.update({
+                    "status": "failed",
+                    "failure_stage": "candidate_generation",
+                    "failure_turn": env.turn_id,
+                    "failure_action": action_name,
+                    "failure_target_skill": target_skill,
+                    "failure_target_skill_id": target_metadata.skill_id,
+                    "failure_reason": "candidate generation failed after 3 attempts",
+                })
                 print(f"  [ERROR] Episode episode_{ep}: candidate repeatedly failed.")
                 return []
             
@@ -1006,6 +1064,15 @@ async def simulate_episode(
                 grounding_context=question_grounding,
             )
             if not evaluation_valid:
+                episode_diagnostic.update({
+                    "status": "failed",
+                    "failure_stage": "answer_evaluation",
+                    "failure_turn": env.turn_id,
+                    "failure_action": action_name,
+                    "failure_target_skill": target_skill,
+                    "failure_target_skill_id": target_metadata.skill_id,
+                    "failure_reason": "evaluator remained invalid after bounded retries",
+                })
                 print(
                     f"  [ERROR] Episode episode_{ep}: evaluator remained invalid "
                     "after its bounded retries; aborting the transactional episode."
@@ -1119,6 +1186,7 @@ async def simulate_episode(
             f"--- Finished New Episode {display_number}/{total_eps} "
             f"| ID: episode_{ep} | Transitions: {len(episode_transitions)} ---"
         )
+        episode_diagnostic["status"] = "complete"
         return episode_transitions
 
 async def run_simulation(
@@ -1370,6 +1438,8 @@ async def run_simulation(
         f"global IDs episode_{start_index}..episode_{start_index + total_eps - 1}."
     )
 
+    episode_diagnostics: dict[int, dict] = {}
+
     async def run_one(order, pair):
         global_index = start_index + order
         try:
@@ -1388,12 +1458,25 @@ async def run_simulation(
                 resume_source=resume_source,
                 resume_csv_path=resume_csv_path,
                 resume_categories=resume_categories,
+                failure_diagnostics=episode_diagnostics,
             )
             return order, transitions, None
         except Exception as error:
             # A transient Ollama/document failure must not cancel every other
             # episode in a run that may already have consumed many GPU-hours.
             message = f"{type(error).__name__}: {error}"
+            diagnostic = episode_diagnostics.setdefault(global_index, {
+                "episode_id": f"episode_{global_index}",
+                "display_number": order + 1,
+                "resume_file": None if pair is None else pair[0],
+                "jd_file": None if pair is None else pair[1],
+                "rejected_question_attempts": [],
+            })
+            diagnostic.update({
+                "status": "failed",
+                "failure_stage": diagnostic.get("failure_stage", "episode_exception"),
+                "failure_reason": diagnostic.get("failure_reason", message),
+            })
             return order, [], message
 
     tasks = [
@@ -1408,7 +1491,11 @@ async def run_simulation(
         order, episode_transitions, error = await future
         finished_count += 1
         if not episode_transitions:
-            failed[order] = error or "episode returned no valid transitions"
+            global_index = start_index + order
+            diagnostic = episode_diagnostics.get(global_index, {})
+            failed[order] = error or diagnostic.get(
+                "failure_reason", "episode returned no valid transitions"
+            )
             print(
                 f"[WARN] New episode {order + 1} failed and was not appended: "
                 f"{failed[order]}"
@@ -1437,14 +1524,17 @@ async def run_simulation(
         dataset.extend(completed[completed_order])
     all_completed = len(completed) == total_eps and not failed
     pairing_records = []
-    for completed_order in sorted(completed):
-        first = completed[completed_order][0]
-        pairing_records.append({
-            "episode_id": first.get("episode_id"),
-            "resume_file": first.get("resume_file"),
-            "jd_file": first.get("jd_file"),
-            **dict(first.get("pairing_record") or {}),
-        })
+    for global_index in sorted(episode_diagnostics):
+        diagnostic = episode_diagnostics[global_index]
+        pairing_record = diagnostic.get("pairing_record")
+        if pairing_record:
+            pairing_records.append({
+                "episode_id": diagnostic.get("episode_id"),
+                "episode_status": diagnostic.get("status"),
+                "resume_file": diagnostic.get("resume_file"),
+                "jd_file": diagnostic.get("jd_file"),
+                **dict(pairing_record),
+            })
     partial_path = None
     if not all_completed and completed:
         partial_path = (
@@ -1460,6 +1550,10 @@ async def run_simulation(
         "status": "complete" if all_completed else "failed",
         "completed_episodes": len(completed),
         "failed_episodes": {str(order): message for order, message in failed.items()},
+        "failed_episode_diagnostics": {
+            str(order): episode_diagnostics.get(start_index + order, {})
+            for order in sorted(failed)
+        },
         "combined_transition_count": len(dataset),
         "pairing_records": pairing_records,
         "partial_dataset_path": str(partial_path) if partial_path else None,

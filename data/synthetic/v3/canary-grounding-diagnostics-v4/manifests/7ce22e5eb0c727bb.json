@@ -1,0 +1,956 @@
+{
+  "generation_run_id": "7ce22e5eb0c727bb",
+  "plan_id": "0f4a1b7c23ea1ddb",
+  "status": "failed",
+  "generation_started_at": "2026-09-06T08:48:47.991238+00:00",
+  "source_dataset_hash": "new-corpus",
+  "simulation_seed": 42,
+  "start_episode_index": 0,
+  "planned_episodes": 3,
+  "planned_pairs_hash": "fe5b62a1574f259fba59a409c6fdf7ae43f204d1e641c2936d95e731ffd70f18",
+  "document_sources_hash": "3094a651041381fba4cf8cb5e169be12cad57eb363d2573b69712d49197cc99a",
+  "identity_component_targets": [
+    1,
+    1,
+    1
+  ],
+  "planned_document_pairs": [
+    {
+      "resume_file": "opensporks:62071407",
+      "jd_file": "Mechanical Intern \u2013 Design (2D_3D).pdf"
+    },
+    {
+      "resume_file": "opensporks:27756469",
+      "jd_file": "Embedded_Software_Intern_JD.pdf"
+    },
+    {
+      "resume_file": "opensporks:20408458",
+      "jd_file": "Intern - Software Engineering.pdf"
+    }
+  ],
+  "persona_schedule": [
+    "BEGINNER",
+    "MID",
+    "EXPERT"
+  ],
+  "candidate_model": "qwen2.5:7b",
+  "evaluator_model": "gemma3:4b",
+  "generator_schema_version": "aria-simulator-v4",
+  "transition_schema_version": "aria-transition-v4",
+  "state_schema_version": "aria-state-v4",
+  "action_schema_version": "aria-action-v4",
+  "reward_schema_version": "aria-reward-v3",
+  "role_profile_schema_version": "aria-role-profile-v1",
+  "question_grounding_schema_version": "aria-question-grounding-v1",
+  "grounding_contract_hash": "8f8e13dcecd71d7fd4b2ac47fcc88664c350c457a51ffbabbe6af77b2c634cd6",
+  "ollama_host": "http://localhost:11434",
+  "ollama_num_ctx": 4096,
+  "ollama_keep_alive": -1,
+  "episode_worker_concurrency": 1,
+  "candidate_request_concurrency": 3,
+  "evaluator_request_concurrency": 2,
+  "single_model_residency": true,
+  "resume_source": {
+    "source_type": "opensporks_csv",
+    "source_file": "data/external/opensporks/Resume/Resume.cleaned.csv",
+    "source_file_hash": "fff06001ec24c21847adcfe05b3e37e596522e4984d147d215e0b128a216a541",
+    "selected_categories": [
+      "ENGINEERING",
+      "INFORMATION-TECHNOLOGY"
+    ],
+    "selected_resume_count": 238,
+    "unique_content_hashes": 238
+  },
+  "job_description_source": {
+    "pdf_files": 32,
+    "filename_excluded_files": [
+      "Internship (Mechanical).pdf",
+      "JD - Assistant Manager (NEEV) (1).pdf",
+      "JD - Technical Sales and Application Specialist - Fresher - Biotechnology (1).pdf",
+      "JD - Technical Sales and Service Engineer - Freshers(0-1 year) Biomedical.pdf",
+      "Job Description BDA (2).pdf",
+      "Linux Driver Intern JD.pdf"
+    ],
+    "unreadable_files": [],
+    "duplicate_content_groups": [],
+    "unique_readable_content_hashes": 26,
+    "groundable_role_profiles": 17,
+    "ungroundable_role_profiles": [
+      {
+        "file": "AD_26M_20-_20JD_20.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Analytics Data Science - JD.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Cyber Security Engineering - JD.pdf",
+        "reason": "JD yields 2 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Data Pipeline - Software.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Gartner_Campus JD_Intern - IT (LAUNCH) - Rotational Development Program 2025-26  - Internship (Chennai).pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD_BTSA_2026.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD_DAA_2026.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Motor - DVP.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Python Javascript - JD.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      }
+    ],
+    "grounded_skill_counts": {
+      "Battery - Design and testing intern.pdf": 13,
+      "CSG - Undergraduate Intern.pdf": 9,
+      "Embedded_Software_Intern_JD.pdf": 6,
+      "FullStack_Developer_Intern_JD.pdf": 7,
+      "Hardware Design - General.pdf": 6,
+      "Intern - Aladdin Data.pdf": 5,
+      "Intern - Software Engineering.pdf": 7,
+      "JD_Battery DVP.pdf": 8,
+      "JD_PE_DVP.pdf": 9,
+      "Job Description - AI Engineer.pdf": 10,
+      "Job Description Electrical Engineering  (1) (1).pdf": 7,
+      "Job Description for Campus.pdf": 5,
+      "MBD.pdf": 8,
+      "Mechanical Intern \u2013 Design (2D_3D).pdf": 6,
+      "Powertrain.pdf": 8,
+      "Python C# .Net - JD.pdf": 10,
+      "Testing_20_26_20Decom_20-_20JD_20.pdf": 5
+    }
+  },
+  "completed_episodes": 1,
+  "failed_episodes": {
+    "0": "question grounding failed after 3 attempts",
+    "1": "question grounding failed after 3 attempts"
+  },
+  "failed_episode_diagnostics": {
+    "0": {
+      "episode_id": "episode_0",
+      "display_number": 1,
+      "resume_file": "opensporks:62071407",
+      "jd_file": "Mechanical Intern \u2013 Design (2D_3D).pdf",
+      "persona_tier": "BEGINNER",
+      "role_profile_hash": "d82a0d40287f906fae7efe8d9062e8540995eabaf196503d16dbc0bdbc9add14",
+      "role_profile": {
+        "schema_version": "aria-role-profile-v1",
+        "normalized_document_hash": "23b6faa9096f4d4d4ee6c894c3730ad8f4437d0b36bb3e42532c68301ad68222",
+        "role_title": "Mechanical Intern \u2013 Design (2D/3D)",
+        "role_domain": "mechanical_automotive",
+        "skills": [
+          {
+            "skill_id": "engineering-drawings",
+            "canonical_name": "Engineering Drawings",
+            "definition": "Creation and interpretation of dimensioned technical drawings and assembly documentation.",
+            "domain": "mechanical_automotive",
+            "aliases": [
+              "engineering drawings",
+              "2d drawings",
+              "technical drawings"
+            ],
+            "priority": "required",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "2D drawings",
+                "start": 369,
+                "end": 380
+              },
+              {
+                "source": "jd",
+                "text": "engineering drawings",
+                "start": 764,
+                "end": 784
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "gd-and-t",
+            "canonical_name": "Geometric Dimensioning and Tolerancing",
+            "definition": "Specification and interpretation of geometric tolerances using GD&T.",
+            "domain": "mechanical_automotive",
+            "aliases": [
+              "gd&t",
+              "geometric dimensioning",
+              "geometric tolerancing"
+            ],
+            "priority": "required",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "GD&T",
+                "start": 443,
+                "end": 447
+              },
+              {
+                "source": "jd",
+                "text": "Geometric Dimensioning",
+                "start": 449,
+                "end": 471
+              },
+              {
+                "source": "jd",
+                "text": "GD&T",
+                "start": 822,
+                "end": 826
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "engineering-drawings"
+            ]
+          },
+          {
+            "skill_id": "mechanical-design",
+            "canonical_name": "Mechanical Design",
+            "definition": "Design of mechanical parts, assemblies, interfaces, and production-ready models.",
+            "domain": "mechanical_automotive",
+            "aliases": [
+              "mechanical design",
+              "3d models",
+              "assembly design",
+              "solidworks",
+              "catia"
+            ],
+            "priority": "required",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "Mechanical Design",
+                "start": 138,
+                "end": 155
+              },
+              {
+                "source": "jd",
+                "text": "3D models",
+                "start": 385,
+                "end": 394
+              },
+              {
+                "source": "jd",
+                "text": "assembly design",
+                "start": 405,
+                "end": 420
+              },
+              {
+                "source": "jd",
+                "text": "SolidWorks",
+                "start": 868,
+                "end": 878
+              },
+              {
+                "source": "jd",
+                "text": "CATIA",
+                "start": 881,
+                "end": 886
+              }
+            ],
+            "resume_evidence": [
+              {
+                "source": "resume",
+                "text": "SolidWorks",
+                "start": 567,
+                "end": 577
+              }
+            ],
+            "prerequisite_ids": [
+              "engineering-drawings"
+            ]
+          },
+          {
+            "skill_id": "product-development",
+            "canonical_name": "Product Development",
+            "definition": "Iterative development from requirements through design, prototype, validation, and release.",
+            "domain": "mechanical_automotive",
+            "aliases": [
+              "product development",
+              "prototype development",
+              "design improvements"
+            ],
+            "priority": "required",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "product development",
+                "start": 300,
+                "end": 319
+              },
+              {
+                "source": "jd",
+                "text": "prototype development",
+                "start": 569,
+                "end": 590
+              },
+              {
+                "source": "jd",
+                "text": "design improvements",
+                "start": 649,
+                "end": 668
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "mechanical-design",
+              "test-validation"
+            ]
+          },
+          {
+            "skill_id": "manufacturing-processes",
+            "canonical_name": "Manufacturing Processes",
+            "definition": "Selection and analysis of processes used to manufacture mechanical components and assemblies.",
+            "domain": "manufacturing_quality",
+            "aliases": [
+              "manufacturing processes",
+              "production processes"
+            ],
+            "priority": "preferred",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "manufacturing processes",
+                "start": 1078,
+                "end": 1101
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "engineering-drawings"
+            ]
+          },
+          {
+            "skill_id": "test-validation",
+            "canonical_name": "Test and Validation",
+            "definition": "Planning, executing, and documenting engineering verification and validation.",
+            "domain": "manufacturing_quality",
+            "aliases": [
+              "test plan",
+              "testing and validation",
+              "test and validation",
+              "validation activities",
+              "dvp",
+              "dvt",
+              "pvt"
+            ],
+            "priority": "prerequisite",
+            "support_type": "reviewed_prerequisite",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "product development",
+                "start": 300,
+                "end": 319
+              },
+              {
+                "source": "jd",
+                "text": "prototype development",
+                "start": 569,
+                "end": 590
+              },
+              {
+                "source": "jd",
+                "text": "design improvements",
+                "start": 649,
+                "end": 668
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          }
+        ],
+        "acronym_resolutions": []
+      },
+      "pairing_record": {
+        "schema_version": "aria-pairing-record-v1",
+        "role_profile_hash": "d82a0d40287f906fae7efe8d9062e8540995eabaf196503d16dbc0bdbc9add14",
+        "explicit_jd_skill_ids": [
+          "engineering-drawings",
+          "gd-and-t",
+          "mechanical-design",
+          "product-development",
+          "manufacturing-processes"
+        ],
+        "resume_overlap_skill_ids": [
+          "mechanical-design"
+        ],
+        "explicit_jd_skill_count": 5,
+        "resume_overlap_skill_count": 1,
+        "resume_overlap_ratio": 0.2,
+        "pairing_class": "evidence_overlap"
+      },
+      "ontology_hash": "fe40a1dd3d992614e271a6246a1f904ac897733dbe0e95634c490a1a2946aeb6",
+      "ontology_nodes": [
+        "Engineering Drawings",
+        "Geometric Dimensioning and Tolerancing",
+        "Manufacturing Processes",
+        "Mechanical Design",
+        "Product Development",
+        "Test and Validation"
+      ],
+      "rejected_question_attempts": [
+        {
+          "turn": 2,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Engineering Drawings",
+          "target_skill_id": "engineering-drawings",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach creating a 2D drawing for a complex mechanical component, ensuring all necessary dimensions and tolerances are accurately represented?",
+          "normalized_question": "How would you approach creating a 2D drawing for a complex mechanical component, ensuring all necessary dimensions and tolerances are accurately represented?",
+          "validation_reasons": [
+            "question has no lexical support from the target or JD evidence"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question has no lexical support from the target or JD evidence"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": []
+          },
+          "question_prompt_hash": "55969dd208e7e518864484a02fc4313c480062d541e96c10a88d5033b3e4946b"
+        },
+        {
+          "turn": 2,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Engineering Drawings",
+          "target_skill_id": "engineering-drawings",
+          "retry_number": 2,
+          "raw_generated_question": "How would you approach creating a 2D drawing for a complex mechanical assembly, and what considerations would you keep in mind to ensure all necessary information is accurately represented?",
+          "normalized_question": "How would you approach creating a 2D drawing for a complex mechanical assembly, and what considerations would you keep in mind to ensure all necessary information is accurately represented?",
+          "validation_reasons": [
+            "question has no lexical support from the target or JD evidence"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question has no lexical support from the target or JD evidence"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": []
+          },
+          "question_prompt_hash": "24e224b1d4a828f06f597dc4d4a909f9a11d86225e858ce60984f88b645fdd3c"
+        },
+        {
+          "turn": 2,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Engineering Drawings",
+          "target_skill_id": "engineering-drawings",
+          "retry_number": 3,
+          "raw_generated_question": "How would you approach creating a 2D drawing for a complex mechanical component, ensuring all necessary dimensions and tolerances are accurately represented?",
+          "normalized_question": "How would you approach creating a 2D drawing for a complex mechanical component, ensuring all necessary dimensions and tolerances are accurately represented?",
+          "validation_reasons": [
+            "question has no lexical support from the target or JD evidence"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question has no lexical support from the target or JD evidence"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": []
+          },
+          "question_prompt_hash": "24e224b1d4a828f06f597dc4d4a909f9a11d86225e858ce60984f88b645fdd3c"
+        }
+      ],
+      "status": "failed",
+      "failure_stage": "question_grounding",
+      "failure_turn": 2,
+      "failure_action": "switch_topic",
+      "failure_target_skill": "Engineering Drawings",
+      "failure_target_skill_id": "engineering-drawings",
+      "failure_reason": "question grounding failed after 3 attempts"
+    },
+    "1": {
+      "episode_id": "episode_1",
+      "display_number": 2,
+      "resume_file": "opensporks:27756469",
+      "jd_file": "Embedded_Software_Intern_JD.pdf",
+      "persona_tier": "MID",
+      "role_profile_hash": "0ae756e665e4d93319fa1fc007420d6da5a379b619676b8fb2f3e50c941fd158",
+      "role_profile": {
+        "schema_version": "aria-role-profile-v1",
+        "normalized_document_hash": "93c43b5b563c6077fcdb9d87858a3dc0e7370ebcdc1463dadfcb55c2c12bb8a5",
+        "role_title": "Embedded Software Intern",
+        "role_domain": "electrical_electronics",
+        "skills": [
+          {
+            "skill_id": "pcb-design",
+            "canonical_name": "PCB Design",
+            "definition": "Schematic capture, board layout, signal integrity, and design validation.",
+            "domain": "electrical_electronics",
+            "aliases": [
+              "pcb",
+              "schematic",
+              "board layout",
+              "printed circuit"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "schematic",
+                "start": 1092,
+                "end": 1101
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "electrical-circuits",
+              "electronic-components"
+            ]
+          },
+          {
+            "skill_id": "python",
+            "canonical_name": "Python",
+            "definition": "Python programming, packaging, testing, and runtime behaviour.",
+            "domain": "software",
+            "aliases": [
+              "python"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "Python",
+                "start": 1530,
+                "end": 1536
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "root-cause-analysis",
+            "canonical_name": "Root Cause Analysis",
+            "definition": "Systematic isolation and verification of failure causes.",
+            "domain": "manufacturing_quality",
+            "aliases": [
+              "root cause analysis",
+              "root-cause analysis",
+              "failure analysis",
+              "troubleshoot"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "troubleshoot",
+                "start": 923,
+                "end": 935
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "test-validation"
+            ]
+          },
+          {
+            "skill_id": "electrical-circuits",
+            "canonical_name": "Electrical Circuits",
+            "definition": "Circuit analysis using voltage, current, resistance, and network laws.",
+            "domain": "electrical_electronics",
+            "aliases": [
+              "electrical circuit",
+              "circuits",
+              "ohm's law",
+              "kirchhoff"
+            ],
+            "priority": "prerequisite",
+            "support_type": "reviewed_prerequisite",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "schematic",
+                "start": 1092,
+                "end": 1101
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "electronic-components",
+            "canonical_name": "Electronic Components",
+            "definition": "Selection and behaviour of resistors, capacitors, diodes, and semiconductor components.",
+            "domain": "electrical_electronics",
+            "aliases": [
+              "electronic components",
+              "component selection",
+              "resistors",
+              "capacitors",
+              "diodes"
+            ],
+            "priority": "prerequisite",
+            "support_type": "reviewed_prerequisite",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "schematic",
+                "start": 1092,
+                "end": 1101
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "electrical-circuits"
+            ]
+          },
+          {
+            "skill_id": "test-validation",
+            "canonical_name": "Test and Validation",
+            "definition": "Planning, executing, and documenting engineering verification and validation.",
+            "domain": "manufacturing_quality",
+            "aliases": [
+              "test plan",
+              "testing and validation",
+              "test and validation",
+              "validation activities",
+              "dvp",
+              "dvt",
+              "pvt"
+            ],
+            "priority": "prerequisite",
+            "support_type": "reviewed_prerequisite",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "troubleshoot",
+                "start": 923,
+                "end": 935
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          }
+        ],
+        "acronym_resolutions": []
+      },
+      "pairing_record": {
+        "schema_version": "aria-pairing-record-v1",
+        "role_profile_hash": "0ae756e665e4d93319fa1fc007420d6da5a379b619676b8fb2f3e50c941fd158",
+        "explicit_jd_skill_ids": [
+          "pcb-design",
+          "python",
+          "root-cause-analysis"
+        ],
+        "resume_overlap_skill_ids": [],
+        "explicit_jd_skill_count": 3,
+        "resume_overlap_skill_count": 0,
+        "resume_overlap_ratio": 0.0,
+        "pairing_class": "no_evidence_overlap"
+      },
+      "ontology_hash": "ae09b40d940aab3e30911c50e17fd4e860c1db91a67dcba073c7da14d318ffa7",
+      "ontology_nodes": [
+        "Electrical Circuits",
+        "Electronic Components",
+        "PCB Design",
+        "Python",
+        "Root Cause Analysis",
+        "Test and Validation"
+      ],
+      "rejected_question_attempts": [
+        {
+          "turn": 0,
+          "action_idx": 0,
+          "action": "increase_difficulty",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 1,
+          "raw_generated_question": "Given a complex multi-layer PCB design with high-speed serial interfaces and multiple power planes, describe a scenario where you would ensure signal integrity and power delivery integrity, and explain the steps you would take to validate the design.",
+          "normalized_question": "Given a complex multi-layer PCB design with high-speed serial interfaces and multiple power planes, describe a scenario where you would ensure signal integrity and power delivery integrity, and explain the steps you would take to validate the design.",
+          "validation_reasons": [
+            "question must be a non-empty interrogative"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question must be a non-empty interrogative"
+            ],
+            "supporting_terms": [
+              "design",
+              "pcb"
+            ],
+            "off_profile_skill_ids": []
+          },
+          "question_prompt_hash": "f69ea0b5cfd8335989a10f85c7f7869c8f42593c1f759532fea7e26fce0def5a"
+        },
+        {
+          "turn": 0,
+          "action_idx": 0,
+          "action": "increase_difficulty",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 2,
+          "raw_generated_question": "Given a complex multi-layer PCB design with high-speed serial interfaces and multiple power planes, describe a scenario where you would ensure signal integrity and power delivery network stability, considering potential crosstalk and ground bounce issues.",
+          "normalized_question": "Given a complex multi-layer PCB design with high-speed serial interfaces and multiple power planes, describe a scenario where you would ensure signal integrity and power delivery network stability, considering potential crosstalk and ground bounce issues.",
+          "validation_reasons": [
+            "question must be a non-empty interrogative"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question must be a non-empty interrogative"
+            ],
+            "supporting_terms": [
+              "design",
+              "pcb"
+            ],
+            "off_profile_skill_ids": []
+          },
+          "question_prompt_hash": "e00a1c8165660bb3f96251cae8d102c570df6e396f2ab0dd2f3727cff7bb2d18"
+        },
+        {
+          "turn": 8,
+          "action_idx": 0,
+          "action": "increase_difficulty",
+          "target_skill": "Root Cause Analysis",
+          "target_skill_id": "root-cause-analysis",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach performing root cause analysis on a failure in an embedded system's communication interface when the issue manifests intermittently and only under specific environmental conditions, such as high humidity or temperature fluctuations? Describe the specific tools and techniques you would use to systematically isolate and verify the failure cause in this scenario.",
+          "normalized_question": "How would you approach performing root cause analysis on a failure in an embedded system's communication interface when the issue manifests intermittently and only under specific environmental conditions, such as high humidity or temperature fluctuations? Describe the specific tools and techniques you would use to systematically isolate and verify the failure cause in this scenario.",
+          "validation_reasons": [
+            "question must be a non-empty interrogative"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question must be a non-empty interrogative"
+            ],
+            "supporting_terms": [
+              "analysis",
+              "cause",
+              "root"
+            ],
+            "off_profile_skill_ids": []
+          },
+          "question_prompt_hash": "057bc670412b9fb2bc7130a032f148a758f54b50a80c91c398dc903bccdeaf6f"
+        },
+        {
+          "turn": 15,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 1,
+          "raw_generated_question": "Can you describe a scenario where you had to use Altium Designer to design or modify a PCB layout to address a specific issue in an embedded system, and what steps did you take to ensure the design met the required specifications and performance criteria?",
+          "normalized_question": "Can you describe a scenario where you had to use Altium Designer to design or modify a PCB layout to address a specific issue in an embedded system, and what steps did you take to ensure the design met the required specifications and performance criteria?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "design",
+              "pcb"
+            ],
+            "off_profile_skill_ids": []
+          },
+          "question_prompt_hash": "78f99737870386d863ae4c9db0bbc6e0bdb249283365ff8084d96816ce3b9c1d"
+        },
+        {
+          "turn": 18,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach designing a multi-layer PCB layout to minimize electromagnetic interference (EMI) and ensure proper signal integrity in a high-speed embedded system, and what specific tools or techniques would you use to validate your design?",
+          "normalized_question": "How would you approach designing a multi-layer PCB layout to minimize electromagnetic interference (EMI) and ensure proper signal integrity in a high-speed embedded system, and what specific tools or techniques would you use to validate your design?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: emi-emc"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: emi-emc"
+            ],
+            "supporting_terms": [
+              "design",
+              "pcb"
+            ],
+            "off_profile_skill_ids": [
+              "emi-emc"
+            ]
+          },
+          "question_prompt_hash": "864d8a855f184679d0008ed554f3521d2069302c8337f451d3978cdfeabda4c7"
+        },
+        {
+          "turn": 18,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 2,
+          "raw_generated_question": "How would you approach designing a PCB layout to ensure proper signal integrity and minimize EMI in a high-speed embedded system, and what tools or techniques would you use to validate the design?",
+          "normalized_question": "How would you approach designing a PCB layout to ensure proper signal integrity and minimize EMI in a high-speed embedded system, and what tools or techniques would you use to validate the design?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: emi-emc"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: emi-emc"
+            ],
+            "supporting_terms": [
+              "design",
+              "pcb"
+            ],
+            "off_profile_skill_ids": [
+              "emi-emc"
+            ]
+          },
+          "question_prompt_hash": "a73c46f342c227249986751f04007c639366fc88ee7e9cbac969d1c441cdec73"
+        },
+        {
+          "turn": 18,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 3,
+          "raw_generated_question": "How would you approach designing a multi-layer PCB layout to minimize electromagnetic interference (EMI) and ensure signal integrity in a high-speed embedded system, considering factors such as power plane placement, decoupling capacitor placement, and ground plane design?",
+          "normalized_question": "How would you approach designing a multi-layer PCB layout to minimize electromagnetic interference (EMI) and ensure signal integrity in a high-speed embedded system, considering factors such as power plane placement, decoupling capacitor placement, and ground plane design?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: emi-emc"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: emi-emc"
+            ],
+            "supporting_terms": [
+              "design",
+              "pcb"
+            ],
+            "off_profile_skill_ids": [
+              "emi-emc"
+            ]
+          },
+          "question_prompt_hash": "a73c46f342c227249986751f04007c639366fc88ee7e9cbac969d1c441cdec73"
+        }
+      ],
+      "status": "failed",
+      "failure_stage": "question_grounding",
+      "failure_turn": 18,
+      "failure_action": "switch_topic",
+      "failure_target_skill": "PCB Design",
+      "failure_target_skill_id": "pcb-design",
+      "failure_reason": "question grounding failed after 3 attempts"
+    }
+  },
+  "combined_transition_count": 11,
+  "pairing_records": [
+    {
+      "episode_id": "episode_0",
+      "episode_status": "failed",
+      "resume_file": "opensporks:62071407",
+      "jd_file": "Mechanical Intern \u2013 Design (2D_3D).pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "d82a0d40287f906fae7efe8d9062e8540995eabaf196503d16dbc0bdbc9add14",
+      "explicit_jd_skill_ids": [
+        "engineering-drawings",
+        "gd-and-t",
+        "mechanical-design",
+        "product-development",
+        "manufacturing-processes"
+      ],
+      "resume_overlap_skill_ids": [
+        "mechanical-design"
+      ],
+      "explicit_jd_skill_count": 5,
+      "resume_overlap_skill_count": 1,
+      "resume_overlap_ratio": 0.2,
+      "pairing_class": "evidence_overlap"
+    },
+    {
+      "episode_id": "episode_1",
+      "episode_status": "failed",
+      "resume_file": "opensporks:27756469",
+      "jd_file": "Embedded_Software_Intern_JD.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "0ae756e665e4d93319fa1fc007420d6da5a379b619676b8fb2f3e50c941fd158",
+      "explicit_jd_skill_ids": [
+        "pcb-design",
+        "python",
+        "root-cause-analysis"
+      ],
+      "resume_overlap_skill_ids": [],
+      "explicit_jd_skill_count": 3,
+      "resume_overlap_skill_count": 0,
+      "resume_overlap_ratio": 0.0,
+      "pairing_class": "no_evidence_overlap"
+    },
+    {
+      "episode_id": "episode_2",
+      "episode_status": "complete",
+      "resume_file": "opensporks:20408458",
+      "jd_file": "Intern - Software Engineering.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "fbac60e9fb13b4008173aa79b87bf0bc8f68592289c55a070f40c10354e95f4f",
+      "explicit_jd_skill_ids": [
+        "java",
+        "kafka",
+        "kubernetes",
+        "python",
+        "rest-api"
+      ],
+      "resume_overlap_skill_ids": [],
+      "explicit_jd_skill_count": 5,
+      "resume_overlap_skill_count": 0,
+      "resume_overlap_ratio": 0.0,
+      "pairing_class": "no_evidence_overlap"
+    }
+  ],
+  "partial_dataset_path": "data\\synthetic\\v3\\canary-grounding-diagnostics-v4\\failed_runs\\7ce22e5eb0c727bb.partial.json",
+  "canonical_dataset_restored": true,
+  "generation_finished_at": "2026-09-06T09:41:49.923139+00:00"
+}

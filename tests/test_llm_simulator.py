@@ -640,6 +640,31 @@ def test_episode_exception_is_isolated_and_other_results_are_checkpointed(tmp_pa
 
     async def fake_episode(ep, pair, total_eps, semaphore, **kwargs):
         if kwargs["display_number"] == 2:
+            kwargs["failure_diagnostics"][ep] = {
+                "episode_id": f"episode_{ep}",
+                "resume_file": pair[0],
+                "jd_file": pair[1],
+                "status": "failed",
+                "failure_stage": "question_grounding",
+                "failure_reason": "question grounding failed after 3 attempts",
+                "role_profile_hash": "profile-hash",
+                "role_profile": {"schema_version": "aria-role-profile-v1"},
+                "pairing_record": {
+                    "schema_version": "aria-pairing-record-v1",
+                    "pairing_class": "evidence_overlap",
+                },
+                "rejected_question_attempts": [{
+                    "turn": 2,
+                    "action": "switch_topic",
+                    "target_skill_id": "python",
+                    "retry_number": 3,
+                    "raw_generated_question": "Question: invalid output",
+                    "normalized_question": "invalid output",
+                    "validation_reasons": [
+                        "question must be a non-empty interrogative"
+                    ],
+                }],
+            }
             raise ConnectionError("temporary Ollama disconnect")
         await asyncio.sleep(0.001 if kwargs["display_number"] == 1 else 0)
         return [_terminal(ep, pair)]
@@ -671,6 +696,12 @@ def test_episode_exception_is_isolated_and_other_results_are_checkpointed(tmp_pa
     checkpoint = json.loads(partial_path.read_text(encoding="utf-8"))
     assert len(checkpoint) == 5
     assert {item["episode_id"] for item in checkpoint[3:]} == {"episode_3", "episode_5"}
+    manifest_path = next((tmp_path / "manifests").glob("*.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    failed_diagnostic = manifest["failed_episode_diagnostics"]["1"]
+    assert failed_diagnostic["role_profile_hash"] == "profile-hash"
+    assert failed_diagnostic["rejected_question_attempts"][0]["retry_number"] == 3
+    assert manifest["pairing_records"][0]["episode_status"] == "failed"
 
 
 def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
