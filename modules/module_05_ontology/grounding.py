@@ -523,6 +523,8 @@ def validate_grounded_question(question: str, packet: dict, history: list[dict])
     return {
         "schema_version": GROUNDING_SCHEMA_VERSION,
         "grounding_policy_version": GROUNDING_POLICY_VERSION,
+        "target_skill_id": packet.get("target_skill_id"),
+        "role_profile_hash": packet.get("role_profile_hash"),
         "decision": "accept" if not reasons else "reject",
         "valid": not reasons,
         "reasons": reasons,

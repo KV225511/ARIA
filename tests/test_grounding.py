@@ -93,6 +93,7 @@ def test_question_validator_rejects_off_profile_technology():
 
 def test_question_validator_accepts_inflected_alias_and_short_technical_token():
     packet = {
+        "role_profile_hash": "engineering-profile",
         "target_skill_id": "engineering-drawings",
         "target_skill": "Engineering Drawings",
         "target_aliases": ["2D drawings", "technical drawings"],
@@ -111,6 +112,8 @@ def test_question_validator_accepts_inflected_alias_and_short_technical_token():
     )
     assert result["valid"] is True
     assert {"2d", "drawing"} <= set(result["supporting_terms"])
+    assert result["target_skill_id"] == "engineering-drawings"
+    assert result["role_profile_hash"] == "engineering-profile"
 
 
 def test_question_validator_accepts_definition_vocabulary():

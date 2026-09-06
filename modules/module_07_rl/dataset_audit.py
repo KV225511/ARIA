@@ -196,10 +196,11 @@ def audit_raw_evidence(
             for item in episode if item.get("question")
         ]
         duplicate_questions += len(questions) - len(set(questions))
-        profiles = {item.get("role_profile_hash") for item in episode}
-        ontologies = {item.get("ontology_hash") for item in episode}
-        if len(profiles - {None}) != 1 or len(ontologies - {None}) != 1:
-            inconsistent_episode_grounding += 1
+        if grounding_required:
+            profiles = {item.get("role_profile_hash") for item in episode}
+            ontologies = {item.get("ontology_hash") for item in episode}
+            if len(profiles - {None}) != 1 or len(ontologies - {None}) != 1:
+                inconsistent_episode_grounding += 1
         distinct_targets_per_episode.append(len({
             item.get("target_skill_id") for item in episode
             if item.get("target_skill_id")

@@ -102,6 +102,18 @@ def test_raw_gate_does_not_fail_only_because_stored_beliefs_collapse():
     assert belief["passes_quality_gates"] is False
 
 
+def test_legacy_transitions_do_not_require_v4_grounding_consistency():
+    transitions = [
+        _transition(f"legacy-{label}", label, label, True, 0.1)
+        for label in range(3)
+    ]
+    report = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+    assert report["inconsistent_episode_grounding"] == 0
+    assert report["passes_quality_gates"] is True
+
+
 def test_content_hash_detects_renamed_duplicate_and_cross_split_leakage():
     transitions = []
     for index, split in enumerate(("train", "validation", "test")):
