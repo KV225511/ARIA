@@ -181,6 +181,47 @@ def test_related_off_profile_term_is_context_not_a_competency_switch():
     assert result["contextual_skill_ids"] == ["emi-emc"]
 
 
+def test_same_domain_deployment_detail_is_context_for_ci_cd():
+    packet = {
+        "target_skill_id": "ci-cd",
+        "target_skill": "CI/CD",
+        "target_aliases": [
+            "continuous integration", "continuous deployment", "jenkins", "gitlab ci",
+        ],
+        "target_definition": "Automated build, test, release, and deployment workflows.",
+        "jd_evidence": ["Jenkins"],
+        "allowed_skill_ids": ["ci-cd"],
+        "acronym_resolutions": [],
+    }
+    result = validate_grounded_question(
+        "How would you handle database migrations in your CI/CD pipeline to ensure "
+        "that the database schema is updated correctly during deployment, and what "
+        "steps would you include in Jenkins to automate this task?",
+        packet,
+        [],
+    )
+    assert result["valid"] is True
+    assert result["off_profile_skill_ids"] == []
+    assert result["contextual_skill_ids"] == ["database-design"]
+
+
+def test_cross_domain_competency_still_fails_closed():
+    packet = {
+        "target_skill_id": "battery-testing",
+        "target_skill": "Battery Testing",
+        "target_aliases": ["battery", "battery pack"],
+        "target_definition": "Electrical and thermal performance validation of batteries.",
+        "jd_evidence": ["battery pack testing"],
+        "allowed_skill_ids": ["battery-testing"],
+        "acronym_resolutions": [],
+    }
+    result = validate_grounded_question(
+        "How would you use Kubernetes while testing a battery pack?", packet, []
+    )
+    assert result["valid"] is False
+    assert result["off_profile_skill_ids"] == ["kubernetes"]
+
+
 def test_short_jd_fails_closed():
     with pytest.raises(ValueError, match="at least 100"):
         build_role_profile("Python required")

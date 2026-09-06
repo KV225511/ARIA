@@ -450,11 +450,7 @@ def _interrogative_reasons(question: str) -> list[str]:
 
 def _is_contextual_skill(target_skill_id: str, other: SkillDefinition) -> bool:
     target = _CATALOG_BY_ID.get(target_skill_id)
-    if target is None or target.domain != other.domain:
-        return False
-    target_links = {target.skill_id, *target.prerequisites}
-    other_links = {other.skill_id, *other.prerequisites}
-    return bool(target_links & other_links)
+    return target is not None and target.domain == other.domain
 
 
 def validate_grounded_question(question: str, packet: dict, history: list[dict]) -> dict:
