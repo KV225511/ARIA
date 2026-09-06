@@ -140,7 +140,7 @@ def test_question_validator_accepts_definition_vocabulary():
     assert generic["valid"] is False
 
 
-def test_question_validator_handles_imperative_and_trailing_text_deliberately():
+def test_question_validator_accepts_one_coherent_turn_with_up_to_two_clauses():
     profile = build_role_profile(JD, "Battery testing experience.")
     packet = grounding_packet(profile, profile.skill("battery-testing"))
     imperative = validate_grounded_question(
@@ -155,8 +155,15 @@ def test_question_validator_handles_imperative_and_trailing_text_deliberately():
         packet,
         [],
     )
-    assert compound["valid"] is False
-    assert any("trailing text" in reason for reason in compound["reasons"])
+    assert compound["valid"] is True
+
+    excessive = validate_grounded_question(
+        "What would you test? What would you measure? What would you report?",
+        packet,
+        [],
+    )
+    assert excessive["valid"] is False
+    assert any("more than two" in reason for reason in excessive["reasons"])
 
 
 def test_related_off_profile_term_is_context_not_a_competency_switch():

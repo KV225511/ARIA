@@ -14,7 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from modules.module_05_ontology.graph import SkillOntologyGraph
 from modules.module_06_belief.belief_state import BeliefStateUpdater
 from modules.module_07_rl.environment import ARIAInterviewEnv
-from modules.module_08_llm.generator import LLMQuestionGenerator
+from modules.module_08_llm.generator import (
+    LLMQuestionGenerator,
+    build_question_retry_correction,
+)
 from modules.module_05_ontology.grounding import (
     grounding_packet,
     normalize_generated_question,
@@ -149,8 +152,14 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
     context = grounding_packet(profile, target)
     belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
     rejected: list[list[str]] = []
-    for _ in range(3):
-        correction = "; ".join(rejected[-1]) if rejected else None
+    rejected_outputs: list[str] = []
+    for attempt in range(1, 4):
+        correction = (
+            build_question_retry_correction(
+                rejected[-1], rejected_outputs[-1], attempt
+            )
+            if rejected else None
+        )
         raw_question = await llm_gen.generate_question(
             action=action,
             belief_state=belief,
@@ -161,6 +170,7 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
             target_skill=target.canonical_name,
             grounding_context=context,
             correction=correction,
+            temperature=0.3 + 0.15 * (attempt - 1),
         )
         question = normalize_generated_question(raw_question)
         result = validate_grounded_question(question, context, session["history"])
@@ -168,6 +178,7 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
             session["current_target"] = target
             return question
         rejected.append(result["reasons"])
+        rejected_outputs.append(question)
     raise RuntimeError(f"Question grounding failed: {rejected[-1]}")
 
 @app.websocket("/ws/interview/{session_id}")

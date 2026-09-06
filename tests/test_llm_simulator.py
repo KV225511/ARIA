@@ -27,6 +27,7 @@ from modules.module_07_rl.dataset_split import (
 )
 from modules.module_08_llm.generator import (
     LLMQuestionGenerator,
+    build_question_retry_correction,
     normalize_ollama_keep_alive,
 )
 
@@ -212,15 +213,35 @@ def test_duration_formatting(seconds, formatted):
 
 def test_question_prompt_requires_target_skill():
     generator = LLMQuestionGenerator()
+    history = [
+        {"q": f"Prior question {index}?", "a": f"Prior answer {index}."}
+        for index in range(8)
+    ]
     prompt = generator._build_prompt(
         "probe_foundation",
         {"Docker": [0.4, 0.4, 0.2]},
         "Resume",
-        [],
+        history,
         target_skill="Docker",
     )
     assert "Required Target Skill: Docker" in prompt
-    assert "question about the Required Target Skill" in prompt
+    assert "interview turn about the Required Target Skill" in prompt
+    assert "Prior question 0?" in prompt
+    assert "Prior answer 0." not in prompt
+
+
+def test_question_retry_correction_names_rejected_output_and_changes_angle():
+    rejected = "What is Python?"
+    second = build_question_retry_correction(
+        ["question duplicates accepted history"], rejected, 2
+    )
+    third = build_question_retry_correction(
+        ["question duplicates accepted history"], rejected, 3
+    )
+    assert rejected in second
+    assert "Retry 2 of 3" in second
+    assert "Retry 3 of 3" in third
+    assert second != third
 
 
 def test_append_uses_unused_documents_as_new_identity_components():
@@ -481,12 +502,15 @@ def test_question_generator_request_sends_context_and_keep_alive_settings():
     )
     with patch("modules.module_08_llm.generator.httpx.AsyncClient", return_value=Client()):
         result = asyncio.run(generator.generate_question(
-            "probe_foundation", {"SQL": [0.3, 0.4, 0.3]}, "resume", []
+            "probe_foundation", {"SQL": [0.3, 0.4, 0.3]}, "resume", [],
+            temperature=0.6, generation_seed=12345,
         ))
 
     assert result == "What is an index?"
     assert captured["payload"]["keep_alive"] == -1
     assert captured["payload"]["options"]["num_ctx"] == 4096
+    assert captured["payload"]["options"]["temperature"] == 0.6
+    assert captured["payload"]["options"]["seed"] == 12345
 
 
 def test_synthetic_question_generation_disables_fallbacks():

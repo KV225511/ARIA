@@ -427,12 +427,10 @@ def _interrogative_reasons(question: str) -> list[str]:
     if not question:
         return ["question must be a non-empty interrogative"]
     question_marks = question.count("?")
-    if question_marks > 1:
-        return ["question must contain exactly one assessment request"]
-    if question_marks == 1:
-        if question.rstrip().endswith("?"):
-            return []
-        return ["question contains trailing text after the interrogative"]
+    if question_marks > 2:
+        return ["question contains more than two assessment clauses"]
+    if question_marks >= 1:
+        return []
 
     lowered = question.casefold().strip()
     request_pattern = (

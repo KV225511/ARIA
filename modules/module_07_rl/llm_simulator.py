@@ -20,6 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_SKILLS_COVERED, MIN_INTERVIEW_TURNS
 from modules.module_08_llm.generator import (
     LLMQuestionGenerator,
+    build_question_retry_correction,
     normalize_ollama_keep_alive,
 )
 from modules.module_07_rl.data_loader import (
@@ -76,7 +77,7 @@ ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
 DEFAULT_SWEEP_EPISODES = 300
 MIN_RECOMMENDED_EPISODES = 200
 DATASET_SPLIT_RATIOS = (0.70, 0.15, 0.15)
-GENERATOR_SCHEMA_VERSION = "aria-simulator-v4"
+GENERATOR_SCHEMA_VERSION = "aria-simulator-v5"
 
 
 def _sha256_text(value: str) -> str:
@@ -943,14 +944,26 @@ async def simulate_episode(
             # One sampled behavior action and target survive all retries. A
             # rejected generation therefore cannot bias logged propensities.
             rejected_question_reasons = []
+            rejected_question_outputs = []
             question = ""
             question_prompt_hash = None
+            question_generation_seed = None
             grounding_result = None
             for question_attempt in range(1, 4):
-                correction = (
-                    "; ".join(rejected_question_reasons[-1])
-                    if rejected_question_reasons else None
-                )
+                correction = None
+                if rejected_question_reasons:
+                    correction = build_question_retry_correction(
+                        rejected_question_reasons[-1],
+                        rejected_question_outputs[-1],
+                        question_attempt,
+                    )
+                question_generation_seed = (
+                    int(seed)
+                    + ep * 1_000_003
+                    + env.turn_id * 1_009
+                    + action_idx * 97
+                    + question_attempt
+                ) % 2_147_483_647
                 question_prompt = interviewer._build_prompt(
                     action_name,
                     belief_state,
@@ -973,6 +986,8 @@ async def simulate_episode(
                     target_skill=target_skill,
                     grounding_context=question_grounding,
                     correction=correction,
+                    temperature=0.3 + 0.15 * (question_attempt - 1),
+                    generation_seed=question_generation_seed,
                 )
                 question = normalize_generated_question(raw_question)
                 grounding_result = validate_grounded_question(
@@ -992,8 +1007,10 @@ async def simulate_episode(
                     "validation_reasons": list(grounding_result["reasons"]),
                     "validation_result": grounding_result,
                     "question_prompt_hash": question_prompt_hash,
+                    "question_generation_seed": question_generation_seed,
                 })
                 rejected_question_reasons.append(grounding_result["reasons"])
+                rejected_question_outputs.append(question)
             if not grounding_result or not grounding_result["valid"]:
                 episode_diagnostic.update({
                     "status": "failed",
@@ -1175,6 +1192,7 @@ async def simulate_episode(
                 "question": question,
                 "candidate_answer": answer,
                 "question_prompt_hash": question_prompt_hash,
+                "question_generation_seed": question_generation_seed,
                 "candidate_system_prompt_hash": candidate_system_prompt_hash,
                 "evaluator_prompt_hash": evaluator_prompt_hash,
                 "jd_text": jd_text[:2000]
