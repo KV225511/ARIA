@@ -36,7 +36,7 @@ from modules.module_07_rl.state_builder import (
 MIN_INTERVIEW_TURNS = 10
 MIN_SKILLS_COVERED = 5
 MAX_TURNS = 30
-REPLAY_SCHEMA_VERSION = "aria-replay-v3"
+REPLAY_SCHEMA_VERSION = "aria-replay-v4"
 
 
 def canonical_json_hash(value) -> str:
@@ -88,7 +88,10 @@ def _confidence(value) -> float:
     return float(np.clip(number, 0.0, 1.0))
 
 
-def _action_mask(turn_id, assessment, total_skills, config, valid_evidence_count):
+def _action_mask(
+    turn_id, assessment, total_skills, config, valid_evidence_count,
+    current_skill=None,
+):
     mask = [1.0] * len(RL_ACTION_SPACE)
     required = min(
         max(MIN_SKILLS_COVERED, config.minimum_skill_coverage), total_skills
@@ -99,6 +102,8 @@ def _action_mask(turn_id, assessment, total_skills, config, valid_evidence_count
         and valid_evidence_count >= 5
     )
     mask[RL_ACTION_SPACE.index("conclude_interview")] = float(can_conclude)
+    if current_skill is None:
+        mask[RL_ACTION_SPACE.index("ask_follow_up_same_topic")] = 0.0
     return mask, can_conclude
 
 
@@ -122,7 +127,7 @@ def replay_one_episode(
     for turn_index, source in enumerate(episode):
         if source.get("transition_schema_version") != TRANSITION_SCHEMA_VERSION:
             raise ValueError(
-                "Raw transition is not aria-transition-v3; regenerate it because "
+                f"Raw transition is not {TRANSITION_SCHEMA_VERSION}; regenerate it because "
                 "legacy action propensities cannot be reconstructed safely"
             )
         if source.get("action_schema_version") != ACTION_SCHEMA_VERSION:
@@ -140,6 +145,7 @@ def replay_one_episode(
             source_probabilities.shape != (len(RL_ACTION_SPACE),)
             or not np.all(np.isfinite(source_probabilities))
             or np.any(source_probabilities < 0.0)
+            or np.any(source_probabilities[source_mask == 0.0] != 0.0)
             or not np.isclose(source_probabilities.sum(), 1.0)
             or not np.isclose(
                 float(source.get("behavior_action_probability", -1.0)),
@@ -155,7 +161,26 @@ def replay_one_episode(
             total_skills,
             config,
             valid_evidence_count,
+            current_skill,
         )
+        if not np.array_equal(source_mask, np.asarray(action_mask, dtype=float)):
+            raise ValueError(
+                "Raw transition pre-action mask does not match replayed legality"
+            )
+        if action_name == "conclude_interview":
+            if source.get("target_skill_id") is not None:
+                raise ValueError("Raw stop transition contains a target skill")
+            if source.get("question_grounding_valid") is not None:
+                raise ValueError("Raw stop transition contains question grounding")
+        else:
+            if source.get("question_grounding_valid") is not True:
+                raise ValueError("Raw question transition is not grounding-validated")
+            if not source.get("target_skill_id"):
+                raise ValueError("Raw question transition lacks a stable target skill")
+            if not source.get("role_profile_hash") or not source.get("ontology_hash"):
+                raise ValueError("Raw question transition lacks grounding provenance")
+            if not source.get("grounding_contract_hash"):
+                raise ValueError("Raw question transition lacks a grounding contract hash")
         obs = build_policy_state(
             updater,
             total_skills=total_skills,
@@ -210,6 +235,7 @@ def replay_one_episode(
             total_skills,
             config,
             valid_evidence_count,
+            current_skill if action_name == "conclude_interview" else target_skill,
         )
         if action_name == "conclude_interview":
             reward = compute_stop_reward(not can_conclude_before)
@@ -288,7 +314,9 @@ def replay_one_episode(
             "information_gain": information_gain,
             "action_mask_before": action_mask,
             "action_mask": _action_mask(
-                interview_turn_id, assessment, total_skills, config, valid_evidence_count
+                interview_turn_id, assessment, total_skills, config,
+                valid_evidence_count,
+                current_skill if action_name == "conclude_interview" else target_skill,
             )[0],
             "valid_evidence_count": valid_evidence_count,
             "transition_kind": (

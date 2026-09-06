@@ -62,6 +62,26 @@ def test_cleaned_csv_loader_filters_categories_and_preserves_full_identity_hash(
     assert records[0].source_file_hash == hashlib.sha256(source.read_bytes()).hexdigest()
 
 
+def test_loader_canonicalizes_embedded_windows_newlines(tmp_path):
+    source = tmp_path / "resumes.csv"
+    full_text = ("Engineering systems and validation\r\n" * 260).strip()
+    normalized = full_text.replace("\r\n", "\n")
+    prompt_text = data_loader._expected_resume_prompt(normalized)[0].replace(
+        "\n", "\r\n"
+    )
+    _write_csv(source, [_row(
+        "windows-newlines",
+        full_text,
+        Resume_prompt=prompt_text,
+        Prompt_truncated="true",
+    )])
+
+    records = data_loader.load_clean_resume_csv(source, ("ENGINEERING",))
+
+    assert len(records) == 1
+    assert "\r" not in records[0].prompt_text
+
+
 @pytest.mark.parametrize(
     ("text", "updates", "message"),
     [

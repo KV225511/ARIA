@@ -38,6 +38,7 @@ def _terminal(ep, pair):
         "jd_file": pair[1],
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
+        "transition_schema_version": "aria-transition-v4",
         "done": True,
     }
 
@@ -234,9 +235,10 @@ def test_append_uses_unused_documents_as_new_identity_components():
             "episode_id": f"episode_{index}",
             "resume_file": resume,
             "jd_file": jd,
-            "candidate_model": "qwen2.5:7b",
-            "evaluator_model": "gemma3:4b",
-            "done": True,
+                "candidate_model": "qwen2.5:7b",
+                "evaluator_model": "gemma3:4b",
+                "transition_schema_version": "aria-transition-v4",
+                "done": True,
         }
         for index, (resume, jd) in enumerate(original_pairs)
     ]
@@ -299,6 +301,7 @@ def test_append_provenance_and_episode_ids_are_protected():
             "episode_id": "episode_199",
             "candidate_model": "qwen2.5:7b",
             "evaluator_model": "gemma3:4b",
+            "transition_schema_version": "aria-transition-v4",
         }
     ]
     assert _next_episode_index(existing) == 200
@@ -307,6 +310,16 @@ def test_append_provenance_and_episode_ids_are_protected():
         validate_append_provenance(existing, "qwen2.5:1.5b", "gemma3:4b")
     with pytest.raises(ValueError, match="must remain distinct"):
         validate_append_provenance(existing, "gemma3:4b", "gemma3:4b")
+
+
+def test_append_rejects_legacy_transition_schema():
+    existing = [{
+        "candidate_model": "qwen2.5:7b",
+        "evaluator_model": "gemma3:4b",
+        "transition_schema_version": "aria-transition-v3",
+    }]
+    with pytest.raises(ValueError, match="transition schema is incompatible"):
+        validate_append_provenance(existing, "qwen2.5:7b", "gemma3:4b")
 
 
 def test_question_generator_uses_memory_bounded_ollama_settings(monkeypatch):
@@ -545,6 +558,7 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
             "jd_file": f"jd-{index}.pdf",
             "candidate_model": "qwen2.5:7b",
             "evaluator_model": "gemma3:4b",
+            "transition_schema_version": "aria-transition-v4",
             "done": True,
         }
         for index in range(3)
@@ -639,20 +653,24 @@ def test_episode_exception_is_isolated_and_other_results_are_checkpointed(tmp_pa
         patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
         patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fake_episode),
     ):
-        combined = asyncio.run(run_simulation(
-            sweep=True,
-            max_episodes=3,
-            max_concurrent=2,
-            identity_component_targets=(1, 1, 1),
-            dataset_file=dataset_file,
-            append=True,
-            check_ollama_capacity=False,
-            resume_source="pdf",
-        ))
+        with pytest.raises(RuntimeError, match="partial output is not eligible"):
+            asyncio.run(run_simulation(
+                sweep=True,
+                max_episodes=3,
+                max_concurrent=2,
+                identity_component_targets=(1, 1, 1),
+                dataset_file=dataset_file,
+                append=True,
+                check_ollama_capacity=False,
+                resume_source="pdf",
+            ))
 
-    assert len(combined) == 5
-    assert json.loads(dataset_file.read_text(encoding="utf-8")) == combined
-    assert {item["episode_id"] for item in combined[3:]} == {"episode_3", "episode_5"}
+    canonical = json.loads(dataset_file.read_text(encoding="utf-8"))
+    assert canonical == existing
+    partial_path = next((tmp_path / "failed_runs").glob("*.partial.json"))
+    checkpoint = json.loads(partial_path.read_text(encoding="utf-8"))
+    assert len(checkpoint) == 5
+    assert {item["episode_id"] for item in checkpoint[3:]} == {"episode_3", "episode_5"}
 
 
 def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
@@ -676,7 +694,7 @@ def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
         patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
         patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fail_episode),
     ):
-        with pytest.raises(RuntimeError, match="No new episodes"):
+        with pytest.raises(RuntimeError, match="partial output is not eligible"):
             asyncio.run(run_simulation(
                 sweep=True,
                 max_episodes=3,
@@ -751,7 +769,7 @@ def test_csv_sweep_records_resume_source_manifest(tmp_path):
 
     with (
         patch(
-            "modules.module_07_rl.llm_simulator.get_valid_jd_documents",
+            "modules.module_07_rl.llm_simulator.get_groundable_jd_documents",
             return_value=(jds, {
                 "pdf_files": 3,
                 "filename_excluded_files": [],
@@ -801,6 +819,7 @@ def test_csv_append_requires_matching_source_hash():
     existing = [{
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
+        "transition_schema_version": "aria-transition-v4",
         "resume_source_type": "opensporks_csv",
         "resume_source_file_hash": "old-hash",
     }]
@@ -819,6 +838,7 @@ def test_csv_append_rejects_missing_source_provenance():
     existing = [{
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
+        "transition_schema_version": "aria-transition-v4",
     }]
 
     with pytest.raises(ValueError, match="lack cleaned-CSV source provenance"):

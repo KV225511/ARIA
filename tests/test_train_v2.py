@@ -9,7 +9,11 @@ from modules.module_07_rl.state_builder import (
     STATE_FEATURE_NAMES,
     STATE_SCHEMA_VERSION,
 )
-from modules.module_07_rl.train import train_iql_policy, validate_replayed_dataset
+from modules.module_07_rl.train import (
+    CHECKPOINT_SCHEMA_VERSION,
+    train_iql_policy,
+    validate_replayed_dataset,
+)
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
 from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
@@ -45,6 +49,16 @@ def _transition(index, split):
         "action_schema_version": ACTION_SCHEMA_VERSION,
         "reward_schema_version": REWARD_SCHEMA_VERSION,
         "transition_kind": "stop" if is_stop else "question",
+        "role_profile_hash": "profile-hash",
+        "role_profile_schema_version": "aria-role-profile-v1",
+        "grounding_contract_hash": "grounding-contract-hash",
+        "ontology_hash": "ontology-hash",
+        "target_skill_id": None if is_stop else "python",
+        "question_grounding_schema_version": "aria-question-grounding-v1",
+        "question_grounding_valid": None if is_stop else True,
+        "pairing_record": {"pairing_class": "evidence_overlap"},
+        "generation_run_id": "generation-run",
+        "plan_id": "generation-plan",
         "action_mask_before": [1.0] * 8,
         "behavior_action_probs": [1.0 / 8.0] * 8,
         "behavior_action_probability": 1.0 / 8.0,
@@ -84,7 +98,7 @@ def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
         seed=7,
     )
     checkpoint = torch.load(checkpoint_file, map_location="cpu", weights_only=False)
-    assert checkpoint["checkpoint_schema_version"] == "aria-iql-checkpoint-v3"
+    assert checkpoint["checkpoint_schema_version"] == CHECKPOINT_SCHEMA_VERSION
     assert checkpoint["state_schema_version"] == STATE_SCHEMA_VERSION
     assert checkpoint["belief_config_hash"] == config.config_hash
     assert result["evaluates_learned_policy"] is False

@@ -96,7 +96,13 @@ def test_behavior_policy_logs_normalized_support_and_masks_stop(env):
     probabilities, _ = behavior_action_distribution(env)
     assert len(probabilities) == env.action_space.n
     assert sum(probabilities) == pytest.approx(1.0)
-    assert all(probability > 0.0 for probability in probabilities[:7])
+    follow_up = ACTION_TO_INDEX["ask_follow_up_same_topic"]
+    assert probabilities[follow_up] == 0.0
+    assert all(
+        probability > 0.0
+        for index, probability in enumerate(probabilities[:7])
+        if index != follow_up
+    )
     assert probabilities[7] == 0.0
 
 

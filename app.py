@@ -15,6 +15,10 @@ from modules.module_05_ontology.graph import SkillOntologyGraph
 from modules.module_06_belief.belief_state import BeliefStateUpdater
 from modules.module_07_rl.environment import ARIAInterviewEnv
 from modules.module_08_llm.generator import LLMQuestionGenerator
+from modules.module_05_ontology.grounding import (
+    grounding_packet,
+    validate_grounded_question,
+)
 from modules.module_09_tts.engine import TTSAvatarBaseline
 from modules.module_01_stt.transcriber import transcribe_file
 
@@ -82,6 +86,11 @@ async def start_session(
     # 1. Initialize Ontology (Module 5)
     ontology = SkillOntologyGraph(role_name=role_name)
     adaptation_success = ontology.adapt_to_candidate(jd_text, resume_text)
+    if not adaptation_success or ontology.role_profile is None:
+        raise HTTPException(
+            status_code=422,
+            detail="The job description could not be converted into a grounded role profile.",
+        )
     
     # 2. Initialize Belief State (Module 6)
     all_skills = ontology.get_all_skills()
@@ -93,6 +102,9 @@ async def start_session(
         "belief": belief_updater,
         "history": [],
         "resume": resume_text, # Save text for Module 8 context
+        "jd": jd_text,
+        "role_profile": ontology.role_profile,
+        "current_target": None,
         "role": getattr(ontology, "inferred_role", role_name),
         "experience": getattr(ontology, "inferred_experience", "Mid-Level"),
         "turn": 0
@@ -105,6 +117,56 @@ async def start_session(
         "inferred_role": sessions[session_id]["role"],
         "inferred_experience": sessions[session_id]["experience"]
     }
+
+
+async def generate_grounded_session_question(session: dict, action: str) -> str:
+    profile = session["role_profile"]
+    skills = list(profile.skills)
+    if not skills:
+        raise RuntimeError("Session role profile has no assessable skills")
+    current = session.get("current_target")
+    candidates = []
+    if current and action == "increase_difficulty":
+        candidates = session["ontology"].get_advanced(current.canonical_name)
+    elif current and action in {"decrease_difficulty", "probe_foundation"}:
+        candidates = session["ontology"].get_prerequisites(current.canonical_name)
+    elif current and action != "switch_topic":
+        candidates = [current.canonical_name]
+    if not candidates:
+        candidates = [
+            skill.canonical_name for skill in skills
+            if current is None or skill.skill_id != current.skill_id
+        ] or [current.canonical_name]
+    target = min(
+        (session["ontology"].get_skill_metadata(name) for name in candidates),
+        key=lambda skill: (
+            skill.selection_priority,
+            session["belief"].get_evidence_count(skill.canonical_name),
+            skill.skill_id,
+        ),
+    )
+    context = grounding_packet(profile, target)
+    belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
+    rejected: list[list[str]] = []
+    for _ in range(3):
+        correction = "; ".join(rejected[-1]) if rejected else None
+        question = await llm_gen.generate_question(
+            action=action,
+            belief_state=belief,
+            resume=session["resume"],
+            history=session["history"],
+            role=session["role"],
+            experience=session["experience"],
+            target_skill=target.canonical_name,
+            grounding_context=context,
+            correction=correction,
+        )
+        result = validate_grounded_question(question, context, session["history"])
+        if result["valid"]:
+            session["current_target"] = target
+            return question
+        rejected.append(result["reasons"])
+    raise RuntimeError(f"Question grounding failed: {rejected[-1]}")
 
 @app.websocket("/ws/interview/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
@@ -127,28 +189,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     session = sessions[session_id]
     
     try:
-        first_action = "probe_foundation"
-        current_belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
-        
-        # Module 8: Generate Question (Streaming)
-        question_text = ""
-        async for chunk in llm_gen.generate_question_stream(
-            action=first_action,
-            belief_state=current_belief,
-            resume=session["resume"],
-            history=session["history"],
-            role=session["role"],
-            experience=session["experience"]
-        ):
-            if isinstance(chunk, dict) and chunk.get("type") == "prompt_debug":
-                await websocket.send_json(chunk)
-                continue
-                
-            question_text += chunk
-            await websocket.send_json({
-                "type": "aria_chunk",
-                "text": chunk
-            })
+        first_action = "switch_topic"
+        question_text = await generate_grounded_session_question(session, first_action)
             
         await websocket.send_json({
             "type": "aria_question",
@@ -213,32 +255,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "a": candidate_text
                 })
                 
-                skills = session["ontology"].get_all_skills()
-                if skills:
-                    session["belief"].update_belief(skills[0], semantic_score=0.9, cognitive_load="low", behavior_score=0.9)
+                if session.get("current_target"):
+                    session["belief"].update_belief(
+                        session["current_target"].canonical_name,
+                        semantic_score=0.9,
+                        cognitive_load="low",
+                        behavior_score=0.9,
+                    )
                 
                 session["turn"] += 1
-                next_action = "increase_difficulty" if session["turn"] % 2 == 0 else "probe_foundation"
+                action_cycle = (
+                    "probe_foundation",
+                    "increase_difficulty",
+                    "switch_topic",
+                )
+                next_action = action_cycle[(session["turn"] - 1) % len(action_cycle)]
                 
                 new_belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
-                question_text = ""
-                async for chunk in llm_gen.generate_question_stream(
-                    action=next_action,
-                    belief_state=new_belief,
-                    resume=session["resume"],
-                    history=session["history"],
-                    role=session["role"],
-                    experience=session["experience"]
-                ):
-                    if isinstance(chunk, dict) and chunk.get("type") == "prompt_debug":
-                        await websocket.send_json(chunk)
-                        continue
-                        
-                    question_text += chunk
-                    await websocket.send_json({
-                        "type": "aria_chunk",
-                        "text": chunk
-                    })
+                question_text = await generate_grounded_session_question(
+                    session, next_action
+                )
                 
                 await websocket.send_json({
                     "type": "aria_question",

@@ -119,6 +119,36 @@ def audit_raw_evidence(
     ]
     invalid = sum(item.get("evaluation_valid") is False for item in question_transitions)
     missing_validity = sum("evaluation_valid" not in item for item in question_transitions)
+    grounding_required = any(
+        item.get("transition_schema_version") == "aria-transition-v4"
+        for item in transitions
+    )
+    invalid_grounding = (
+        sum(item.get("question_grounding_valid") is not True for item in question_transitions)
+        if grounding_required else 0
+    )
+    missing_role_profiles = (
+        sum(
+            not item.get("role_profile_hash")
+            or not item.get("ontology_hash")
+            or not item.get("grounding_contract_hash")
+            for item in question_transitions
+        )
+        if grounding_required else 0
+    )
+    invalid_grounding_provenance = (
+        sum(
+            not isinstance(item.get("pairing_record"), dict)
+            or not item.get("target_skill_id")
+            or item.get("question_grounding", {}).get("target_skill_id")
+            != item.get("target_skill_id")
+            or item.get("question_grounding", {}).get("role_profile_hash")
+            != item.get("role_profile_hash")
+            or int(item.get("question_generation_attempts", 0) or 0) not in (1, 2, 3)
+            for item in question_transitions
+        )
+        if grounding_required else 0
+    )
     nonfinite_scores = 0
     missing_scores = 0
     for transition in question_transitions:
@@ -142,6 +172,38 @@ def audit_raw_evidence(
     leaking, renamed_duplicates = _identity_diagnostics(transitions)
     components = connected_identity_components(transitions)
     score_summaries, adjacent_effects = _score_separation(transitions)
+    generation_attempt_counts = Counter(
+        int(item.get("question_generation_attempts", 0) or 0)
+        for item in question_transitions
+    )
+    retried_questions = sum(
+        int(item.get("question_generation_attempts", 0) or 0) > 1
+        for item in question_transitions
+    )
+    pairing_classes = Counter()
+    duplicate_questions = 0
+    inconsistent_episode_grounding = 0
+    distinct_targets_per_episode = []
+    for episode in episodes:
+        first_pairing = next(
+            (item.get("pairing_record") for item in episode if item.get("pairing_record")),
+            {},
+        )
+        if first_pairing.get("pairing_class"):
+            pairing_classes[first_pairing["pairing_class"]] += 1
+        questions = [
+            " ".join(str(item.get("question", "")).casefold().split())
+            for item in episode if item.get("question")
+        ]
+        duplicate_questions += len(questions) - len(set(questions))
+        profiles = {item.get("role_profile_hash") for item in episode}
+        ontologies = {item.get("ontology_hash") for item in episode}
+        if len(profiles - {None}) != 1 or len(ontologies - {None}) != 1:
+            inconsistent_episode_grounding += 1
+        distinct_targets_per_episode.append(len({
+            item.get("target_skill_id") for item in episode
+            if item.get("target_skill_id")
+        }))
     warnings = []
     if len(episodes) < min_episodes:
         warnings.append(
@@ -157,6 +219,12 @@ def audit_raw_evidence(
         warnings.append("Terminal true-label distribution differs by more than 5%.")
     if invalid or missing_validity:
         warnings.append("Dataset contains invalid or unverified evaluator outputs.")
+    if invalid_grounding or missing_role_profiles or invalid_grounding_provenance:
+        warnings.append("Dataset contains invalid or unverified question grounding.")
+    if duplicate_questions:
+        warnings.append("Dataset contains repeated questions within an episode.")
+    if inconsistent_episode_grounding:
+        warnings.append("Role-profile or ontology provenance changes within an episode.")
     if nonfinite_scores or missing_scores:
         warnings.append("Dataset contains missing, non-finite, or out-of-range semantic scores.")
     if candidate_models & evaluator_models:
@@ -186,6 +254,17 @@ def audit_raw_evidence(
         "adjacent_standardized_effects": adjacent_effects,
         "invalid_evaluations": invalid,
         "missing_evaluation_validity": missing_validity,
+        "invalid_question_grounding": invalid_grounding,
+        "missing_role_profile_provenance": missing_role_profiles,
+        "invalid_grounding_provenance": invalid_grounding_provenance,
+        "question_generation_attempt_counts": dict(generation_attempt_counts),
+        "question_grounding_retry_rate": (
+            retried_questions / len(question_transitions) if question_transitions else None
+        ),
+        "pairing_class_counts": dict(pairing_classes),
+        "duplicate_questions_within_episode": duplicate_questions,
+        "inconsistent_episode_grounding": inconsistent_episode_grounding,
+        "distinct_targets_per_episode": _summary(distinct_targets_per_episode),
         "invalid_semantic_scores": nonfinite_scores,
         "missing_semantic_scores": missing_scores,
         "split_leaking_resumes": leaking["resume"],
@@ -350,6 +429,10 @@ def audit_offline_rl_support(transitions: list[dict]):
             probabilities.shape != (8,)
             or not np.all(np.isfinite(probabilities))
             or np.any(probabilities < 0.0)
+            or (
+                mask.shape == (8,)
+                and np.any(probabilities[mask == 0.0] != 0.0)
+            )
             or not np.isclose(probabilities.sum(), 1.0)
         ):
             invalid_propensities += 1

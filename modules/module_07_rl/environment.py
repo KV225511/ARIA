@@ -82,13 +82,10 @@ class ARIAInterviewEnv(gym.Env):
         Should be called after env.ontology.adapt_to_candidate().
         """
         all_skills = self.ontology.get_all_skills()
-        # Bug #4 guard: truncate to MAX_NODES to prevent obs dimension overflow
         if len(all_skills) > MAX_NODES:
-            import logging
-            logging.getLogger(__name__).warning(
-                f"Ontology has {len(all_skills)} nodes, exceeding MAX_NODES={MAX_NODES}. Truncating."
+            raise ValueError(
+                f"Ontology has {len(all_skills)} nodes, exceeding MAX_NODES={MAX_NODES}"
             )
-            all_skills = all_skills[:MAX_NODES]
         self.nodes = sorted(all_skills)
         self.num_nodes = len(self.nodes)
 
@@ -98,9 +95,11 @@ class ARIAInterviewEnv(gym.Env):
             raise RuntimeError("Cannot select a target skill from an empty ontology")
 
         action_name = RL_ACTION_SPACE[action_idx]
-        current_skill = self.nodes[self.current_node_idx]
+        current_skill = self.last_target_skill or self.nodes[self.current_node_idx]
 
-        if action_name in {"increase_difficulty"}:
+        if action_name == "ask_follow_up_same_topic" and self.last_target_skill:
+            candidates = [self.last_target_skill]
+        elif action_name in {"increase_difficulty"}:
             candidates = self.ontology.get_advanced(current_skill)
         elif action_name in {"decrease_difficulty", "probe_foundation"}:
             candidates = self.ontology.get_prerequisites(current_skill)
@@ -113,11 +112,16 @@ class ARIAInterviewEnv(gym.Env):
         if not candidates:
             candidates = [current_skill]
 
-        # Prefer under-observed and uncertain skills; lexical order makes ties
-        # deterministic across runs despite ontology storage using sets.
+        def requirement_priority(skill: str) -> int:
+            metadata = self.ontology.get_skill_metadata(skill)
+            return metadata.selection_priority if metadata is not None else 5
+
+        # The JD requirement is the primary ordering. Evidence and uncertainty
+        # adapt the interview only within equally important requirements.
         return min(
             candidates,
             key=lambda skill: (
+                requirement_priority(skill),
                 self.belief_updater.get_evidence_count(skill),
                 -self.belief_updater._calculate_entropy(
                     self.belief_updater.get_belief(skill)
@@ -138,7 +142,11 @@ class ARIAInterviewEnv(gym.Env):
         )
 
     def get_action_mask(self):
-        return build_action_mask(self)
+        mask = build_action_mask(self)
+        follow_up = RL_ACTION_SPACE.index("ask_follow_up_same_topic")
+        if self.last_target_skill is None:
+            mask[follow_up] = 0.0
+        return mask
 
     def step(self, action_idx):
         # NOTE: do NOT increment turn_id here — step_with_scores() handles it

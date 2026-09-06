@@ -2,9 +2,10 @@
 
 ## Scope
 
-This runbook describes the implemented v3 data-generation, replay, and
-training contract. Existing v2 synthetic data is evidence for historical
-belief-model experiments only; it must not be used to train the v3 policy.
+This runbook describes the v3 pipeline release. Its grounding-sensitive raw
+transition, state, action, simulator, and replay contracts are schema v4.
+Existing v2/v3 synthetic transitions are historical evidence only and must
+not be mixed with or used to train the v4 policy.
 
 ## Required inputs
 
@@ -30,8 +31,9 @@ python -m modules.module_07_rl.generation_preflight --resume-csv data/external/o
 
 Do not start generation unless `passes_preflight` is true. The preflight
 validates cleaned-resume hashes, selected categories, extractable JD text,
-duplicate JD content, and the unique-document counts required by the component
-plan.
+duplicate JD content, at least five evidence-backed competencies per eligible
+JD, and the unique-document counts required by the component plan. Readable JDs
+that cannot meet the grounding contract are listed and excluded from planning.
 
 Before the production run, use a three-component canary:
 
@@ -70,6 +72,15 @@ Every accepted question transition must contain:
 - raw question, candidate answer, evaluator scores, confidence, and rubric
   evidence;
 - atomic run-manifest provenance.
+- a grounding-contract hash, role-profile hash, ontology hash, stable
+  target-skill ID, exact JD evidence spans, grounding decision, retry count,
+  and descriptive JD/resume pairing record.
+
+Question retries are transactional: the sampled action and target are held
+fixed, rejected questions never enter history, and candidate retries reuse the
+same accepted question. A run with any failed episode is marked failed; its
+partial checkpoint is moved under `failed_runs/`, and the canonical dataset is
+restored byte-for-byte so the partial run cannot accidentally reach training.
 
 Every stop transition must be terminal, have action index 7, have identical
 `obs` and `next_obs`, and contain no question, answer, target skill, evaluator
@@ -123,7 +134,7 @@ be reconstructed after the fact.
 ## 5. Train the IQL policy
 
 ```powershell
-python -m modules.module_07_rl.train --train-file data/synthetic/v3/derived/splits/train.json --validation-file data/synthetic/v3/derived/splits/validation.json --belief-config data/synthetic/v3/derived/belief_model_v2.json --output modules/module_07_rl/aria_iql_belief_v3.pth --epochs 100 --batch-size 256 --seed 42
+python -m modules.module_07_rl.train --train-file data/synthetic/v3/derived/splits/train.json --validation-file data/synthetic/v3/derived/splits/validation.json --belief-config data/synthetic/v3/derived/belief_model_v2.json --output modules/module_07_rl/aria_iql_belief_v4.pth --epochs 100 --batch-size 256 --seed 42
 ```
 
 Training fails closed when schema versions, state semantics, hashes, masks,

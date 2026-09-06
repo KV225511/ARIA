@@ -8,7 +8,7 @@ import numpy as np
 from modules.module_07_rl.rl_spec import RL_ACTION_SPACE
 
 
-STATE_SCHEMA_VERSION = "aria-state-v3"
+STATE_SCHEMA_VERSION = "aria-state-v4"
 COGNITIVE_LABELS = ("low", "anxiety", "ignorance", "confident_ignorance")
 STATE_FEATURE_NAMES = (
     "global_p_beginner", "global_p_mid", "global_p_expert",

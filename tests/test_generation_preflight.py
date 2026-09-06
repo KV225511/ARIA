@@ -46,6 +46,14 @@ def test_preflight_requires_unique_readable_jds(tmp_path, monkeypatch):
             "unique_readable_content_hashes": 2,
         }),
     )
+    monkeypatch.setattr(
+        generation_preflight,
+        "extract_text_from_pdf",
+        lambda _: (
+            "Job Title: Software Engineer\nRequired Python, REST API, SQL, "
+            "Docker, authentication, and system design for production services."
+        ),
+    )
 
     report = generation_preflight.build_preflight_report(
         resume_csv=resume_csv,
@@ -57,5 +65,6 @@ def test_preflight_requires_unique_readable_jds(tmp_path, monkeypatch):
     assert report["job_descriptions"]["unique_readable_content_hashes"] == 2
     assert report["checks"]["enough_unique_readable_jds"] is False
     assert report["checks"]["no_duplicate_jd_content"] is False
+    assert report["job_descriptions"]["groundable_role_profiles"] == 2
     assert report["shortfall"]["unique_readable_jds"] == 1
     assert report["passes_preflight"] is False

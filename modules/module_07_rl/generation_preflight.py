@@ -6,11 +6,13 @@ import argparse
 import json
 from pathlib import Path
 
+from modules.module_05_ontology.grounding import build_role_profile, validate_role_profile
 from modules.module_07_rl.data_loader import (
     DEFAULT_CLEANED_RESUME_CSV,
     DEFAULT_RESUME_CATEGORIES,
     get_resume_source_manifest,
     get_valid_jd_documents,
+    extract_text_from_pdf,
 )
 
 
@@ -19,6 +21,31 @@ def _atomic_json_write(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
     temporary.replace(path)
+
+
+def get_groundable_jd_documents(directory: Path | None = None) -> tuple[list[Path], dict]:
+    if directory is None:
+        jd_paths, jd_report = get_valid_jd_documents()
+    else:
+        jd_paths, jd_report = get_valid_jd_documents(directory)
+    accepted = []
+    ungroundable_jds = []
+    grounded_skill_counts = {}
+    for path in jd_paths:
+        jd_text = extract_text_from_pdf(str(path))
+        try:
+            profile = build_role_profile(jd_text)
+            validate_role_profile(profile, jd_text)
+            grounded_skill_counts[path.name] = len(profile.skills)
+            accepted.append(path)
+        except ValueError as error:
+            ungroundable_jds.append({"file": path.name, "reason": str(error)})
+    return accepted, {
+        **jd_report,
+        "groundable_role_profiles": len(accepted),
+        "ungroundable_role_profiles": ungroundable_jds,
+        "grounded_skill_counts": grounded_skill_counts,
+    }
 
 
 def build_preflight_report(
@@ -34,7 +61,8 @@ def build_preflight_report(
         "csv", resume_csv, resume_categories
     )
 
-    _, jd_report = get_valid_jd_documents()
+    jd_paths, jd_report = get_groundable_jd_documents()
+    groundable_jds = len(jd_paths)
     unique_readable_jds = jd_report["unique_readable_content_hashes"]
     checks = {
         "enough_unique_resumes": (
@@ -43,9 +71,10 @@ def build_preflight_report(
         "enough_unique_readable_jds": unique_readable_jds >= required_components,
         "no_duplicate_jd_content": not jd_report["duplicate_content_groups"],
         "no_unreadable_selected_jds": not jd_report["unreadable_files"],
+        "enough_groundable_jds": groundable_jds >= required_components,
     }
     return {
-        "schema_version": "aria-generation-preflight-v1",
+        "schema_version": "aria-generation-preflight-v2",
         "required_identity_components": required_components,
         "identity_component_targets": list(identity_components),
         "resume_source": resume_manifest,
@@ -57,6 +86,7 @@ def build_preflight_report(
             "unique_readable_jds": max(
                 required_components - unique_readable_jds, 0
             ),
+            "groundable_jds": max(required_components - groundable_jds, 0),
         },
         "checks": checks,
         "passes_preflight": all(checks.values()),

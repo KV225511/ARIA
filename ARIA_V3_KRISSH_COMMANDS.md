@@ -291,7 +291,7 @@ Do not inspect or evaluate `test.json` yet.
   --train-file "$DerivedRoot\splits\train.json" `
   --validation-file "$DerivedRoot\splits\validation.json" `
   --belief-config "$DerivedRoot\belief_model_v2.json" `
-  --output "modules\module_07_rl\aria_iql_belief_v3.pth" `
+  --output "modules\module_07_rl\aria_iql_belief_v4.pth" `
   --epochs 100 `
   --batch-size 256 `
   --seed 42

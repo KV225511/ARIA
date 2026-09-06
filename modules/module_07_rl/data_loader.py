@@ -198,8 +198,15 @@ def _load_clean_resume_csv_cached(
     for row_number, row in enumerate(rows, start=2):
         raw_id = (row.get("ID") or "").strip()
         category = (row.get("Category") or "").strip()
-        full_text = (row.get("Resume_str") or "").strip()
-        prompt_text = (row.get("Resume_prompt") or "").strip()
+        # Git/CSV tooling may materialize quoted embedded newlines as CRLF on
+        # Windows. Canonicalize both fields before deriving the prompt so the
+        # contract is invariant across checkout platforms.
+        full_text = (row.get("Resume_str") or "").replace(
+            "\r\n", "\n"
+        ).replace("\r", "\n").strip()
+        prompt_text = (row.get("Resume_prompt") or "").replace(
+            "\r\n", "\n"
+        ).replace("\r", "\n").strip()
         declared_hash = (row.get("Resume_text_hash") or "").strip().lower()
         source_id = f"opensporks:{raw_id}"
 

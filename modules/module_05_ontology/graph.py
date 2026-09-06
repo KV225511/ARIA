@@ -2,8 +2,14 @@ import json
 import os
 import logging
 import re
-import requests
 from dotenv import load_dotenv
+
+from modules.module_05_ontology.grounding import (
+    GroundedSkill,
+    RoleProfile,
+    build_role_profile,
+    validate_role_profile,
+)
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -28,6 +34,8 @@ class SkillOntologyGraph:
         
         self.inferred_role = role_name
         self.inferred_experience = "Mid-Level"
+        self.role_profile: RoleProfile | None = None
+        self.skill_metadata: dict[str, GroundedSkill] = {}
         
         self._load_graph()
         
@@ -72,89 +80,71 @@ class SkillOntologyGraph:
         Also infers the target role and experience level.
         Returns True if successful, False if fell back to baseline.
         """
-        logger.info("Starting dynamic ontology adaptation via local Ollama...")
-        
-        base_nodes = self.base_data.get("nodes", [])
-        
-        prompt = f"""
-You are an expert technical interviewer and ontologist.
-Below are the baseline skills for the role of {self.role_name}:
-{json.dumps(base_nodes)}
-
-Here is the Job Description:
-{jd_text[:1500]}
-
-Here is the Candidate's Resume:
-{resume_text[:1500]}
-
-Modify the baseline ontology graph to perfectly adapt to the candidate's resume and the job description.
-- Add highly relevant new skills mentioned in the resume/JD as new nodes.
-- Remove baseline skills that are completely irrelevant to the JD or resume.
-- Update the edges to reflect prerequisite -> advanced relationships correctly.
-ALSO, infer the specific Role Name and the Experience Level (Fresher, Mid-Level, or Senior).
-
-Return ONLY valid JSON with this exact schema:
-{{
-    "inferred_role": "string",
-    "inferred_experience": "string",
-    "nodes": ["skill1", "skill2"], 
-    "edges": [["prereq", "advanced"]]
-}}
-Do not include any markdown formatting. Output ONLY JSON.
-"""
-        
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.2,
-                "num_ctx": 16384
-            }
-        }
-        
+        logger.info("Building evidence-backed ontology from the complete JD...")
         try:
-            # Huge timeout for local generation (300s)
-            response = requests.post(self.api_endpoint, json=payload, timeout=300)
-            response.raise_for_status()
-            
-            data = response.json()
-            raw_text = data.get("response", "").strip()
-                
-            # Use Regex to extract just the JSON block in case the LLM was chatty
-            json_match = re.search(r'\{.*?\}', raw_text, re.DOTALL)
-            if json_match:
-                clean_json_str = json_match.group(0)
-            else:
-                clean_json_str = raw_text
-                
-            parsed = json.loads(clean_json_str)
-            
-            self.inferred_role = parsed.get("inferred_role", self.role_name)
-            self.inferred_experience = parsed.get("inferred_experience", "Mid-Level")
-            
-            if "nodes" not in parsed or "edges" not in parsed:
-                raise ValueError("LLM returned JSON without 'nodes' or 'edges' keys.")
-                
+            profile = build_role_profile(jd_text, resume_text)
+            validate_role_profile(profile, jd_text)
             self._clear_graph()
-            for node in parsed.get("nodes", []):
-                self._add_node(node)
-            for edge in parsed.get("edges", []):
-                if len(edge) == 2:
-                    self._add_edge(edge[0], edge[1])
-            
-            logger.info(f"Successfully adapted ontology dynamically. Role: {self.inferred_role}, Exp: {self.inferred_experience}.")
+            self.role_profile = profile
+            self.skill_metadata = {
+                skill.canonical_name: skill for skill in profile.skills
+            }
+            names_by_id = {
+                skill.skill_id: skill.canonical_name for skill in profile.skills
+            }
+            for skill in profile.skills:
+                self._add_node(skill.canonical_name)
+            for skill in profile.skills:
+                for prerequisite_id in skill.prerequisite_ids:
+                    prerequisite = names_by_id.get(prerequisite_id)
+                    if prerequisite:
+                        self._add_edge(prerequisite, skill.canonical_name)
+            self._validate_graph()
+            self.inferred_role = profile.role_title
+            self.inferred_experience = self._infer_experience(resume_text)
+            logger.info(
+                "Built grounded ontology for %s with %d skills.",
+                self.inferred_role,
+                len(profile.skills),
+            )
             return True
-                
         except Exception as e:
-            logger.error(f"Dynamic adaptation failed via Ollama: {e}. Falling back to static graph.")
-            try:
-                self._load_graph() # Reset to baseline
-            except Exception as load_e:
-                logger.error(f"Fallback load also failed: {load_e}")
-            self.inferred_role = self.role_name
-            self.inferred_experience = "Mid-Level"
+            logger.error("Grounded ontology adaptation failed: %s", e)
+            self.role_profile = None
+            self.skill_metadata = {}
             return False
+
+    @staticmethod
+    def _infer_experience(resume_text: str) -> str:
+        text = resume_text.casefold()
+        years = [int(value) for value in re.findall(r"\b(\d{1,2})\+?\s+years?\b", text)]
+        maximum = max(years, default=0)
+        if maximum >= 7:
+            return "Senior"
+        if maximum >= 2:
+            return "Mid-Level"
+        return "Fresher"
+
+    def _validate_graph(self) -> None:
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(node: str) -> None:
+            if node in visiting:
+                raise ValueError("Grounded ontology contains a prerequisite cycle")
+            if node in visited:
+                return
+            visiting.add(node)
+            for successor in self.successors.get(node, ()):
+                visit(successor)
+            visiting.remove(node)
+            visited.add(node)
+
+        for node in self.nodes:
+            visit(node)
+
+    def get_skill_metadata(self, skill: str) -> GroundedSkill | None:
+        return self.skill_metadata.get(skill)
         
     def get_prerequisites(self, skill):
         """

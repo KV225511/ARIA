@@ -44,7 +44,8 @@ DEFAULT_DERIVED_DIR = PROJECT_ROOT / "data" / "synthetic" / "derived"
 DEFAULT_TRAIN_FILE = DEFAULT_DERIVED_DIR / "splits" / "train.json"
 DEFAULT_VALIDATION_FILE = DEFAULT_DERIVED_DIR / "splits" / "validation.json"
 DEFAULT_CONFIG_FILE = DEFAULT_DERIVED_DIR / "belief_model_v2.json"
-DEFAULT_CHECKPOINT = Path(__file__).with_name("aria_iql_belief_v3.pth")
+CHECKPOINT_SCHEMA_VERSION = "aria-iql-checkpoint-v4"
+DEFAULT_CHECKPOINT = Path(__file__).with_name("aria_iql_belief_v4.pth")
 
 
 class IQLNetworks(nn.Module):
@@ -136,7 +137,9 @@ def validate_replayed_dataset(dataset, config, expected_split):
             raise ValueError(f"Transition {index} selected an action masked as illegal")
         if behavior_probs.shape != expected_shape or not np.all(
             np.isfinite(behavior_probs)
-        ) or np.any(behavior_probs < 0.0) or not np.isclose(behavior_probs.sum(), 1.0):
+        ) or np.any(behavior_probs < 0.0) or np.any(
+            behavior_probs[action_mask == 0.0] != 0.0
+        ) or not np.isclose(behavior_probs.sum(), 1.0):
             raise ValueError(f"Transition {index} has invalid behavior propensities")
         selected_probability = float(transition["behavior_action_probability"])
         if selected_probability <= 0.0 or not np.isclose(
@@ -155,6 +158,21 @@ def validate_replayed_dataset(dataset, config, expected_split):
                 raise ValueError(f"Transition {index} stop action contains synthetic evidence")
             if not np.allclose(transition["obs"], transition["next_obs"]):
                 raise ValueError(f"Transition {index} stop action mutates policy state")
+            if transition.get("target_skill_id") is not None:
+                raise ValueError(f"Transition {index} stop action has a target skill")
+            if transition.get("question_grounding_valid") is not None:
+                raise ValueError(f"Transition {index} stop action has question grounding")
+        else:
+            if transition.get("question_grounding_valid") is not True:
+                raise ValueError(f"Transition {index} question is not grounding-validated")
+            if not transition.get("target_skill_id"):
+                raise ValueError(f"Transition {index} question has no stable target skill")
+            if not transition.get("role_profile_hash") or not transition.get("ontology_hash"):
+                raise ValueError(f"Transition {index} question lacks grounding provenance")
+        if not isinstance(transition.get("pairing_record"), dict):
+            raise ValueError(f"Transition {index} lacks a pairing record")
+        if not transition.get("generation_run_id") or not transition.get("plan_id"):
+            raise ValueError(f"Transition {index} lacks run provenance")
         reward = float(transition["reward"])
         if not math.isfinite(reward):
             raise ValueError(f"Transition {index} has non-finite reward")
@@ -369,7 +387,7 @@ def train_iql_policy(
             best_epoch = epoch + 1
             epochs_without_improvement = 0
             checkpoint = {
-                "checkpoint_schema_version": "aria-iql-checkpoint-v3",
+                "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
                 "model_state_dict": nets.state_dict(),
                 "state_schema_version": STATE_SCHEMA_VERSION,
                 "state_feature_names": list(STATE_FEATURE_NAMES),

@@ -10,6 +10,7 @@ import shutil
 import sys
 import random
 import time
+import uuid
 import httpx
 import numpy as np
 from pathlib import Path
@@ -42,6 +43,15 @@ from modules.module_07_rl.ollama_client import BoundedOllamaClient
 from modules.module_07_rl.state_builder import STATE_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
 from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
+from modules.module_07_rl.generation_preflight import get_groundable_jd_documents
+from modules.module_05_ontology.grounding import (
+    GROUNDING_SCHEMA_VERSION,
+    ROLE_PROFILE_SCHEMA_VERSION,
+    build_pairing_record,
+    grounding_contract_hash,
+    grounding_packet,
+    validate_grounded_question,
+)
 from modules.module_07_rl.dataset_split import (
     SPLIT_NAMES,
     group_transitions_into_episodes,
@@ -65,7 +75,7 @@ ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
 DEFAULT_SWEEP_EPISODES = 300
 MIN_RECOMMENDED_EPISODES = 200
 DATASET_SPLIT_RATIOS = (0.70, 0.15, 0.15)
-GENERATOR_SCHEMA_VERSION = "aria-simulator-v3"
+GENERATOR_SCHEMA_VERSION = "aria-simulator-v4"
 
 
 def _sha256_text(value: str) -> str:
@@ -109,9 +119,19 @@ async def generate_llm_response(
             print(f"Ollama API Error: {e}")
             return ""
 
-def build_evaluator_prompt(question: str, answer: str) -> str:
+def build_evaluator_prompt(
+    question: str,
+    answer: str,
+    grounding_context: dict | None = None,
+) -> str:
     """Build a label-blind rubric prompt with concrete score anchors."""
-    return f"""Evaluate the interview answer strictly against the technical question. Judge correctness, depth, trade-offs, and edge-case awareness. Do not reward length, confidence, terminology, or polished writing unless the technical substance supports it.
+    grounding_context = grounding_context or {}
+    return f"""Evaluate the interview answer strictly against the technical question and supplied competency context. Judge correctness, depth, trade-offs, and edge-case awareness. Do not reward length, confidence, terminology, or polished writing unless the technical substance supports it.
+
+Target competency: {grounding_context.get('target_skill', 'unspecified')}
+Competency definition: {grounding_context.get('target_definition', 'unspecified')}
+Role domain: {grounding_context.get('role_domain', 'unspecified')}
+JD evidence: {json.dumps(grounding_context.get('jd_evidence', []), ensure_ascii=False)}
 
 Question: {question}
 Answer: {answer}
@@ -154,9 +174,10 @@ async def evaluate_answer(
     question: str,
     answer: str,
     client: BoundedOllamaClient | None = None,
+    grounding_context: dict | None = None,
 ) -> tuple:
     """Return scores plus a validity flag without consulting persona labels."""
-    prompt = build_evaluator_prompt(question, answer)
+    prompt = build_evaluator_prompt(question, answer, grounding_context)
 
     # Invalid evaluations are never converted into label-dependent fallback
     # scores. Retry once, then let the simulator reject the turn.
@@ -366,6 +387,13 @@ def _atomic_json_write(path: Path, value) -> None:
     temporary.replace(path)
 
 
+def _atomic_bytes_write(path: Path, value: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".restore.tmp")
+    temporary.write_bytes(value)
+    temporary.replace(path)
+
+
 def _format_duration(seconds: float) -> str:
     """Format an ETA without implying more precision than the estimate has."""
     seconds = max(int(round(seconds)), 0)
@@ -417,6 +445,17 @@ def validate_append_provenance(
 ) -> None:
     if candidate_model == evaluator_model:
         raise ValueError("Candidate and evaluator models must remain distinct")
+    if transitions:
+        existing_transition_schemas = {
+            str(item.get("transition_schema_version") or "missing")
+            for item in transitions
+        }
+        if existing_transition_schemas != {TRANSITION_SCHEMA_VERSION}:
+            raise ValueError(
+                "Append transition schema is incompatible with the current corpus: "
+                f"existing={sorted(existing_transition_schemas)}, "
+                f"required={TRANSITION_SCHEMA_VERSION}. Regenerate or use a new output path."
+            )
     existing_candidates = {
         str(item["candidate_model"])
         for item in transitions if item.get("candidate_model")
@@ -612,7 +651,12 @@ def behavior_action_distribution(env: ARIAInterviewEnv) -> tuple[list[float], st
     """Return the exact probability of every action under the behavior policy."""
     epsilon = 0.25
     stop_index = ACTION_TO_INDEX["conclude_interview"]
-    question_indices = list(range(stop_index))
+    action_mask = env.get_action_mask().tolist()
+    question_indices = [
+        index for index in range(stop_index) if action_mask[index] > 0.0
+    ]
+    if not question_indices:
+        raise RuntimeError("No legal question action is available")
     assessment = env.belief_updater.get_aggregate_assessment()
     coverage = len(assessment["visited_skills"])
     required_coverage = min(MIN_SKILLS_COVERED, env.num_nodes)
@@ -631,7 +675,13 @@ def behavior_action_distribution(env: ARIAInterviewEnv) -> tuple[list[float], st
         heuristic_indices = [ACTION_TO_INDEX[name] for name in candidates_by_label[label]]
         policy_name = "belief_heuristic"
 
-    question_probs = [epsilon / len(question_indices)] * len(question_indices)
+    heuristic_indices = [
+        index for index in heuristic_indices if index in question_indices
+    ] or question_indices
+
+    question_probs = {
+        index: epsilon / len(question_indices) for index in question_indices
+    }
     for index in heuristic_indices:
         question_probs[index] += (1.0 - epsilon) / len(heuristic_indices)
 
@@ -679,6 +729,7 @@ async def simulate_episode(
     seed: int = 42,
     display_number: int | None = None,
     generation_run_id: str = "",
+    plan_id: str = "",
     generation_started_at: str = "",
     ollama_client: BoundedOllamaClient | None = None,
     resume_source: str = "csv",
@@ -724,8 +775,25 @@ async def simulate_episode(
             client=ollama_client,
         )
         
-        env.ontology.adapt_to_candidate(jd_text, resume_text)
+        if not env.ontology.adapt_to_candidate(jd_text, resume_text):
+            raise ValueError(f"Grounded role-profile extraction failed for {jd_name}")
         env.sync_ontology_nodes()
+        role_profile = env.ontology.role_profile
+        if role_profile is None:
+            raise RuntimeError("Ontology adaptation returned no role profile")
+        pairing_record = build_pairing_record(role_profile)
+        grounding_contract = grounding_contract_hash()
+        ontology_nodes = sorted(env.ontology.get_all_skills())
+        ontology_edges = sorted(
+            (source, target)
+            for source, targets in env.ontology.successors.items()
+            for target in targets
+        )
+        ontology_hash = _sha256_text(json.dumps(
+            {"nodes": ontology_nodes, "edges": ontology_edges},
+            sort_keys=True,
+            separators=(",", ":"),
+        ))
         obs, _ = env.reset()
         
         # Cycle tiers to guarantee balance without leaking the label into scoring.
@@ -753,9 +821,6 @@ async def simulate_episode(
         interviewer_experience = getattr(
             env.ontology, "inferred_experience", "Mid-Level"
         )
-        consecutive_evaluation_failures = 0
-        consecutive_question_failures = 0
-        consecutive_answer_failures = 0
         while not done:
             action_idx, behavior_policy, behavior_probabilities = select_behavior_action(
                 env, rng, include_probabilities=True
@@ -802,6 +867,20 @@ async def simulate_episode(
                     "skills_covered": len(assessment["visited_skills"]),
                     "valid_evidence_count": env.valid_evidence_count,
                     "target_skill": None,
+                    "target_skill_id": None,
+                    "target_skill_source": None,
+                    "role_profile_hash": role_profile.profile_hash,
+                    "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
+                    "grounding_contract_hash": grounding_contract,
+                    "pairing_record": pairing_record,
+                    "ontology_hash": ontology_hash,
+                    "ontology_nodes": ontology_nodes,
+                    "ontology_size": len(ontology_nodes),
+                    "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
+                    "question_grounding_valid": None,
+                    "question_grounding": None,
+                    "question_generation_attempts": 0,
+                    "rejected_question_reasons": [],
                     "semantic_score": None,
                     "behavior_score": None,
                     "cognitive_load": None,
@@ -814,6 +893,7 @@ async def simulate_episode(
                     "simulation_seed": seed + ep,
                     "episode_id": f"episode_{ep}",
                     "generation_run_id": generation_run_id,
+                    "plan_id": plan_id,
                     "generation_started_at": generation_started_at,
                     "generator_schema_version": GENERATOR_SCHEMA_VERSION,
                     "transition_schema_version": TRANSITION_SCHEMA_VERSION,
@@ -837,59 +917,81 @@ async def simulate_episode(
             
             belief_state = {k: v.tolist() for k, v in env.belief_updater.beliefs.items()}
             
-            # 1. Interviewer generates question (pass persona experience for prompt calibration)
-            question_prompt_hash = _sha256_text(interviewer._build_prompt(
-                action_name,
-                belief_state,
-                resume_text[:1500],
-                history,
-                experience=interviewer_experience,
-                target_skill=target_skill,
-            ))
-            question = await interviewer.generate_question(
-                action=action_name,
-                belief_state=belief_state,
-                resume=resume_text[:1500],
-                history=history,
-                experience=interviewer_experience,
-                target_skill=target_skill,
-            )
-            
-            # Guard: skip turn if question is empty (Ollama timeout / model hiccup)
-            if not question or not question.strip():
-                consecutive_question_failures += 1
-                print(
-                    f"  [WARN] Episode episode_{ep}: empty question generated "
-                    f"for action '{action_name}'."
+            target_metadata = env.ontology.get_skill_metadata(target_skill)
+            if target_metadata is None:
+                raise RuntimeError(f"Target skill lacks grounding metadata: {target_skill}")
+            question_grounding = grounding_packet(role_profile, target_metadata)
+
+            # One sampled behavior action and target survive all retries. A
+            # rejected generation therefore cannot bias logged propensities.
+            rejected_question_reasons = []
+            question = ""
+            question_prompt_hash = None
+            grounding_result = None
+            for question_attempt in range(1, 4):
+                correction = (
+                    "; ".join(rejected_question_reasons[-1])
+                    if rejected_question_reasons else None
                 )
-                if consecutive_question_failures >= 3:
-                    print(f"  [ERROR] Episode episode_{ep}: question generation repeatedly failed.")
-                    return []
-                continue
-            consecutive_question_failures = 0
+                question_prompt = interviewer._build_prompt(
+                    action_name,
+                    belief_state,
+                    resume_text,
+                    history,
+                    role=role_profile.role_title,
+                    experience=interviewer_experience,
+                    target_skill=target_skill,
+                    grounding_context=question_grounding,
+                    correction=correction,
+                )
+                question_prompt_hash = _sha256_text(question_prompt)
+                question = await interviewer.generate_question(
+                    action=action_name,
+                    belief_state=belief_state,
+                    resume=resume_text,
+                    history=history,
+                    role=role_profile.role_title,
+                    experience=interviewer_experience,
+                    target_skill=target_skill,
+                    grounding_context=question_grounding,
+                    correction=correction,
+                )
+                grounding_result = validate_grounded_question(
+                    question, question_grounding, history
+                )
+                if grounding_result["valid"]:
+                    break
+                rejected_question_reasons.append(grounding_result["reasons"])
+            if not grounding_result or not grounding_result["valid"]:
+                print(
+                    f"  [ERROR] Episode episode_{ep}: grounding failed for "
+                    f"action '{action_name}' after 3 attempts."
+                )
+                return []
             
             # 2. Candidate answers
-            answer = await generate_llm_response(
-                question, CANDIDATE_MODEL, system=system_prompt, client=ollama_client
-            )
-            if not answer or not answer.strip():
-                consecutive_answer_failures += 1
+            answer = ""
+            for answer_attempt in range(1, 4):
+                answer = await generate_llm_response(
+                    question,
+                    CANDIDATE_MODEL,
+                    system=system_prompt,
+                    client=ollama_client,
+                )
+                if answer and answer.strip():
+                    break
                 print(
                     f"  [WARN] Episode episode_{ep}: candidate generation failed "
-                    f"({consecutive_answer_failures}/3)."
+                    f"({answer_attempt}/3); retrying the same action, target, and question."
                 )
-                if consecutive_answer_failures >= 3:
-                    print(
-                        f"  [ERROR] Episode episode_{ep}: candidate generation "
-                        "repeatedly failed."
-                    )
-                    return []
-                continue
-            consecutive_answer_failures = 0
-            history.append({"q": question, "a": answer})
+            if not answer or not answer.strip():
+                print(f"  [ERROR] Episode episode_{ep}: candidate repeatedly failed.")
+                return []
             
             # 3. Evaluate
-            evaluator_prompt_hash = _sha256_text(build_evaluator_prompt(question, answer))
+            evaluator_prompt_hash = _sha256_text(build_evaluator_prompt(
+                question, answer, question_grounding
+            ))
             (
                 sem_score,
                 beh_score,
@@ -897,19 +999,19 @@ async def simulate_episode(
                 evaluator_confidence,
                 rubric_evidence,
                 evaluation_valid,
-            ) = await evaluate_answer(question, answer, client=ollama_client)
+            ) = await evaluate_answer(
+                question,
+                answer,
+                client=ollama_client,
+                grounding_context=question_grounding,
+            )
             if not evaluation_valid:
-                consecutive_evaluation_failures += 1
-                history.pop()
                 print(
-                    f"  [WARN] Episode episode_{ep}: invalid evaluator output; "
-                    "rejecting turn."
+                    f"  [ERROR] Episode episode_{ep}: evaluator remained invalid "
+                    "after its bounded retries; aborting the transactional episode."
                 )
-                if consecutive_evaluation_failures >= 3:
-                    print(f"  [ERROR] Episode episode_{ep}: evaluator repeatedly failed.")
-                    return []
-                continue
-            consecutive_evaluation_failures = 0
+                return []
+            history.append({"q": question, "a": answer})
             
             # 4. Environment Step
             next_obs, reward, terminated, truncated, info = env.step_with_scores(
@@ -959,6 +1061,28 @@ async def simulate_episode(
                 "skills_covered": len(assessment["visited_skills"]),
                 "valid_evidence_count": env.valid_evidence_count,
                 "target_skill": target_skill,
+                "target_skill_id": target_metadata.skill_id,
+                "target_skill_source": target_metadata.support_type,
+                "target_skill_priority": target_metadata.priority,
+                "role_profile_hash": role_profile.profile_hash,
+                "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
+                "grounding_contract_hash": grounding_contract,
+                "pairing_record": pairing_record,
+                "ontology_hash": ontology_hash,
+                "ontology_nodes": ontology_nodes,
+                "ontology_size": len(ontology_nodes),
+                "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
+                "question_grounding_valid": grounding_result["valid"],
+                "question_grounding": grounding_result,
+                "question_generation_attempts": question_attempt,
+                "candidate_generation_attempts": answer_attempt,
+                "rejected_question_reasons": rejected_question_reasons,
+                "jd_evidence_hashes": [
+                    _sha256_text(span.text) for span in target_metadata.jd_evidence
+                ],
+                "resume_evidence_hashes": [
+                    _sha256_text(span.text) for span in target_metadata.resume_evidence
+                ],
                 "semantic_score": float(sem_score),
                 "behavior_score": float(beh_score),
                 "cognitive_load": cog_load,
@@ -971,6 +1095,7 @@ async def simulate_episode(
                 "simulation_seed": seed + ep,
                 "episode_id": f"episode_{ep}",
                 "generation_run_id": generation_run_id,
+                "plan_id": plan_id,
                 "generation_started_at": generation_started_at,
                 "generator_schema_version": GENERATOR_SCHEMA_VERSION,
                 "transition_schema_version": TRANSITION_SCHEMA_VERSION,
@@ -1016,6 +1141,9 @@ async def run_simulation(
 ):
     dataset_path = Path(dataset_file)
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    original_dataset_bytes = (
+        dataset_path.read_bytes() if dataset_path.exists() else None
+    )
     if max_concurrent <= 0:
         raise ValueError("max_concurrent must be positive")
     if candidate_request_concurrency <= 0 or evaluator_request_concurrency <= 0:
@@ -1088,7 +1216,7 @@ async def run_simulation(
             
     if sweep:
         if resume_source == "csv":
-            jds, jd_manifest = get_valid_jd_documents(JDS_DIR)
+            jds, jd_manifest = get_groundable_jd_documents(JDS_DIR)
             resumes = get_resume_documents(
                 resume_source,
                 resume_csv_path,
@@ -1183,15 +1311,22 @@ async def run_simulation(
         ensure_ascii=False,
         separators=(",", ":"),
     ))
+    grounding_hash = grounding_contract_hash()
     run_material = (
         f"{source_hash}|{seed}|{start_index}|{total_eps}|"
         f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}|"
-        f"{document_sources_hash}|{planned_pairs_hash}"
+        f"{document_sources_hash}|{planned_pairs_hash}|{grounding_hash}|"
+        f"{TRANSITION_SCHEMA_VERSION}|{STATE_SCHEMA_VERSION}|"
+        f"{ACTION_SCHEMA_VERSION}|{REWARD_SCHEMA_VERSION}"
     )
-    generation_run_id = hashlib.sha256(run_material.encode("utf-8")).hexdigest()[:16]
+    plan_id = hashlib.sha256(run_material.encode("utf-8")).hexdigest()[:16]
+    generation_run_id = hashlib.sha256(
+        f"{plan_id}|{generation_started_at}|{uuid.uuid4().hex}".encode("utf-8")
+    ).hexdigest()[:16]
     manifest_path = dataset_path.parent / "manifests" / f"{generation_run_id}.json"
     run_manifest = {
         "generation_run_id": generation_run_id,
+        "plan_id": plan_id,
         "status": "running",
         "generation_started_at": generation_started_at,
         "source_dataset_hash": source_hash,
@@ -1216,6 +1351,9 @@ async def run_simulation(
         "state_schema_version": STATE_SCHEMA_VERSION,
         "action_schema_version": ACTION_SCHEMA_VERSION,
         "reward_schema_version": REWARD_SCHEMA_VERSION,
+        "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
+        "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
+        "grounding_contract_hash": grounding_hash,
         "ollama_host": OLLAMA_HOST,
         "ollama_num_ctx": OLLAMA_NUM_CTX,
         "ollama_keep_alive": OLLAMA_KEEP_ALIVE,
@@ -1244,6 +1382,7 @@ async def run_simulation(
                 seed=seed,
                 display_number=order + 1,
                 generation_run_id=generation_run_id,
+                plan_id=plan_id,
                 generation_started_at=generation_started_at,
                 ollama_client=ollama_client,
                 resume_source=resume_source,
@@ -1296,24 +1435,52 @@ async def run_simulation(
     dataset = list(existing)
     for completed_order in sorted(completed):
         dataset.extend(completed[completed_order])
-    print(
-        f"\nSimulation complete: {len(completed)}/{total_eps} new episodes saved. "
-        f"Failures: {len(failed)}. "
-        f"Combined dataset has {len(group_transitions_into_episodes(dataset))} "
-        f"episodes and {len(dataset)} transitions at {dataset_path}."
-    )
+    all_completed = len(completed) == total_eps and not failed
+    pairing_records = []
+    for completed_order in sorted(completed):
+        first = completed[completed_order][0]
+        pairing_records.append({
+            "episode_id": first.get("episode_id"),
+            "resume_file": first.get("resume_file"),
+            "jd_file": first.get("jd_file"),
+            **dict(first.get("pairing_record") or {}),
+        })
+    partial_path = None
+    if not all_completed and completed:
+        partial_path = (
+            dataset_path.parent / "failed_runs" /
+            f"{generation_run_id}.partial.json"
+        )
+        _atomic_json_write(partial_path, dataset)
+        if original_dataset_bytes is None:
+            dataset_path.unlink(missing_ok=True)
+        else:
+            _atomic_bytes_write(dataset_path, original_dataset_bytes)
     run_manifest.update({
-        "status": "complete" if completed else "failed",
+        "status": "complete" if all_completed else "failed",
         "completed_episodes": len(completed),
         "failed_episodes": {str(order): message for order, message in failed.items()},
         "combined_transition_count": len(dataset),
+        "pairing_records": pairing_records,
+        "partial_dataset_path": str(partial_path) if partial_path else None,
+        "canonical_dataset_restored": not all_completed,
         "generation_finished_at": datetime.now(timezone.utc).isoformat(),
     })
     _atomic_json_write(manifest_path, run_manifest)
-    if not completed:
-        raise RuntimeError(
-            "No new episodes completed successfully; the existing dataset was preserved"
+    if not all_completed:
+        print(
+            f"\nGeneration failed: {len(completed)}/{total_eps} episodes completed; "
+            f"canonical dataset restored. Partial checkpoint: {partial_path or 'none'}."
         )
+        raise RuntimeError(
+            f"Generation completed {len(completed)}/{total_eps} episodes; "
+            "partial output is not eligible for training"
+        )
+    print(
+        f"\nSimulation complete: {len(completed)}/{total_eps} new episodes saved. "
+        f"Combined dataset has {len(group_transitions_into_episodes(dataset))} "
+        f"episodes and {len(dataset)} transitions at {dataset_path}."
+    )
     return dataset
 
 if __name__ == "__main__":

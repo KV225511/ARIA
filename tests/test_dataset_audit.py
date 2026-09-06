@@ -116,3 +116,38 @@ def test_content_hash_detects_renamed_duplicate_and_cross_split_leakage():
     )
     assert report["split_leaking_resumes"] == ["same-content"]
     assert report["renamed_duplicate_resumes"]
+
+
+def test_v4_raw_audit_requires_and_reports_grounding_provenance():
+    transitions = []
+    for label in range(3):
+        item = _transition(f"grounded-{label}", label, label, True, 0.1)
+        item.update({
+            "transition_schema_version": "aria-transition-v4",
+            "transition_kind": "question",
+            "resume_content_hash": f"resume-hash-{label}",
+            "jd_content_hash": f"jd-hash-{label}",
+            "question": f"How would you apply Python in scenario {label}?",
+            "question_grounding_valid": True,
+            "question_generation_attempts": label + 1,
+            "target_skill_id": "python",
+            "role_profile_hash": f"profile-{label}",
+            "grounding_contract_hash": "contract-hash",
+            "ontology_hash": f"ontology-{label}",
+            "pairing_record": {"pairing_class": "evidence_overlap"},
+            "question_grounding": {
+                "target_skill_id": "python",
+                "role_profile_hash": f"profile-{label}",
+            },
+        })
+        transitions.append(item)
+
+    report = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+
+    assert report["passes_quality_gates"] is True
+    assert report["invalid_grounding_provenance"] == 0
+    assert report["question_generation_attempt_counts"] == {1: 1, 2: 1, 3: 1}
+    assert report["question_grounding_retry_rate"] == 2 / 3
+    assert report["pairing_class_counts"] == {"evidence_overlap": 3}

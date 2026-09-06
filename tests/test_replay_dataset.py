@@ -36,9 +36,21 @@ def _raw_episode(index, label, score):
             "question": f"Question {turn}",
             "transition_schema_version": TRANSITION_SCHEMA_VERSION,
             "action_schema_version": ACTION_SCHEMA_VERSION,
-            "action_mask_before": [1.0] * 7 + [0.0],
-            "behavior_action_probs": [1.0 / 7.0] * 7 + [0.0],
-            "behavior_action_probability": 1.0 / 7.0,
+            "action_mask_before": (
+                [1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0]
+                if turn == 0 else [1.0] * 7 + [0.0]
+            ),
+            "behavior_action_probs": (
+                [1.0 / 6.0, 1.0 / 6.0, 0.0, 1.0 / 6.0,
+                 1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0, 0.0]
+                if turn == 0 else [1.0 / 7.0] * 7 + [0.0]
+            ),
+            "behavior_action_probability": 1.0 / (6.0 if turn == 0 else 7.0),
+            "target_skill_id": "python",
+            "question_grounding_valid": True,
+            "role_profile_hash": f"profile-{index}",
+            "ontology_hash": f"ontology-{index}",
+            "grounding_contract_hash": "grounding-contract-hash",
         }
         for turn in range(2)
     ]

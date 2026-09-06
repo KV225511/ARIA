@@ -451,7 +451,7 @@ Do not inspect locked-test metrics at this stage.
 ## 15. Train IQL
 
 ```powershell
-$Checkpoint = "$ProdRoot\aria_iql_belief_v3.pth"
+$Checkpoint = "$ProdRoot\aria_iql_belief_v4.pth"
 
 & $PY -m modules.module_07_rl.train `
   --train-file "$ProdDerived\splits\train.json" `
@@ -489,6 +489,6 @@ until the following are implemented and frozen:
 9. a release manifest binding all source, dataset, split, configuration,
    checkpoint, model, and evaluation-report hashes.
 
-The currently valid stopping point is a trained v3 checkpoint backed by
+The currently valid stopping point is a trained v4 checkpoint backed by
 passing raw-data, offline-support, split, calibration, and replay gates. That
 checkpoint is not yet a release-validated interview policy.
