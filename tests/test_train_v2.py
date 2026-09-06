@@ -16,7 +16,10 @@ from modules.module_07_rl.train import (
 )
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
-from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import (
+    GENERATOR_SCHEMA_VERSION,
+    TRANSITION_SCHEMA_VERSION,
+)
 
 
 def _transition(index, split):
@@ -46,6 +49,7 @@ def _transition(index, split):
         "state_feature_names": list(STATE_FEATURE_NAMES),
         "belief_config_hash": BeliefModelConfig().config_hash,
         "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+        "generator_schema_version": GENERATOR_SCHEMA_VERSION,
         "action_schema_version": ACTION_SCHEMA_VERSION,
         "reward_schema_version": REWARD_SCHEMA_VERSION,
         "transition_kind": "stop" if is_stop else "question",
@@ -56,6 +60,13 @@ def _transition(index, split):
         "target_skill_id": None if is_stop else "python",
         "question_grounding_schema_version": "aria-question-grounding-v1",
         "question_grounding_valid": None if is_stop else True,
+        "question_generation_attempts": None if is_stop else 1,
+        "llm_question_generation_attempts": None if is_stop else 1,
+        "deterministic_question_generation_attempts": None if is_stop else 0,
+        "question_generation_mode": None if is_stop else "llm",
+        "fallback_question_template_version": None,
+        "question_prompt_hash": None if is_stop else f"prompt-{split}-{index}",
+        "question_generation_seed": None if is_stop else index,
         "pairing_record": {"pairing_class": "evidence_overlap"},
         "generation_run_id": "generation-run",
         "plan_id": "generation-plan",

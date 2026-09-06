@@ -75,10 +75,17 @@ Every accepted question transition must contain:
 - a grounding-contract hash, role-profile hash, ontology hash, stable
   target-skill ID, exact JD evidence spans, grounding decision, retry count,
   and descriptive JD/resume pairing record.
+- an exact question-generation mode: accepted LLM output, or the versioned
+  deterministic recovery used only after three non-empty grounded rejections.
 
 Question retries are transactional: the sampled action and target are held
 fixed, rejected questions never enter history, and candidate retries reuse the
-same accepted question. A run with any failed episode is marked failed; its
+same accepted question. After three non-empty question rejections, the
+simulator may use one action-specific deterministic question, but it must pass
+the same grounding validator and is recorded separately. Empty/API-failed
+generations never use this recovery. The raw audit rejects fallback rates above
+10%, invalid generation provenance, and excessive repeated fallback questions
+across independent identity components. A run with any failed episode is marked failed; its
 partial checkpoint is moved under `failed_runs/`, and the canonical dataset is
 restored byte-for-byte so the partial run cannot accidentally reach training.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -14,9 +15,46 @@ from modules.module_07_rl.dataset_split import (
     connected_identity_components,
     group_transitions_into_episodes,
 )
+from modules.module_07_rl.transition_schema import (
+    GENERATOR_SCHEMA_VERSION,
+    TRANSITION_SCHEMA_VERSION,
+    has_valid_question_generation_provenance,
+    is_plain_int,
+)
+from modules.module_05_ontology.grounding import (
+    GROUNDING_POLICY_VERSION,
+    GROUNDING_SCHEMA_VERSION,
+    ROLE_PROFILE_SCHEMA_VERSION,
+    grounding_contract_hash,
+)
 
 
 MIN_QUALITY_GATE_EPISODES = 200
+MAX_DETERMINISTIC_FALLBACK_RATE = 0.10
+MAX_CROSS_COMPONENT_FALLBACK_DUPLICATE_RATE = 0.25
+
+
+def _valid_grounding_provenance(item: dict) -> bool:
+    grounding = item.get("question_grounding")
+    attempts = item.get("question_generation_attempts")
+    return (
+        isinstance(item.get("pairing_record"), dict)
+        and bool(item.get("target_skill_id"))
+        and isinstance(grounding, dict)
+        and grounding.get("schema_version") == GROUNDING_SCHEMA_VERSION
+        and grounding.get("grounding_policy_version") == GROUNDING_POLICY_VERSION
+        and grounding.get("target_skill_id") == item.get("target_skill_id")
+        and grounding.get("role_profile_hash") == item.get("role_profile_hash")
+        and grounding.get("decision") == "accept"
+        and grounding.get("valid") is True
+        and item.get("question_grounding_valid") is True
+        and is_plain_int(attempts)
+        and 1 <= attempts <= 3
+    )
+
+
+def _attempt_bucket(value):
+    return value if is_plain_int(value) else "invalid"
 
 
 def _summary(values):
@@ -107,6 +145,7 @@ def audit_raw_evidence(
     transitions: list[dict],
     min_episodes: int = MIN_QUALITY_GATE_EPISODES,
     min_independent_components: int = 3,
+    allow_legacy: bool = False,
 ):
     episodes = group_transitions_into_episodes(transitions)
     terminal = _terminal_records(transitions)
@@ -119,10 +158,11 @@ def audit_raw_evidence(
     ]
     invalid = sum(item.get("evaluation_valid") is False for item in question_transitions)
     missing_validity = sum("evaluation_valid" not in item for item in question_transitions)
-    grounding_required = any(
-        item.get("transition_schema_version") == "aria-transition-v4"
+    contains_current_contract = any(
+        item.get("transition_schema_version") == TRANSITION_SCHEMA_VERSION
         for item in transitions
     )
+    grounding_required = not allow_legacy or contains_current_contract
     invalid_grounding = (
         sum(item.get("question_grounding_valid") is not True for item in question_transitions)
         if grounding_required else 0
@@ -136,15 +176,23 @@ def audit_raw_evidence(
         )
         if grounding_required else 0
     )
+    current_contract = {
+        "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+        "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
+        "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
+        "grounding_contract_hash": grounding_contract_hash(),
+    }
+    invalid_contract_provenance = (
+        sum(
+            any(item.get(field) != required for field, required in current_contract.items())
+            for item in transitions
+        )
+        if grounding_required else 0
+    )
     invalid_grounding_provenance = (
         sum(
-            not isinstance(item.get("pairing_record"), dict)
-            or not item.get("target_skill_id")
-            or item.get("question_grounding", {}).get("target_skill_id")
-            != item.get("target_skill_id")
-            or item.get("question_grounding", {}).get("role_profile_hash")
-            != item.get("role_profile_hash")
-            or int(item.get("question_generation_attempts", 0) or 0) not in (1, 2, 3)
+            not _valid_grounding_provenance(item)
             for item in question_transitions
         )
         if grounding_required else 0
@@ -173,12 +221,67 @@ def audit_raw_evidence(
     components = connected_identity_components(transitions)
     score_summaries, adjacent_effects = _score_separation(transitions)
     generation_attempt_counts = Counter(
-        int(item.get("question_generation_attempts", 0) or 0)
+        _attempt_bucket(item.get("question_generation_attempts"))
         for item in question_transitions
     )
     retried_questions = sum(
-        int(item.get("question_generation_attempts", 0) or 0) > 1
+        is_plain_int(item.get("question_generation_attempts"))
+        and item["question_generation_attempts"] > 1
         for item in question_transitions
+    )
+    fallback_questions = sum(
+        item.get("question_generation_mode") == "deterministic_grounded_fallback"
+        for item in question_transitions
+    )
+    fallback_rate = (
+        fallback_questions / len(question_transitions) if question_transitions else 0.0
+    )
+    invalid_generation_mode_provenance = (
+        sum(
+            not has_valid_question_generation_provenance(item)
+            for item in question_transitions
+        )
+        if grounding_required else 0
+    )
+
+    episode_components = {}
+    for component_index, component_episodes in enumerate(components):
+        for episode in component_episodes:
+            if episode and episode[0].get("episode_id") is not None:
+                episode_components[str(episode[0]["episode_id"])] = component_index
+    fallback_occurrences = defaultdict(list)
+    for item in question_transitions:
+        if item.get("question_generation_mode") != "deterministic_grounded_fallback":
+            continue
+        normalized = " ".join(str(item.get("question") or "").casefold().split())
+        if not normalized:
+            continue
+        question_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        fallback_occurrences[question_hash].append({
+            "episode_id": str(item.get("episode_id")),
+            "component": episode_components.get(str(item.get("episode_id"))),
+            "dataset_split": item.get("dataset_split"),
+        })
+    cross_component_fallback_duplicates = {}
+    cross_component_fallback_duplicate_count = 0
+    for question_hash, occurrences in fallback_occurrences.items():
+        component_ids = {
+            item["component"] for item in occurrences if item["component"] is not None
+        }
+        if len(component_ids) <= 1:
+            continue
+        cross_component_fallback_duplicate_count += len(occurrences) - 1
+        cross_component_fallback_duplicates[question_hash] = {
+            "occurrences": len(occurrences),
+            "identity_components": sorted(component_ids),
+            "dataset_splits": sorted({
+                item["dataset_split"] for item in occurrences
+                if item["dataset_split"] is not None
+            }),
+        }
+    cross_component_fallback_duplicate_rate = (
+        cross_component_fallback_duplicate_count / fallback_questions
+        if fallback_questions else 0.0
     )
     pairing_classes = Counter()
     duplicate_questions = 0
@@ -222,6 +325,24 @@ def audit_raw_evidence(
         warnings.append("Dataset contains invalid or unverified evaluator outputs.")
     if invalid_grounding or missing_role_profiles or invalid_grounding_provenance:
         warnings.append("Dataset contains invalid or unverified question grounding.")
+    if invalid_contract_provenance:
+        warnings.append("Dataset contains stale, missing, or mixed grounding contracts.")
+    if fallback_rate > MAX_DETERMINISTIC_FALLBACK_RATE:
+        warnings.append(
+            "More than 10% of questions required deterministic grounding fallback."
+        )
+    if invalid_generation_mode_provenance:
+        warnings.append(
+            "Dataset contains invalid question-generation mode provenance."
+        )
+    if (
+        cross_component_fallback_duplicate_rate
+        > MAX_CROSS_COMPONENT_FALLBACK_DUPLICATE_RATE
+    ):
+        warnings.append(
+            "More than 25% of deterministic fallback questions are exact "
+            "duplicates across independent identity components."
+        )
     if duplicate_questions:
         warnings.append("Dataset contains repeated questions within an episode.")
     if inconsistent_episode_grounding:
@@ -258,9 +379,28 @@ def audit_raw_evidence(
         "invalid_question_grounding": invalid_grounding,
         "missing_role_profile_provenance": missing_role_profiles,
         "invalid_grounding_provenance": invalid_grounding_provenance,
+        "invalid_contract_provenance": invalid_contract_provenance,
         "question_generation_attempt_counts": dict(generation_attempt_counts),
         "question_grounding_retry_rate": (
             retried_questions / len(question_transitions) if question_transitions else None
+        ),
+        "deterministic_grounding_fallback_count": fallback_questions,
+        "deterministic_grounding_fallback_rate": fallback_rate,
+        "maximum_deterministic_grounding_fallback_rate": (
+            MAX_DETERMINISTIC_FALLBACK_RATE
+        ),
+        "invalid_generation_mode_provenance": invalid_generation_mode_provenance,
+        "cross_component_duplicate_fallback_question_count": (
+            cross_component_fallback_duplicate_count
+        ),
+        "cross_component_duplicate_fallback_question_rate": (
+            cross_component_fallback_duplicate_rate
+        ),
+        "maximum_cross_component_fallback_duplicate_rate": (
+            MAX_CROSS_COMPONENT_FALLBACK_DUPLICATE_RATE
+        ),
+        "cross_component_duplicate_fallback_questions": (
+            cross_component_fallback_duplicates
         ),
         "pairing_class_counts": dict(pairing_classes),
         "duplicate_questions_within_episode": duplicate_questions,
@@ -485,7 +625,11 @@ def audit_offline_rl_support(transitions: list[dict]):
 
 def audit_dataset(transitions: list[dict], min_episodes=MIN_QUALITY_GATE_EPISODES):
     """Backward-compatible composite report; new code should select a stage."""
-    raw = audit_raw_evidence(transitions, min_episodes=min_episodes)
+    raw = audit_raw_evidence(
+        transitions,
+        min_episodes=min_episodes,
+        allow_legacy=True,
+    )
     belief = audit_belief_predictions(transitions)
     offline = audit_offline_rl_support(transitions)
     episodes = group_transitions_into_episodes(transitions)

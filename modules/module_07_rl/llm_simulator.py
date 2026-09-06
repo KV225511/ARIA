@@ -20,6 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_SKILLS_COVERED, MIN_INTERVIEW_TURNS
 from modules.module_08_llm.generator import (
     LLMQuestionGenerator,
+    build_grounded_fallback_question,
     build_question_retry_correction,
     normalize_ollama_keep_alive,
 )
@@ -43,7 +44,12 @@ from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
 from modules.module_07_rl.ollama_client import BoundedOllamaClient
 from modules.module_07_rl.state_builder import STATE_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
-from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import (
+    FALLBACK_QUESTION_TEMPLATE_VERSION,
+    GENERATOR_SCHEMA_VERSION,
+    TRANSITION_SCHEMA_VERSION,
+    has_valid_question_generation_provenance,
+)
 from modules.module_07_rl.generation_preflight import get_groundable_jd_documents
 from modules.module_05_ontology.grounding import (
     GROUNDING_SCHEMA_VERSION,
@@ -77,11 +83,18 @@ ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
 DEFAULT_SWEEP_EPISODES = 300
 MIN_RECOMMENDED_EPISODES = 200
 DATASET_SPLIT_RATIOS = (0.70, 0.15, 0.15)
-GENERATOR_SCHEMA_VERSION = "aria-simulator-v5"
 
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _can_use_deterministic_grounding_fallback(outputs: list[str]) -> bool:
+    """Recover semantic rejections, but never convert an API outage into data."""
+    return len(outputs) == 3 and all(
+        isinstance(output, str) and bool(output.strip()) for output in outputs
+    )
+
 
 async def generate_llm_response(
     prompt: str,
@@ -458,6 +471,34 @@ def validate_append_provenance(
                 f"existing={sorted(existing_transition_schemas)}, "
                 f"required={TRANSITION_SCHEMA_VERSION}. Regenerate or use a new output path."
             )
+        required_contracts = {
+            "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+            "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
+            "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
+            "grounding_contract_hash": grounding_contract_hash(),
+        }
+        for field, required in required_contracts.items():
+            existing = {
+                str(item.get(field) or "missing") for item in transitions
+            }
+            if existing != {required}:
+                raise ValueError(
+                    f"Append {field} is incompatible with the current corpus: "
+                    f"existing={sorted(existing)}, required={required}. "
+                    "Regenerate or use a new output path."
+                )
+        invalid_generation_records = [
+            index
+            for index, item in enumerate(transitions)
+            if item.get("transition_kind") == "question"
+            and not has_valid_question_generation_provenance(item)
+        ]
+        if invalid_generation_records:
+            raise ValueError(
+                "Append question-generation provenance is invalid at transition "
+                f"indices {invalid_generation_records[:10]}. Regenerate or use a "
+                "new output path."
+            )
     existing_candidates = {
         str(item["candidate_model"])
         for item in transitions if item.get("candidate_model")
@@ -822,6 +863,7 @@ async def simulate_episode(
             "ontology_hash": ontology_hash,
             "ontology_nodes": ontology_nodes,
             "rejected_question_attempts": [],
+            "fallback_questions": [],
             "status": "running",
         }
         if failure_diagnostics is not None:
@@ -948,6 +990,9 @@ async def simulate_episode(
             question = ""
             question_prompt_hash = None
             question_generation_seed = None
+            question_generation_mode = "llm"
+            fallback_question_result = None
+            fallback_attempted = False
             grounding_result = None
             for question_attempt in range(1, 4):
                 correction = None
@@ -1011,6 +1056,43 @@ async def simulate_episode(
                 })
                 rejected_question_reasons.append(grounding_result["reasons"])
                 rejected_question_outputs.append(question)
+            fallback_eligible = _can_use_deterministic_grounding_fallback(
+                rejected_question_outputs
+            )
+            if (
+                (not grounding_result or not grounding_result["valid"])
+                and fallback_eligible
+            ):
+                fallback_attempted = True
+                fallback_question = build_grounded_fallback_question(
+                    action_name,
+                    target_skill,
+                    history,
+                    grounding_context=question_grounding,
+                    variation_key=(
+                        f"{resume_content_hash}|{jd_content_hash}|{env.turn_id}|"
+                        f"{action_idx}"
+                    ),
+                )
+                fallback_question_result = validate_grounded_question(
+                    fallback_question,
+                    question_grounding,
+                    history,
+                )
+                episode_diagnostic["fallback_questions"].append({
+                    "turn": env.turn_id,
+                    "action": action_name,
+                    "target_skill_id": target_metadata.skill_id,
+                    "template_version": FALLBACK_QUESTION_TEMPLATE_VERSION,
+                    "question": fallback_question,
+                    "validation_result": fallback_question_result,
+                })
+                if fallback_question_result["valid"]:
+                    question = fallback_question
+                    grounding_result = fallback_question_result
+                    question_generation_mode = "deterministic_grounded_fallback"
+                    question_prompt_hash = None
+                    question_generation_seed = None
             if not grounding_result or not grounding_result["valid"]:
                 episode_diagnostic.update({
                     "status": "failed",
@@ -1019,7 +1101,12 @@ async def simulate_episode(
                     "failure_action": action_name,
                     "failure_target_skill": target_skill,
                     "failure_target_skill_id": target_metadata.skill_id,
-                    "failure_reason": "question grounding failed after 3 attempts",
+                    "failure_reason": (
+                        "question grounding failed after 3 LLM attempts and "
+                        "deterministic fallback"
+                        if fallback_attempted
+                        else "question generation failed after 3 LLM attempts"
+                    ),
                 })
                 print(
                     f"  [ERROR] Episode episode_{ep}: grounding failed for "
@@ -1032,6 +1119,13 @@ async def simulate_episode(
                         f"target={attempt['target_skill_id']} "
                         f"reasons={attempt['validation_reasons']} "
                         f"raw={attempt['raw_generated_question']!r}"
+                    )
+                if episode_diagnostic["fallback_questions"]:
+                    fallback = episode_diagnostic["fallback_questions"][-1]
+                    print(
+                        "    deterministic_fallback "
+                        f"reasons={fallback['validation_result']['reasons']} "
+                        f"question={fallback['question']!r}"
                     )
                 return []
             
@@ -1159,6 +1253,18 @@ async def simulate_episode(
                 "question_grounding_valid": grounding_result["valid"],
                 "question_grounding": grounding_result,
                 "question_generation_attempts": question_attempt,
+                "llm_question_generation_attempts": question_attempt,
+                "deterministic_question_generation_attempts": (
+                    1
+                    if question_generation_mode == "deterministic_grounded_fallback"
+                    else 0
+                ),
+                "question_generation_mode": question_generation_mode,
+                "fallback_question_template_version": (
+                    FALLBACK_QUESTION_TEMPLATE_VERSION
+                    if question_generation_mode == "deterministic_grounded_fallback"
+                    else None
+                ),
                 "candidate_generation_attempts": answer_attempt,
                 "rejected_question_reasons": rejected_question_reasons,
                 "jd_evidence_hashes": [
@@ -1263,6 +1369,7 @@ async def run_simulation(
             )
 
     existing = _load_dataset(dataset_path)
+    source_dataset = list(existing)
     if sweep and existing and not append and not replace_existing:
         raise ValueError(
             f"Refusing to erase existing dataset {dataset_path}. Use --append to "
@@ -1401,6 +1508,7 @@ async def run_simulation(
     run_material = (
         f"{source_hash}|{seed}|{start_index}|{total_eps}|"
         f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}|"
+        f"{FALLBACK_QUESTION_TEMPLATE_VERSION}|"
         f"{document_sources_hash}|{planned_pairs_hash}|{grounding_hash}|"
         f"{TRANSITION_SCHEMA_VERSION}|{STATE_SCHEMA_VERSION}|"
         f"{ACTION_SCHEMA_VERSION}|{REWARD_SCHEMA_VERSION}"
@@ -1440,6 +1548,7 @@ async def run_simulation(
         "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
         "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
         "grounding_contract_hash": grounding_hash,
+        "fallback_question_template_version": FALLBACK_QUESTION_TEMPLATE_VERSION,
         "ollama_host": OLLAMA_HOST,
         "ollama_num_ctx": OLLAMA_NUM_CTX,
         "ollama_keep_alive": OLLAMA_KEEP_ALIVE,
@@ -1489,6 +1598,7 @@ async def run_simulation(
                 "resume_file": None if pair is None else pair[0],
                 "jd_file": None if pair is None else pair[1],
                 "rejected_question_attempts": [],
+                "fallback_questions": [],
             })
             diagnostic.update({
                 "status": "failed",
@@ -1541,6 +1651,20 @@ async def run_simulation(
     for completed_order in sorted(completed):
         dataset.extend(completed[completed_order])
     all_completed = len(completed) == total_eps and not failed
+    canonical_dataset = dataset if all_completed else source_dataset
+    new_fallback_transition_count = sum(
+        item.get("question_generation_mode") == "deterministic_grounded_fallback"
+        for episode in completed.values()
+        for item in episode
+    )
+    working_fallback_transition_count = sum(
+        item.get("question_generation_mode") == "deterministic_grounded_fallback"
+        for item in dataset
+    )
+    combined_fallback_transition_count = sum(
+        item.get("question_generation_mode") == "deterministic_grounded_fallback"
+        for item in canonical_dataset
+    )
     pairing_records = []
     for global_index in sorted(episode_diagnostics):
         diagnostic = episode_diagnostics[global_index]
@@ -1564,6 +1688,14 @@ async def run_simulation(
             dataset_path.unlink(missing_ok=True)
         else:
             _atomic_bytes_write(dataset_path, original_dataset_bytes)
+    canonical_dataset_hash = (
+        hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+        if dataset_path.exists() else None
+    )
+    partial_dataset_hash = (
+        hashlib.sha256(partial_path.read_bytes()).hexdigest()
+        if partial_path is not None and partial_path.exists() else None
+    )
     run_manifest.update({
         "status": "complete" if all_completed else "failed",
         "completed_episodes": len(completed),
@@ -1572,9 +1704,39 @@ async def run_simulation(
             str(order): episode_diagnostics.get(start_index + order, {})
             for order in sorted(failed)
         },
-        "combined_transition_count": len(dataset),
+        "successful_fallback_episode_diagnostics": {
+            str(global_index): {
+                "episode_id": diagnostic.get("episode_id"),
+                "status": diagnostic.get("status"),
+                "resume_file": diagnostic.get("resume_file"),
+                "jd_file": diagnostic.get("jd_file"),
+                "rejected_question_attempts": diagnostic.get(
+                    "rejected_question_attempts", []
+                ),
+                "fallback_questions": diagnostic.get("fallback_questions", []),
+            }
+            for global_index, diagnostic in sorted(episode_diagnostics.items())
+            if diagnostic.get("status") == "complete"
+            and diagnostic.get("fallback_questions")
+        },
+        "combined_transition_count": len(canonical_dataset),
+        "partial_combined_transition_count": (
+            len(dataset) if not all_completed else None
+        ),
+        "deterministic_grounding_fallback_count": new_fallback_transition_count,
+        "new_deterministic_grounding_fallback_count": (
+            new_fallback_transition_count
+        ),
+        "combined_deterministic_grounding_fallback_count": (
+            combined_fallback_transition_count
+        ),
+        "partial_combined_deterministic_grounding_fallback_count": (
+            working_fallback_transition_count if not all_completed else None
+        ),
         "pairing_records": pairing_records,
         "partial_dataset_path": str(partial_path) if partial_path else None,
+        "canonical_dataset_hash": canonical_dataset_hash,
+        "partial_dataset_hash": partial_dataset_hash,
         "canonical_dataset_restored": not all_completed,
         "generation_finished_at": datetime.now(timezone.utc).isoformat(),
     })

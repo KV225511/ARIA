@@ -25,7 +25,11 @@ from modules.module_07_rl.reward_model import (
     compute_stop_reward,
 )
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION, RL_ACTION_SPACE
-from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import (
+    GENERATOR_SCHEMA_VERSION,
+    TRANSITION_SCHEMA_VERSION,
+    has_valid_question_generation_provenance,
+)
 from modules.module_07_rl.state_builder import (
     STATE_SCHEMA_VERSION,
     STATE_FEATURE_NAMES,
@@ -130,6 +134,8 @@ def replay_one_episode(
                 f"Raw transition is not {TRANSITION_SCHEMA_VERSION}; regenerate it because "
                 "legacy action propensities cannot be reconstructed safely"
             )
+        if source.get("generator_schema_version") != GENERATOR_SCHEMA_VERSION:
+            raise ValueError("Raw transition uses an incompatible generator schema")
         if source.get("action_schema_version") != ACTION_SCHEMA_VERSION:
             raise ValueError("Raw transition uses an incompatible action schema")
         action_idx = int(source.get("action_idx", 0))
@@ -173,6 +179,10 @@ def replay_one_episode(
             if source.get("question_grounding_valid") is not None:
                 raise ValueError("Raw stop transition contains question grounding")
         else:
+            if not has_valid_question_generation_provenance(source):
+                raise ValueError(
+                    "Raw question transition has invalid generation provenance"
+                )
             if source.get("question_grounding_valid") is not True:
                 raise ValueError("Raw question transition is not grounding-validated")
             if not source.get("target_skill_id"):

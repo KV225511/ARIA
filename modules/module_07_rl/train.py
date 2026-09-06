@@ -34,8 +34,10 @@ from modules.module_07_rl.state_builder import (
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
 from modules.module_07_rl.transition_schema import (
+    GENERATOR_SCHEMA_VERSION,
     REQUIRED_POLICY_FIELDS,
     TRANSITION_SCHEMA_VERSION,
+    has_valid_question_generation_provenance,
 )
 
 
@@ -109,6 +111,8 @@ def validate_replayed_dataset(dataset, config, expected_split):
             raise ValueError(f"Transition {index} uses an incompatible state schema")
         if transition["transition_schema_version"] != TRANSITION_SCHEMA_VERSION:
             raise ValueError(f"Transition {index} uses an incompatible transition schema")
+        if transition["generator_schema_version"] != GENERATOR_SCHEMA_VERSION:
+            raise ValueError(f"Transition {index} uses an incompatible generator schema")
         if transition["action_schema_version"] != ACTION_SCHEMA_VERSION:
             raise ValueError(f"Transition {index} uses an incompatible action schema")
         if transition["reward_schema_version"] != REWARD_SCHEMA_VERSION:
@@ -163,6 +167,10 @@ def validate_replayed_dataset(dataset, config, expected_split):
             if transition.get("question_grounding_valid") is not None:
                 raise ValueError(f"Transition {index} stop action has question grounding")
         else:
+            if not has_valid_question_generation_provenance(transition):
+                raise ValueError(
+                    f"Transition {index} question has invalid generation provenance"
+                )
             if transition.get("question_grounding_valid") is not True:
                 raise ValueError(f"Transition {index} question is not grounding-validated")
             if not transition.get("target_skill_id"):

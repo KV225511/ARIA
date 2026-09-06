@@ -5,7 +5,10 @@ import pytest
 from modules.module_06_belief.belief_config import BeliefModelConfig
 from modules.module_07_rl.replay_dataset import replay_dataset
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
-from modules.module_07_rl.transition_schema import TRANSITION_SCHEMA_VERSION
+from modules.module_07_rl.transition_schema import (
+    GENERATOR_SCHEMA_VERSION,
+    TRANSITION_SCHEMA_VERSION,
+)
 from modules.module_07_rl.state_builder import (
     STATE_DIM,
     STATE_FEATURE_NAMES,
@@ -35,6 +38,7 @@ def _raw_episode(index, label, score):
             "done": turn == 1,
             "question": f"Question {turn}",
             "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+            "generator_schema_version": GENERATOR_SCHEMA_VERSION,
             "action_schema_version": ACTION_SCHEMA_VERSION,
             "action_mask_before": (
                 [1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0]
@@ -51,6 +55,13 @@ def _raw_episode(index, label, score):
             "role_profile_hash": f"profile-{index}",
             "ontology_hash": f"ontology-{index}",
             "grounding_contract_hash": "grounding-contract-hash",
+            "question_generation_attempts": 1,
+            "llm_question_generation_attempts": 1,
+            "deterministic_question_generation_attempts": 0,
+            "question_generation_mode": "llm",
+            "fallback_question_template_version": None,
+            "question_prompt_hash": f"prompt-hash-{index}-{turn}",
+            "question_generation_seed": index * 100 + turn,
         }
         for turn in range(2)
     ]

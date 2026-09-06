@@ -1,3 +1,4 @@
+import hashlib
 import httpx
 import json
 import logging
@@ -8,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 import os
 from dotenv import load_dotenv
+from modules.module_07_rl.transition_schema import FALLBACK_QUESTION_TEMPLATE_VERSION
 
 
 def normalize_ollama_keep_alive(value):
@@ -34,8 +36,6 @@ _QUESTION_RETRY_ANGLES = (
     "Use a different failure mode or diagnostic scenario.",
     "Use a different trade-off, constraint, or verification method.",
 )
-
-
 def build_question_retry_correction(
     reasons: list[str],
     rejected_output: str,
@@ -51,6 +51,102 @@ def build_question_retry_correction(
         f"Retry {attempt} of 3. "
         f"{_QUESTION_RETRY_ANGLES[attempt - 2]}"
     )
+
+
+def build_grounded_fallback_question(
+    action: str,
+    target_skill: str,
+    history: list[dict],
+    grounding_context: dict | None = None,
+    variation_key: str = "",
+) -> str:
+    """Return a novel, target-explicit question after bounded LLM rejection.
+
+    This is intentionally a small, auditable recovery path rather than another
+    probabilistic generation attempt. The caller must still run the normal
+    grounding validator before accepting the result.
+    """
+    target = " ".join(str(target_skill or "").split())
+    if not target:
+        return ""
+    # Keep free-form role and JD text out of the deterministic template. The
+    # canonical target is sufficient for grounding and cannot introduce an
+    # unrelated competency from an inferred role title.
+    action_templates = {
+        "increase_difficulty": (
+            "For {target}, how would you analyze a difficult failure, compare competing solutions, and verify edge cases?",
+            "What advanced trade-offs in {target} would influence your design, and how would you test the chosen approach?",
+            "Under severe performance constraints, how would you adapt {target} and prove the result remains correct?",
+            "Where do common {target} approaches break down, and how would you create and verify a robust alternative?",
+            "How would you optimize {target} under conflicting constraints and validate the trade-offs?",
+            "Which subtle {target} failure would challenge an experienced engineer, and how would you reproduce and resolve it?",
+        ),
+        "decrease_difficulty": (
+            "What are the core principles of {target}, and how would you demonstrate them in a basic scenario?",
+            "How would you explain {target} to a junior engineer and demonstrate that the fundamentals work correctly?",
+            "What is a simple example of {target}, and what output would show that it works?",
+            "Which basic steps are needed for {target}, and how would you check each step?",
+            "What key terms should a beginner know about {target}, and how do they fit together?",
+            "What common beginner mistake occurs with {target}, and how would you correct it?",
+        ),
+        "ask_follow_up_same_topic": (
+            "For {target}, what additional evidence would you collect to validate your earlier answer, and what result would change your conclusion?",
+            "How would you extend your previous {target} approach to cover one failure mode and verify the improvement?",
+            "Which assumption in your earlier {target} answer is most important, and how would you test it?",
+            "What concrete {target} example best supports your previous answer, and what did it demonstrate?",
+            "How would your earlier {target} approach change under one additional constraint?",
+            "What measurement would strengthen your previous {target} answer, and why?",
+        ),
+        "switch_topic": (
+            "How would you apply {target} to solve a relevant problem and verify the result?",
+            "For {target}, which implementation decision matters most, and what evidence would show that your choice is correct?",
+            "Moving to {target}, what approach would you choose for a practical task and how would you validate it?",
+            "What is one important challenge in {target}, and how would you address it?",
+            "For a new task involving {target}, what would you inspect first and what would you do next?",
+            "How would you compare two possible approaches to {target} and select between them?",
+        ),
+        "probe_foundation": (
+            "What underlying mechanisms govern {target}, and how would you demonstrate them with a concrete example?",
+            "Why does {target} work, which assumptions does it rely on, and how would you test those assumptions?",
+            "What happens internally when {target} is used, and why does each step matter?",
+            "Which first principles explain {target}, and how do they predict its behavior?",
+            "How would you derive the expected behavior of {target} from its core rules?",
+            "What foundational concept is easiest to misunderstand in {target}, and how would you explain it accurately?",
+        ),
+        "ask_behavioral": (
+            "Tell me about a time you applied {target}; what was your responsibility, what action did you take, and what result did you measure?",
+            "Describe a situation where your use of {target} did not work initially; how did you respond and what did you learn?",
+            "Tell me about a past project where {target} was important; what did you personally do and what changed as a result?",
+            "Describe a time you had to defend a decision involving {target}; how did you decide and what was the outcome?",
+            "Give an example of feedback you received while working with {target}; how did you act on it?",
+            "Tell me about a time you found a problem involving {target}; how did you communicate and resolve it?",
+        ),
+        "ask_situational": (
+            "Suppose a system involving {target} fails unexpectedly; how would you diagnose the cause, choose a fix, and verify recovery?",
+            "Imagine a {target} implementation passes basic checks but fails in production; how would you investigate and resolve it?",
+            "Suppose you inherit an undocumented {target} implementation; how would you assess it before changing it?",
+            "Imagine two teammates disagree about a {target} approach; what evidence would you gather to make the decision?",
+            "Suppose a late requirement changes how {target} must work; how would you adapt and verify the result?",
+            "Imagine a {target} issue appears only intermittently; how would you reproduce, isolate, and fix it?",
+        ),
+    }
+    prior = {
+        " ".join(str(turn.get("q", "")).casefold().split()) for turn in history
+    }
+    # Never fall through to a generic template. The logged action is training
+    # data, so the recovery question must preserve that action's semantics.
+    templates = action_templates.get(action, ())
+    if variation_key and templates:
+        offset = int.from_bytes(
+            hashlib.sha256(variation_key.encode("utf-8")).digest()[:4], "big"
+        ) % len(templates)
+        templates = templates[offset:] + templates[:offset]
+    for template in templates:
+        question = template.format(target=target)
+        if " ".join(question.casefold().split()) not in prior:
+            return question
+    return ""
+
 
 class LLMQuestionGenerator:
     def __init__(

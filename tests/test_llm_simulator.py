@@ -1,8 +1,11 @@
 import asyncio
+import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import numpy as np
 import pytest
 
 from modules.module_07_rl.llm_simulator import (
@@ -11,22 +14,34 @@ from modules.module_07_rl.llm_simulator import (
     build_evaluator_prompt,
     build_split_safe_sweep_pairs,
     evaluate_answer,
+    _can_use_deterministic_grounding_fallback,
     _format_duration,
     generate_llm_response,
     _next_episode_index,
     _three_way_counts,
     report_ollama_capacity,
     run_simulation,
+    simulate_episode,
     validate_append_provenance,
 )
 from modules.module_07_rl.ollama_client import BoundedOllamaClient
-from modules.module_07_rl.data_loader import ResumeDocument
+from modules.module_07_rl.data_loader import LoadedDocumentPair, ResumeDocument
 from modules.module_07_rl.dataset_split import (
     connected_identity_components,
     split_by_resume_jd_group,
 )
+from modules.module_05_ontology.grounding import (
+    build_role_profile,
+    grounding_contract_hash,
+    validate_grounded_question,
+)
+from modules.module_07_rl.transition_schema import (
+    FALLBACK_QUESTION_TEMPLATE_VERSION,
+    GENERATOR_SCHEMA_VERSION,
+)
 from modules.module_08_llm.generator import (
     LLMQuestionGenerator,
+    build_grounded_fallback_question,
     build_question_retry_correction,
     normalize_ollama_keep_alive,
 )
@@ -40,6 +55,10 @@ def _terminal(ep, pair):
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
+        "generator_schema_version": "aria-simulator-v6",
+        "role_profile_schema_version": "aria-role-profile-v1",
+        "question_grounding_schema_version": "aria-question-grounding-v1",
+        "grounding_contract_hash": grounding_contract_hash(),
         "done": True,
     }
 
@@ -244,6 +263,277 @@ def test_question_retry_correction_names_rejected_output_and_changes_angle():
     assert second != third
 
 
+def test_grounded_fallback_is_action_specific_and_never_exactly_repeats_history():
+    first = build_grounded_fallback_question("switch_topic", "Python", [])
+    second = build_grounded_fallback_question(
+        "switch_topic", "Python", [{"q": first, "a": "answer"}]
+    )
+    assert first != second
+    assert "Python" in first
+    assert "Python" in second
+    assert first.endswith("?")
+    assert second.endswith("?")
+    assert FALLBACK_QUESTION_TEMPLATE_VERSION == "aria-grounded-fallback-v1"
+
+
+def test_deterministic_grounding_fallback_never_masks_an_api_outage():
+    duplicate = "How would you apply Python?"
+    assert _can_use_deterministic_grounding_fallback([duplicate] * 3)
+    assert not _can_use_deterministic_grounding_fallback(["", "", ""])
+    assert not _can_use_deterministic_grounding_fallback([duplicate, "", duplicate])
+
+
+@pytest.mark.parametrize(
+    ("action", "semantic_markers"),
+    (
+        (
+            "increase_difficulty",
+            ("difficult", "advanced", "severe", "break down", "conflicting", "experienced"),
+        ),
+        (
+            "decrease_difficulty",
+            ("core principles", "junior", "simple", "basic", "beginner"),
+        ),
+        (
+            "ask_follow_up_same_topic",
+            ("earlier", "previous"),
+        ),
+        (
+            "switch_topic",
+            ("apply", "implementation", "moving to", "challenge", "new task", "compare"),
+        ),
+        (
+            "probe_foundation",
+            ("underlying", "assumptions", "internally", "first principles", "core rules", "foundational"),
+        ),
+        (
+            "ask_behavioral",
+            ("tell me", "describe a", "give an example"),
+        ),
+        (
+            "ask_situational",
+            ("suppose", "imagine"),
+        ),
+    ),
+)
+def test_grounded_fallback_variation_preserves_logged_action_semantics(
+    action, semantic_markers
+):
+    questions = {
+        build_grounded_fallback_question(
+            action,
+            "Python",
+            [],
+            grounding_context={"role_title": "Job Summary"},
+            variation_key=f"resume|jd|{turn}|{action}",
+        )
+        for turn in range(100)
+    }
+
+    assert len(questions) == 6
+    assert all("job summary" not in question.casefold() for question in questions)
+    assert all(
+        any(marker in question.casefold() for marker in semantic_markers)
+        for question in questions
+    )
+
+
+@pytest.mark.parametrize(
+    ("action", "target_skill_id", "target_skill", "aliases"),
+    (
+        ("decrease_difficulty", "test-validation", "Test and Validation", ("test plan",)),
+        ("switch_topic", "pcb-design", "PCB Design", ("pcb", "board layout")),
+        ("switch_topic", "design-patterns", "Design Patterns", ("factory pattern",)),
+    ),
+)
+def test_grounded_fallback_recovers_the_observed_v8_targets(
+    action, target_skill_id, target_skill, aliases
+):
+    packet = {
+        "target_skill_id": target_skill_id,
+        "target_skill": target_skill,
+        "target_aliases": list(aliases),
+        "target_definition": target_skill,
+        "jd_evidence": [target_skill],
+        "allowed_skill_ids": [target_skill_id],
+        "acronym_resolutions": [],
+    }
+    questions = {
+        build_grounded_fallback_question(
+            action,
+            target_skill,
+            [],
+            grounding_context=packet,
+            variation_key=f"resume|jd|{turn}|{action}",
+        )
+        for turn in range(100)
+    }
+
+    assert len(questions) == 6
+    assert all(
+        validate_grounded_question(question, packet, [])["valid"]
+        for question in questions
+    )
+
+
+def test_simulate_episode_recovers_after_three_duplicate_llm_questions():
+    jd_text = (
+        "Role: Software Engineer\nRequired Python programming, REST API "
+        "development, SQL relational database work, object-oriented "
+        "programming, design patterns, and Linux operations."
+    )
+    resume_text = (
+        "Software engineer experienced with Python, REST API development, "
+        "SQL, object-oriented programming, design patterns, and Linux."
+    )
+    profile = build_role_profile(jd_text, resume_text)
+    python_skill = next(skill for skill in profile.skills if skill.skill_id == "python")
+
+    class FakeOntology:
+        role_profile = None
+        inferred_experience = "Mid-Level"
+        successors = {}
+
+        def adapt_to_candidate(self, supplied_jd, supplied_resume):
+            assert supplied_jd == jd_text
+            assert supplied_resume == resume_text
+            self.role_profile = profile
+            return True
+
+        def get_all_skills(self):
+            return [skill.canonical_name for skill in profile.skills]
+
+        def get_skill_metadata(self, target):
+            if target in {python_skill.skill_id, python_skill.canonical_name}:
+                return python_skill
+            return None
+
+    class FakeBeliefUpdater:
+        beliefs = {"Python": np.asarray([0.2, 0.5, 0.3])}
+
+        def get_aggregate_assessment(self):
+            return {
+                "label": 1,
+                "raw_label": 1,
+                "belief": np.asarray([0.2, 0.6, 0.2]),
+                "confidence": 0.6,
+                "visited_skills": ["Python"],
+            }
+
+    class FakeEnv:
+        def __init__(self, _role):
+            self.ontology = FakeOntology()
+            self.belief_updater = FakeBeliefUpdater()
+            self.action_space = SimpleNamespace(n=8)
+            self.turn_id = 0
+            self.valid_evidence_count = 0
+
+        def sync_ontology_nodes(self):
+            return None
+
+        def reset(self):
+            return np.zeros(33, dtype=np.float32), {}
+
+        def get_action_mask(self):
+            return np.ones(8, dtype=np.float32)
+
+        def select_target_skill(self, _action_idx):
+            return "Python"
+
+        def step_with_scores(self, _action_idx, *_scores, **_kwargs):
+            self.turn_id += 1
+            self.valid_evidence_count += 1
+            return (
+                np.zeros(33, dtype=np.float32),
+                0.25,
+                self.turn_id >= 2,
+                False,
+                {"termination_reason": "test_complete"},
+            )
+
+    accepted_question = "How would you apply Python to solve a small task?"
+
+    class RepeatingQuestionGenerator:
+        instance = None
+
+        def __init__(self, **_kwargs):
+            self.calls = 0
+            RepeatingQuestionGenerator.instance = self
+
+        def _build_prompt(self, *_args, **_kwargs):
+            return f"question-prompt-{self.calls}"
+
+        async def generate_question(self, **_kwargs):
+            self.calls += 1
+            return accepted_question
+
+    loaded_pair = LoadedDocumentPair(
+        resume_text=resume_text,
+        jd_text=jd_text,
+        resume_id="opensporks:test",
+        jd_id="test-jd.pdf",
+        resume_content_hash="resume-hash",
+        jd_content_hash="jd-hash",
+        resume_source_type="opensporks_csv",
+        resume_category="INFORMATION-TECHNOLOGY",
+        resume_source_file_hash="source-hash",
+        resume_prompt_hash="resume-prompt-hash",
+    )
+    probabilities = [0.0] * 8
+    probabilities[3] = 1.0
+    diagnostics = {}
+
+    with (
+        patch("modules.module_07_rl.llm_simulator.ARIAInterviewEnv", FakeEnv),
+        patch(
+            "modules.module_07_rl.llm_simulator.LLMQuestionGenerator",
+            RepeatingQuestionGenerator,
+        ),
+        patch(
+            "modules.module_07_rl.llm_simulator.load_specific_pair",
+            return_value=loaded_pair,
+        ),
+        patch(
+            "modules.module_07_rl.llm_simulator.select_behavior_action",
+            return_value=(3, "test_policy", probabilities),
+        ),
+        patch(
+            "modules.module_07_rl.llm_simulator.generate_llm_response",
+            new=AsyncMock(return_value="A grounded candidate answer."),
+        ),
+        patch(
+            "modules.module_07_rl.llm_simulator.evaluate_answer",
+            new=AsyncMock(return_value=(0.7, 0.6, "low", 0.9, ["evidence"], True)),
+        ),
+    ):
+        transitions = asyncio.run(simulate_episode(
+            0,
+            ("opensporks:test", "test-jd.pdf"),
+            1,
+            asyncio.Semaphore(1),
+            persona_tier="MID",
+            failure_diagnostics=diagnostics,
+        ))
+
+    assert RepeatingQuestionGenerator.instance.calls == 4
+    assert len(transitions) == 2
+    assert transitions[0]["question_generation_mode"] == "llm"
+    recovered = transitions[1]
+    assert recovered["question"] != accepted_question
+    assert recovered["question_grounding_valid"] is True
+    assert recovered["question_generation_mode"] == "deterministic_grounded_fallback"
+    assert recovered["llm_question_generation_attempts"] == 3
+    assert recovered["deterministic_question_generation_attempts"] == 1
+    assert recovered["fallback_question_template_version"] == (
+        FALLBACK_QUESTION_TEMPLATE_VERSION
+    )
+    assert recovered["question_prompt_hash"] is None
+    assert recovered["question_generation_seed"] is None
+    assert diagnostics[0]["status"] == "complete"
+    assert len(diagnostics[0]["rejected_question_attempts"]) == 3
+    assert len(diagnostics[0]["fallback_questions"]) == 1
+
+
 def test_append_uses_unused_documents_as_new_identity_components():
     original_resumes = [Path(f"resume-{index}.pdf") for index in range(6)]
     original_jds = [Path(f"jd-{index}.pdf") for index in range(9)]
@@ -323,6 +613,10 @@ def test_append_provenance_and_episode_ids_are_protected():
             "candidate_model": "qwen2.5:7b",
             "evaluator_model": "gemma3:4b",
             "transition_schema_version": "aria-transition-v4",
+            "generator_schema_version": "aria-simulator-v6",
+            "role_profile_schema_version": "aria-role-profile-v1",
+            "question_grounding_schema_version": "aria-question-grounding-v1",
+            "grounding_contract_hash": grounding_contract_hash(),
         }
     ]
     assert _next_episode_index(existing) == 200
@@ -340,6 +634,36 @@ def test_append_rejects_legacy_transition_schema():
         "transition_schema_version": "aria-transition-v3",
     }]
     with pytest.raises(ValueError, match="transition schema is incompatible"):
+        validate_append_provenance(existing, "qwen2.5:7b", "gemma3:4b")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("generator_schema_version", "aria-simulator-v5"),
+        ("role_profile_schema_version", None),
+        ("question_grounding_schema_version", "aria-question-grounding-old"),
+        ("grounding_contract_hash", "wrong-contract-hash"),
+    ),
+)
+def test_append_rejects_incompatible_generation_contract(field, value):
+    existing = [_terminal(0, ("resume.pdf", "jd.pdf"))]
+    existing[0][field] = value
+
+    with pytest.raises(ValueError, match=field):
+        validate_append_provenance(existing, "qwen2.5:7b", "gemma3:4b")
+
+
+def test_append_rejects_invalid_question_generation_provenance():
+    existing = [_terminal(0, ("resume.pdf", "jd.pdf"))]
+    existing[0].update({
+        "transition_kind": "question",
+        "action_idx": 3,
+        "question_generation_mode": "deterministic_grounded_fallback",
+        "fallback_question_template_version": "wrong-template-version",
+    })
+
+    with pytest.raises(ValueError, match="question-generation provenance"):
         validate_append_provenance(existing, "qwen2.5:7b", "gemma3:4b")
 
 
@@ -583,6 +907,10 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
             "candidate_model": "qwen2.5:7b",
             "evaluator_model": "gemma3:4b",
             "transition_schema_version": "aria-transition-v4",
+            "generator_schema_version": "aria-simulator-v6",
+            "role_profile_schema_version": "aria-role-profile-v1",
+            "question_grounding_schema_version": "aria-question-grounding-v1",
+            "grounding_contract_hash": grounding_contract_hash(),
             "done": True,
         }
         for index in range(3)
@@ -592,14 +920,30 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
     jds = [Path(f"jd-{index}.pdf") for index in range(6)]
 
     async def fake_episode(ep, pair, total_eps, semaphore, **kwargs):
-        return [{
+        transition = {
             "episode_id": f"episode_{ep}",
             "resume_file": pair[0],
             "jd_file": pair[1],
             "candidate_model": "qwen2.5:7b",
             "evaluator_model": "gemma3:4b",
             "done": True,
-        }]
+        }
+        if kwargs["display_number"] == 1:
+            transition["question_generation_mode"] = (
+                "deterministic_grounded_fallback"
+            )
+            kwargs["failure_diagnostics"][ep] = {
+                "episode_id": f"episode_{ep}",
+                "resume_file": pair[0],
+                "jd_file": pair[1],
+                "status": "complete",
+                "rejected_question_attempts": [{"retry_number": 3}],
+                "fallback_questions": [{
+                    "template_version": FALLBACK_QUESTION_TEMPLATE_VERSION,
+                    "question": "fallback question",
+                }],
+            }
+        return [transition]
 
     def fake_get_all_pdfs(directory):
         return resumes if "resume" in str(directory).lower() else jds
@@ -633,6 +977,15 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
     backups = list((tmp_path / "backups").glob("*.json"))
     assert len(backups) == 1
     assert json.loads(backups[0].read_text(encoding="utf-8")) == existing
+    manifest_path = next((tmp_path / "manifests").glob("*.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["new_deterministic_grounding_fallback_count"] == 1
+    assert manifest["combined_deterministic_grounding_fallback_count"] == 1
+    assert len(manifest["successful_fallback_episode_diagnostics"]) == 1
+    assert manifest["canonical_dataset_hash"] == hashlib.sha256(
+        dataset_file.read_bytes()
+    ).hexdigest()
+    assert manifest["partial_dataset_hash"] is None
 
 
 def test_plain_sweep_refuses_to_overwrite_existing_dataset(tmp_path):
@@ -726,6 +1079,14 @@ def test_episode_exception_is_isolated_and_other_results_are_checkpointed(tmp_pa
     assert failed_diagnostic["role_profile_hash"] == "profile-hash"
     assert failed_diagnostic["rejected_question_attempts"][0]["retry_number"] == 3
     assert manifest["pairing_records"][0]["episode_status"] == "failed"
+    assert manifest["combined_transition_count"] == len(existing)
+    assert manifest["partial_combined_transition_count"] == len(checkpoint)
+    assert manifest["canonical_dataset_hash"] == hashlib.sha256(
+        dataset_file.read_bytes()
+    ).hexdigest()
+    assert manifest["partial_dataset_hash"] == hashlib.sha256(
+        partial_path.read_bytes()
+    ).hexdigest()
 
 
 def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
@@ -875,6 +1236,10 @@ def test_csv_append_requires_matching_source_hash():
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
+        "generator_schema_version": "aria-simulator-v6",
+        "role_profile_schema_version": "aria-role-profile-v1",
+        "question_grounding_schema_version": "aria-question-grounding-v1",
+        "grounding_contract_hash": grounding_contract_hash(),
         "resume_source_type": "opensporks_csv",
         "resume_source_file_hash": "old-hash",
     }]
@@ -894,6 +1259,10 @@ def test_csv_append_rejects_missing_source_provenance():
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
+        "generator_schema_version": "aria-simulator-v6",
+        "role_profile_schema_version": "aria-role-profile-v1",
+        "question_grounding_schema_version": "aria-question-grounding-v1",
+        "grounding_contract_hash": grounding_contract_hash(),
     }]
 
     with pytest.raises(ValueError, match="lack cleaned-CSV source provenance"):

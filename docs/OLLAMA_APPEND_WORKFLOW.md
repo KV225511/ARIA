@@ -77,7 +77,10 @@ versions even though numeric `-1` is valid.
 
 Synthetic generation fails closed: question, candidate, or evaluator API
 failures cannot be converted into fallback answers or valid low semantic
-scores. After three consecutive failures the episode is discarded while other
+scores. Three non-empty questions rejected by the grounding validator may use
+one versioned, action-specific deterministic recovery question; it must pass
+the same validator, is fully traced, and is capped by the raw-data quality
+gate. Empty/API-failed generations still discard the episode while other
 concurrent episodes continue, leaving the existing corpus intact.
 
 ## Measure before committing to a multi-day run

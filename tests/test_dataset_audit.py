@@ -5,6 +5,17 @@ from modules.module_07_rl.dataset_audit import (
     audit_dataset,
     audit_raw_evidence,
 )
+from modules.module_07_rl.transition_schema import (
+    FALLBACK_QUESTION_TEMPLATE_VERSION,
+    GENERATOR_SCHEMA_VERSION,
+    TRANSITION_SCHEMA_VERSION,
+)
+from modules.module_05_ontology.grounding import (
+    GROUNDING_POLICY_VERSION,
+    GROUNDING_SCHEMA_VERSION,
+    ROLE_PROFILE_SCHEMA_VERSION,
+    grounding_contract_hash,
+)
 
 
 def _transition(episode, label, prediction, done, reward, model_pair=("candidate", "judge")):
@@ -68,6 +79,43 @@ def test_validation_and_policy_gates_remain_distinct():
     assert audit_learned_policy_evaluation(rollout_report)["passes_quality_gates"]
 
 
+def _current_grounded_transition(episode: str, label: int) -> dict:
+    item = _transition(episode, label, label, True, 0.1)
+    item.update({
+        "transition_schema_version": TRANSITION_SCHEMA_VERSION,
+        "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
+        "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
+        "grounding_contract_hash": grounding_contract_hash(),
+        "transition_kind": "question",
+        "resume_content_hash": f"resume-hash-{episode}",
+        "jd_content_hash": f"jd-hash-{episode}",
+        "question": f"How would you apply Python in scenario {episode}?",
+        "question_grounding_valid": True,
+        "question_generation_attempts": 1,
+        "llm_question_generation_attempts": 1,
+        "deterministic_question_generation_attempts": 0,
+        "question_generation_mode": "llm",
+        "fallback_question_template_version": None,
+        "question_prompt_hash": f"prompt-hash-{episode}",
+        "question_generation_seed": 42 + label,
+        "target_skill_id": "python",
+        "role_profile_hash": f"profile-{episode}",
+        "ontology_hash": f"ontology-{episode}",
+        "pairing_record": {"pairing_class": "evidence_overlap"},
+        "question_grounding": {
+            "schema_version": GROUNDING_SCHEMA_VERSION,
+            "grounding_policy_version": GROUNDING_POLICY_VERSION,
+            "target_skill_id": "python",
+            "role_profile_hash": f"profile-{episode}",
+            "decision": "accept",
+            "valid": True,
+            "reasons": [],
+        },
+    })
+    return item
+
+
 def test_audit_flags_prediction_collapse_and_model_overlap():
     transitions = [
         _transition(f"ep-{index}", index % 3, 0, True, -0.1, ("same", "same"))
@@ -95,7 +143,10 @@ def test_raw_gate_does_not_fail_only_because_stored_beliefs_collapse():
         for index in range(9)
     ]
     raw = audit_raw_evidence(
-        transitions, min_episodes=3, min_independent_components=3
+        transitions,
+        min_episodes=3,
+        min_independent_components=3,
+        allow_legacy=True,
     )
     belief = audit_belief_predictions(transitions)
     assert raw["passes_quality_gates"] is True
@@ -108,10 +159,115 @@ def test_legacy_transitions_do_not_require_v4_grounding_consistency():
         for label in range(3)
     ]
     report = audit_raw_evidence(
-        transitions, min_episodes=3, min_independent_components=3
+        transitions,
+        min_episodes=3,
+        min_independent_components=3,
+        allow_legacy=True,
     )
     assert report["inconsistent_episode_grounding"] == 0
     assert report["passes_quality_gates"] is True
+
+
+def test_raw_gate_rejects_unknown_transition_contract_by_default():
+    transitions = [
+        _transition(f"unknown-{label}", label, label, True, 0.1)
+        for label in range(3)
+    ]
+    for item in transitions:
+        item["transition_schema_version"] = "aria-transition-v999"
+
+    report = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+
+    assert report["invalid_contract_provenance"] == 3
+    assert report["passes_quality_gates"] is False
+
+
+def test_raw_gate_reports_and_caps_deterministic_grounding_fallbacks():
+    transitions = []
+    for label in range(3):
+        item = _transition(f"fallback-{label}", label, label, True, 0.1)
+        item["question_generation_mode"] = (
+            "deterministic_grounded_fallback" if label == 0 else "llm"
+        )
+        transitions.append(item)
+    report = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+    assert report["deterministic_grounding_fallback_count"] == 1
+    assert report["deterministic_grounding_fallback_rate"] == 1 / 3
+    assert any("10%" in warning for warning in report["warnings"])
+
+
+def test_v6_generation_mode_requires_fallback_template_provenance():
+    transitions = [
+        _current_grounded_transition(f"mode-{label}", label)
+        for label in range(3)
+    ]
+    transitions[0]["question_generation_mode"] = "deterministic_grounded_fallback"
+
+    invalid = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+    assert invalid["invalid_generation_mode_provenance"] == 1
+    assert invalid["passes_quality_gates"] is False
+
+    transitions[0].update({
+        "fallback_question_template_version": FALLBACK_QUESTION_TEMPLATE_VERSION,
+        "question_prompt_hash": None,
+        "question_generation_seed": None,
+        "question_generation_attempts": 3,
+        "llm_question_generation_attempts": 3,
+        "deterministic_question_generation_attempts": 1,
+    })
+    valid = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+    assert valid["invalid_generation_mode_provenance"] == 0
+
+
+def test_current_raw_gate_rejects_stale_contract_provenance():
+    transitions = [
+        _current_grounded_transition(f"contract-{label}", label)
+        for label in range(3)
+    ]
+    transitions[0]["generator_schema_version"] = "aria-simulator-v5"
+
+    report = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+
+    assert report["invalid_contract_provenance"] == 1
+    assert report["passes_quality_gates"] is False
+    assert any("contracts" in warning for warning in report["warnings"])
+
+
+def test_raw_gate_reports_excessive_cross_component_fallback_duplicates():
+    transitions = [
+        _current_grounded_transition(f"duplicate-{label}", label % 3)
+        for label in range(3)
+    ]
+    for item in transitions:
+        item.update({
+            "question": "How would you apply Python and verify the result?",
+            "question_generation_mode": "deterministic_grounded_fallback",
+            "fallback_question_template_version": FALLBACK_QUESTION_TEMPLATE_VERSION,
+            "question_prompt_hash": None,
+            "question_generation_seed": None,
+            "question_generation_attempts": 3,
+            "llm_question_generation_attempts": 3,
+            "deterministic_question_generation_attempts": 1,
+        })
+
+    report = audit_raw_evidence(
+        transitions, min_episodes=3, min_independent_components=3
+    )
+
+    assert report["cross_component_duplicate_fallback_question_count"] == 2
+    assert report["cross_component_duplicate_fallback_question_rate"] == 2 / 3
+    assert len(report["cross_component_duplicate_fallback_questions"]) == 1
+    assert any("25%" in warning for warning in report["warnings"])
 
 
 def test_content_hash_detects_renamed_duplicate_and_cross_split_leakage():
@@ -131,28 +287,13 @@ def test_content_hash_detects_renamed_duplicate_and_cross_split_leakage():
 
 
 def test_v4_raw_audit_requires_and_reports_grounding_provenance():
-    transitions = []
-    for label in range(3):
-        item = _transition(f"grounded-{label}", label, label, True, 0.1)
-        item.update({
-            "transition_schema_version": "aria-transition-v4",
-            "transition_kind": "question",
-            "resume_content_hash": f"resume-hash-{label}",
-            "jd_content_hash": f"jd-hash-{label}",
-            "question": f"How would you apply Python in scenario {label}?",
-            "question_grounding_valid": True,
-            "question_generation_attempts": label + 1,
-            "target_skill_id": "python",
-            "role_profile_hash": f"profile-{label}",
-            "grounding_contract_hash": "contract-hash",
-            "ontology_hash": f"ontology-{label}",
-            "pairing_record": {"pairing_class": "evidence_overlap"},
-            "question_grounding": {
-                "target_skill_id": "python",
-                "role_profile_hash": f"profile-{label}",
-            },
-        })
-        transitions.append(item)
+    transitions = [
+        _current_grounded_transition(f"grounded-{label}", label)
+        for label in range(3)
+    ]
+    for label, item in enumerate(transitions):
+        item["question_generation_attempts"] = label + 1
+        item["llm_question_generation_attempts"] = label + 1
 
     report = audit_raw_evidence(
         transitions, min_episodes=3, min_independent_components=3
