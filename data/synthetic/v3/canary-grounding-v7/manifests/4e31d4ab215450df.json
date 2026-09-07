@@ -1,11 +1,55 @@
 {
-  "schema_version": "aria-generation-preflight-v2",
-  "required_identity_components": 32,
+  "generation_run_id": "4e31d4ab215450df",
+  "plan_id": "c6c4ff494a8b7b44",
+  "status": "running",
+  "generation_started_at": "2026-09-06T19:18:02.897288+00:00",
+  "source_dataset_hash": "new-corpus",
+  "simulation_seed": 42,
+  "start_episode_index": 0,
+  "planned_episodes": 3,
+  "planned_pairs_hash": "31d0bd10eeb5ac48acf10ef0a0de6babbd5a0faa0b5212167c0473e55aa0c9ec",
+  "document_sources_hash": "8cd0999c29483542d63ba28ed83d4a05a4698ce317434f33094d0eabb35eea6f",
   "identity_component_targets": [
-    20,
-    6,
-    6
+    1,
+    1,
+    1
   ],
+  "planned_document_pairs": [
+    {
+      "resume_file": "opensporks:25797445",
+      "jd_file": "JD_Battery DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:21283365",
+      "jd_file": "JD_PE_DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:31243710",
+      "jd_file": "Python C# .Net - JD.pdf"
+    }
+  ],
+  "persona_schedule": [
+    "BEGINNER",
+    "MID",
+    "EXPERT"
+  ],
+  "candidate_model": "qwen2.5:7b",
+  "evaluator_model": "gemma3:4b",
+  "generator_schema_version": "aria-simulator-v4",
+  "transition_schema_version": "aria-transition-v4",
+  "state_schema_version": "aria-state-v4",
+  "action_schema_version": "aria-action-v4",
+  "reward_schema_version": "aria-reward-v3",
+  "role_profile_schema_version": "aria-role-profile-v1",
+  "question_grounding_schema_version": "aria-question-grounding-v1",
+  "grounding_contract_hash": "8c7ee7727b1ad0fd5d6bf797da829a506b272c11114ab927464bc17a71962984",
+  "ollama_host": "http://localhost:11434",
+  "ollama_num_ctx": 4096,
+  "ollama_keep_alive": -1,
+  "episode_worker_concurrency": 3,
+  "candidate_request_concurrency": 3,
+  "evaluator_request_concurrency": 2,
+  "single_model_residency": true,
   "resume_source": {
     "source_type": "opensporks_csv",
     "source_file": "data/external/opensporks/Resume/Resume.cleaned.csv",
@@ -17,8 +61,8 @@
     "selected_resume_count": 238,
     "unique_content_hashes": 238
   },
-  "job_descriptions": {
-    "pdf_files": 64,
+  "job_description_source": {
+    "pdf_files": 39,
     "filename_excluded_files": [
       "AMVI_Foods_Food_Technologist_JD.pdf",
       "Internship (Mechanical).pdf",
@@ -31,8 +75,8 @@
     ],
     "unreadable_files": [],
     "duplicate_content_groups": [],
-    "unique_readable_content_hashes": 56,
-    "groundable_role_profiles": 34,
+    "unique_readable_content_hashes": 31,
+    "groundable_role_profiles": 20,
     "ungroundable_role_profiles": [
       {
         "file": "AD_26M_20-_20JD_20.pdf",
@@ -43,32 +87,12 @@
         "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
       },
       {
-        "file": "Associate Escalations Developer (C++ Developer)_Kinaxis_FY26.pdf",
-        "reason": "JD yields 2 evidence-backed competencies; at least 5 are required"
-      },
-      {
-        "file": "Associate Software Developer_Kinaxis_FY26.pdf",
-        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
-      },
-      {
-        "file": "Campus_SDE1_super.moneyJD.pdf",
-        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
-      },
-      {
         "file": "Cyber Security Engineering - JD.pdf",
         "reason": "JD yields 2 evidence-backed competencies; at least 5 are required"
       },
       {
         "file": "Data Pipeline - Software.pdf",
         "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
-      },
-      {
-        "file": "Electrical - JD (1).pdf",
-        "reason": "JD contains no supported, evidence-backed competencies"
-      },
-      {
-        "file": "Electronics - JD (1).pdf",
-        "reason": "JD contains no supported, evidence-backed competencies"
       },
       {
         "file": "Gartner_Campus JD_Intern - IT (LAUNCH) - Rotational Development Program 2025-26  - Internship (Chennai).pdf",
@@ -87,90 +111,39 @@
         "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
       },
       {
-        "file": "Job Description_Associate Consultant Solutions_2026_PS_Kinaxis.pdf",
-        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
-      },
-      {
-        "file": "Keyence_Consulting_Sales_Engineer_JD.pdf",
-        "reason": "JD contains no supported, evidence-backed competencies"
-      },
-      {
-        "file": "Mechanical Engineering Intern - Job Description (1) (1).pdf",
-        "reason": "JD yields 2 evidence-backed competencies; at least 5 are required"
-      },
-      {
         "file": "Motor - DVP.pdf",
         "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
-      },
-      {
-        "file": "Project Management - JD (1).pdf",
-        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
       },
       {
         "file": "Python Javascript - JD.pdf",
         "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
       },
       {
-        "file": "Software Intern - JD (1).pdf",
-        "reason": "JD contains no supported, evidence-backed competencies"
-      },
-      {
         "file": "Talview Software Developer Internship.pdf",
         "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
-      },
-      {
-        "file": "Technical Support Associate_Kinaxis_University JD_2026.pdf",
-        "reason": "JD yields 1 evidence-backed competencies; at least 5 are required"
       }
     ],
     "grounded_skill_counts": {
-      "AI_Engineer_Intern_JD.pdf": 5,
-      "Associate Software Developer (Data & AI ML)_Kinaxis_FY26.pdf": 6,
       "Aumovio jd.pdf": 5,
       "Battery - Design and testing intern.pdf": 13,
-      "Bottomline - ETP 2027 JD.pdf": 7,
-      "Campus DS JD-27.pdf": 5,
-      "Cloud Engineer_Data & Analytics_Kinaxis_JD_2026_Campus Hiring.pdf": 7,
-      "Cloud Engineer_Site Reliability Engineer_Kinaxis_JD_2026_Campus Hiring.pdf": 5,
-      "Core Engineer Role_ JD.pdf": 13,
       "CSG - Undergraduate Intern.pdf": 9,
-      "Data_Engineering_Interns_JD.pdf": 7,
       "Embedded_Software_Intern_JD.pdf": 6,
       "FullStack_Developer_Intern_JD.pdf": 7,
       "Hardware Design - General.pdf": 6,
       "Intern - Aladdin Data.pdf": 5,
       "Intern - Software Engineering.pdf": 7,
-      "Intern, Global Data Science.pdf": 8,
       "JD - Intern - Quality & Engineering - Zetwerk Electronics (1).pdf": 5,
-      "JD - Intern - Quality & Engineering - Zetwerk Electronics (Chennai, Bangalore & Noida).pdf": 5,
       "JD-FY27 Software Engineer - Network_Embedded_Application Development01.pdf": 6,
       "JD_Battery DVP.pdf": 8,
       "JD_PE_DVP.pdf": 9,
       "Job Description - AI Engineer.pdf": 10,
       "Job Description Electrical Engineering  (1) (1).pdf": 7,
       "Job Description for Campus.pdf": 5,
-      "Job Description_Associate Consultant Technology_2026_PS_Kinaxis.pdf": 8,
       "MBD.pdf": 8,
       "Mechanical Intern \u2013 Design (2D_3D).pdf": 6,
-      "Mechanical, Mechatronics - JD (1).pdf": 5,
       "Powertrain.pdf": 8,
       "Python C# .Net - JD.pdf": 10,
-      "SDET Intern.docx.pdf": 5,
-      "Software Engineer_2027_Job description.pdf": 6,
       "Testing_20_26_20Decom_20-_20JD_20.pdf": 5
     }
-  },
-  "shortfall": {
-    "unique_resumes": 0,
-    "unique_readable_jds": 0,
-    "groundable_jds": 0
-  },
-  "checks": {
-    "enough_unique_resumes": true,
-    "enough_unique_readable_jds": true,
-    "no_duplicate_jd_content": true,
-    "no_unreadable_selected_jds": true,
-    "enough_groundable_jds": true
-  },
-  "passes_preflight": true
+  }
 }

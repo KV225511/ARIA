@@ -1,0 +1,1145 @@
+{
+  "generation_run_id": "b69a3789f1516b5b",
+  "plan_id": "065a35ce0a90eb11",
+  "status": "complete",
+  "generation_started_at": "2026-09-06T23:16:49.138823+00:00",
+  "source_dataset_hash": "new-corpus",
+  "simulation_seed": 42,
+  "start_episode_index": 0,
+  "planned_episodes": 3,
+  "planned_pairs_hash": "31d0bd10eeb5ac48acf10ef0a0de6babbd5a0faa0b5212167c0473e55aa0c9ec",
+  "document_sources_hash": "8cd0999c29483542d63ba28ed83d4a05a4698ce317434f33094d0eabb35eea6f",
+  "identity_component_targets": [
+    1,
+    1,
+    1
+  ],
+  "planned_document_pairs": [
+    {
+      "resume_file": "opensporks:25797445",
+      "jd_file": "JD_Battery DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:21283365",
+      "jd_file": "JD_PE_DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:31243710",
+      "jd_file": "Python C# .Net - JD.pdf"
+    }
+  ],
+  "persona_schedule": [
+    "BEGINNER",
+    "MID",
+    "EXPERT"
+  ],
+  "candidate_model": "qwen2.5:7b",
+  "evaluator_model": "gemma3:4b",
+  "generator_schema_version": "aria-simulator-v6",
+  "transition_schema_version": "aria-transition-v4",
+  "state_schema_version": "aria-state-v4",
+  "action_schema_version": "aria-action-v4",
+  "reward_schema_version": "aria-reward-v3",
+  "role_profile_schema_version": "aria-role-profile-v1",
+  "question_grounding_schema_version": "aria-question-grounding-v1",
+  "grounding_contract_hash": "8c7ee7727b1ad0fd5d6bf797da829a506b272c11114ab927464bc17a71962984",
+  "fallback_question_template_version": "aria-grounded-fallback-v1",
+  "ollama_host": "http://localhost:11434",
+  "ollama_num_ctx": 4096,
+  "ollama_keep_alive": -1,
+  "episode_worker_concurrency": 3,
+  "candidate_request_concurrency": 3,
+  "evaluator_request_concurrency": 2,
+  "single_model_residency": true,
+  "resume_source": {
+    "source_type": "opensporks_csv",
+    "source_file": "data/external/opensporks/Resume/Resume.cleaned.csv",
+    "source_file_hash": "f5845c5cd65d8b5814bf61aaf45ab97c804a191cc5333aedf6b41970c2d12720",
+    "selected_categories": [
+      "ENGINEERING",
+      "INFORMATION-TECHNOLOGY"
+    ],
+    "selected_resume_count": 238,
+    "unique_content_hashes": 238
+  },
+  "job_description_source": {
+    "pdf_files": 39,
+    "filename_excluded_files": [
+      "AMVI_Foods_Food_Technologist_JD.pdf",
+      "Internship (Mechanical).pdf",
+      "JD - Assistant Manager (NEEV) (1).pdf",
+      "JD - Technical Sales and Application Specialist - Fresher - Biotechnology (1).pdf",
+      "JD - Technical Sales and Service Engineer - Freshers(0-1 year) Biomedical.pdf",
+      "Job Description BDA (2).pdf",
+      "Job Description_Biomedical - eInfochips (An Arrow Company) 2027.pdf",
+      "Linux Driver Intern JD.pdf"
+    ],
+    "unreadable_files": [],
+    "duplicate_content_groups": [],
+    "unique_readable_content_hashes": 31,
+    "groundable_role_profiles": 20,
+    "ungroundable_role_profiles": [
+      {
+        "file": "AD_26M_20-_20JD_20.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Analytics Data Science - JD.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Cyber Security Engineering - JD.pdf",
+        "reason": "JD yields 2 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Data Pipeline - Software.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Gartner_Campus JD_Intern - IT (LAUNCH) - Rotational Development Program 2025-26  - Internship (Chennai).pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD - JAVA ST (June 2026) (1).pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD_BTSA_2026.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD_DAA_2026.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Motor - DVP.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Python Javascript - JD.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Talview Software Developer Internship.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      }
+    ],
+    "grounded_skill_counts": {
+      "Aumovio jd.pdf": 5,
+      "Battery - Design and testing intern.pdf": 13,
+      "CSG - Undergraduate Intern.pdf": 9,
+      "Embedded_Software_Intern_JD.pdf": 6,
+      "FullStack_Developer_Intern_JD.pdf": 7,
+      "Hardware Design - General.pdf": 6,
+      "Intern - Aladdin Data.pdf": 5,
+      "Intern - Software Engineering.pdf": 7,
+      "JD - Intern - Quality & Engineering - Zetwerk Electronics (1).pdf": 5,
+      "JD-FY27 Software Engineer - Network_Embedded_Application Development01.pdf": 6,
+      "JD_Battery DVP.pdf": 8,
+      "JD_PE_DVP.pdf": 9,
+      "Job Description - AI Engineer.pdf": 10,
+      "Job Description Electrical Engineering  (1) (1).pdf": 7,
+      "Job Description for Campus.pdf": 5,
+      "MBD.pdf": 8,
+      "Mechanical Intern \u2013 Design (2D_3D).pdf": 6,
+      "Powertrain.pdf": 8,
+      "Python C# .Net - JD.pdf": 10,
+      "Testing_20_26_20Decom_20-_20JD_20.pdf": 5
+    }
+  },
+  "completed_episodes": 3,
+  "failed_episodes": {},
+  "failed_episode_diagnostics": {},
+  "successful_fallback_episode_diagnostics": {
+    "0": {
+      "episode_id": "episode_0",
+      "status": "complete",
+      "resume_file": "opensporks:25797445",
+      "jd_file": "JD_Battery DVP.pdf",
+      "rejected_question_attempts": [
+        {
+          "turn": 6,
+          "action_idx": 4,
+          "action": "probe_foundation",
+          "target_skill": "Test and Validation",
+          "target_skill_id": "test-validation",
+          "retry_number": 1,
+          "raw_generated_question": "Can you explain the fundamental principles behind how you would validate the functionality of a battery module using mathematical models and simulations, and how these models help in predicting the battery's performance under different operating conditions?",
+          "normalized_question": "Can you explain the fundamental principles behind how you would validate the functionality of a battery module using mathematical models and simulations, and how these models help in predicting the battery's performance under different operating conditions?",
+          "validation_reasons": [
+            "question has no lexical support from the target or JD evidence"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "test-validation",
+            "role_profile_hash": "d480ffa1c6a44bbe6d7a0bf822453051b34957a0213d01310f600ecaf27cadeb",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question has no lexical support from the target or JD evidence"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "7e7a0263ca2938e5d230b0961395abb90d897ae19e379820b87608d7c1825923",
+          "question_generation_seed": 6485
+        },
+        {
+          "turn": 6,
+          "action_idx": 4,
+          "action": "probe_foundation",
+          "target_skill": "Test and Validation",
+          "target_skill_id": "test-validation",
+          "retry_number": 2,
+          "raw_generated_question": "Can you explain the fundamental principles behind how you would use statistical analysis to validate the performance consistency of a battery module across multiple cycles, and how this analysis helps in identifying potential issues before they become critical?",
+          "normalized_question": "Can you explain the fundamental principles behind how you would use statistical analysis to validate the performance consistency of a battery module across multiple cycles, and how this analysis helps in identifying potential issues before they become critical?",
+          "validation_reasons": [
+            "question has no lexical support from the target or JD evidence"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "test-validation",
+            "role_profile_hash": "d480ffa1c6a44bbe6d7a0bf822453051b34957a0213d01310f600ecaf27cadeb",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question has no lexical support from the target or JD evidence"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "92cd70ea4751506103c6d0147cf530376122391f356446f4bd30417cbaf1eaac",
+          "question_generation_seed": 6486
+        },
+        {
+          "turn": 6,
+          "action_idx": 4,
+          "action": "probe_foundation",
+          "target_skill": "Test and Validation",
+          "target_skill_id": "test-validation",
+          "retry_number": 3,
+          "raw_generated_question": "Can you explain the fundamental principles behind how you would use signal processing techniques to analyze the data from battery cells during operation, and how this analysis helps in identifying potential issues before they become critical?",
+          "normalized_question": "Can you explain the fundamental principles behind how you would use signal processing techniques to analyze the data from battery cells during operation, and how this analysis helps in identifying potential issues before they become critical?",
+          "validation_reasons": [
+            "question has no lexical support from the target or JD evidence"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "test-validation",
+            "role_profile_hash": "d480ffa1c6a44bbe6d7a0bf822453051b34957a0213d01310f600ecaf27cadeb",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question has no lexical support from the target or JD evidence"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "68de66a136758d91ecba9429ec05f572eb1e59d1f436a3aab6d929bd478b21c8",
+          "question_generation_seed": 6487
+        },
+        {
+          "turn": 11,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Mechanical Testing",
+          "target_skill_id": "mechanical-testing",
+          "retry_number": 1,
+          "raw_generated_question": "Can you describe a scenario where you would perform mechanical durability testing on a battery pack, and what specific tests might you conduct to ensure the battery pack can withstand various mechanical stresses?",
+          "normalized_question": "Can you describe a scenario where you would perform mechanical durability testing on a battery pack, and what specific tests might you conduct to ensure the battery pack can withstand various mechanical stresses?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "mechanical-testing",
+            "role_profile_hash": "d480ffa1c6a44bbe6d7a0bf822453051b34957a0213d01310f600ecaf27cadeb",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "durability",
+              "mechanical"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "3b4130b3479898292ccac7a372de58f64f484ba91183a735d03d94acb4e8e0c7",
+          "question_generation_seed": 11433
+        }
+      ],
+      "fallback_questions": [
+        {
+          "turn": 6,
+          "action": "probe_foundation",
+          "target_skill_id": "test-validation",
+          "template_version": "aria-grounded-fallback-v1",
+          "question": "What underlying mechanisms govern Test and Validation, and how would you demonstrate them with a concrete example?",
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "test-validation",
+            "role_profile_hash": "d480ffa1c6a44bbe6d7a0bf822453051b34957a0213d01310f600ecaf27cadeb",
+            "decision": "accept",
+            "valid": true,
+            "reasons": [],
+            "supporting_terms": [
+              "test"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          }
+        }
+      ]
+    },
+    "1": {
+      "episode_id": "episode_1",
+      "status": "complete",
+      "resume_file": "opensporks:21283365",
+      "jd_file": "JD_PE_DVP.pdf",
+      "rejected_question_attempts": [
+        {
+          "turn": 3,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 1,
+          "raw_generated_question": "Can you explain the basic principles of how a buck converter works in power electronics for an electric vehicle, and how it can be used to regulate the voltage of the battery pack?",
+          "normalized_question": "Can you explain the basic principles of how a buck converter works in power electronics for an electric vehicle, and how it can be used to regulate the voltage of the battery pack?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: battery-testing"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: battery-testing"
+            ],
+            "supporting_terms": [
+              "converter",
+              "electronic",
+              "power"
+            ],
+            "off_profile_skill_ids": [
+              "battery-testing"
+            ],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "d5c91d2063e3d668445c2d6d7f921f0f1c36deb5e8e61b5767219fcb4d16802f",
+          "question_generation_seed": 1003364
+        },
+        {
+          "turn": 3,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 2,
+          "raw_generated_question": "Can you explain the basic principles of how a half-bridge inverter works in power electronics for an electric vehicle, and how it can be used to convert DC from the battery pack to AC for motor operation?",
+          "normalized_question": "Can you explain the basic principles of how a half-bridge inverter works in power electronics for an electric vehicle, and how it can be used to convert DC from the battery pack to AC for motor operation?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: battery-testing"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: battery-testing"
+            ],
+            "supporting_terms": [
+              "electronic",
+              "inverter",
+              "power"
+            ],
+            "off_profile_skill_ids": [
+              "battery-testing"
+            ],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "abad8cc9752323497d3aa43c7178c86e01cc851ce5bfeb77334025ae09e4db36",
+          "question_generation_seed": 1003365
+        },
+        {
+          "turn": 3,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 3,
+          "raw_generated_question": "Can you explain the basic principles of how a half-bridge inverter works in power electronics for an electric vehicle, and how it can be used to convert DC from the battery pack to AC for motor operation?",
+          "normalized_question": "Can you explain the basic principles of how a half-bridge inverter works in power electronics for an electric vehicle, and how it can be used to convert DC from the battery pack to AC for motor operation?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: battery-testing"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: battery-testing"
+            ],
+            "supporting_terms": [
+              "electronic",
+              "inverter",
+              "power"
+            ],
+            "off_profile_skill_ids": [
+              "battery-testing"
+            ],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "f184dd598332623016fc07104e3df4e4bf04faa8938fb6cffb6287c93ae509b1",
+          "question_generation_seed": 1003366
+        },
+        {
+          "turn": 14,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Electrical Circuits",
+          "target_skill_id": "electrical-circuits",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "normalized_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "electrical-circuits",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "electrical",
+              "kirchhoff",
+              "law"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "0c70cfe32f102496f152e550c0eb40080663c712e43d8b7582d5a58b743553c6",
+          "question_generation_seed": 1014463
+        },
+        {
+          "turn": 15,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach selecting and placing components in a power electronic circuit for an EV, considering their impact on the overall efficiency and reliability of the circuit, and what specific strategies or tools would you use to ensure optimal component placement?",
+          "normalized_question": "How would you approach selecting and placing components in a power electronic circuit for an EV, considering their impact on the overall efficiency and reliability of the circuit, and what specific strategies or tools would you use to ensure optimal component placement?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "electronic",
+              "power"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "46936781043b3d450abfdb1aee88c5123f5d964c43dc335280a74d2d6fa3bf1e",
+          "question_generation_seed": 1015472
+        },
+        {
+          "turn": 17,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach designing a PCB layout for a power electronic circuit in an EV, ensuring that the layout minimizes electromagnetic interference (EMI) and maximizes efficiency, and what specific features of a PCB layout tool would you utilize for this task?",
+          "normalized_question": "How would you approach designing a PCB layout for a power electronic circuit in an EV, ensuring that the layout minimizes electromagnetic interference (EMI) and maximizes efficiency, and what specific features of a PCB layout tool would you utilize for this task?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "pcb-design",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "layout",
+              "pcb"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "c9ae87871cb9febe4d52660e860c55badda6c5e583dde4fc6632982e975dcb00",
+          "question_generation_seed": 1017490
+        },
+        {
+          "turn": 18,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach selecting and placing components in a power electronic circuit for an EV, considering their impact on the overall efficiency and reliability of the circuit, and what specific strategies or tools would you use to ensure optimal component placement?",
+          "normalized_question": "How would you approach selecting and placing components in a power electronic circuit for an EV, considering their impact on the overall efficiency and reliability of the circuit, and what specific strategies or tools would you use to ensure optimal component placement?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "electronic",
+              "power"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "c7a9fde0ba728213d27f688f5c70a182f050711c93152500f59cb5680806d4d4",
+          "question_generation_seed": 1018499
+        },
+        {
+          "turn": 20,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Electrical Circuits",
+          "target_skill_id": "electrical-circuits",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "normalized_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "electrical-circuits",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "electrical",
+              "kirchhoff",
+              "law"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "f56f63ac5b9eb3042950b545b35bec704f256af9dec1274cfa73f95fd60188ec",
+          "question_generation_seed": 1020517
+        },
+        {
+          "turn": 21,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach designing a PCB layout for a power electronic circuit in an EV, ensuring that the layout minimizes electromagnetic interference (EMI) and maximizes efficiency, and what specific features of a PCB layout tool would you utilize for this task?",
+          "normalized_question": "How would you approach designing a PCB layout for a power electronic circuit in an EV, ensuring that the layout minimizes electromagnetic interference (EMI) and maximizes efficiency, and what specific features of a PCB layout tool would you utilize for this task?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "pcb-design",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "layout",
+              "pcb"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "0e131d720da8c40fa016f13dade06adfbd14aa2d91256d78eb88e086b31f029a",
+          "question_generation_seed": 1021526
+        },
+        {
+          "turn": 22,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Electrical Circuits",
+          "target_skill_id": "electrical-circuits",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "normalized_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "electrical-circuits",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "electrical",
+              "kirchhoff",
+              "law"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "64c4f8979d6187aa6fe5a2613d53ad521fa9ceecc6525f3205d62b1fe10dc803",
+          "question_generation_seed": 1022535
+        },
+        {
+          "turn": 23,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach selecting and placing components in a power electronic circuit for an EV, considering their impact on the overall efficiency and reliability of the circuit, and what specific strategies or tools would you use to ensure optimal component placement, such as minimizing parasitic inductance and capacitance? Can you provide an example of a component you might choose for a high-frequency switching application in an EV and explain why it would be suitable?",
+          "normalized_question": "How would you approach selecting and placing components in a power electronic circuit for an EV, considering their impact on the overall efficiency and reliability of the circuit, and what specific strategies or tools would you use to ensure optimal component placement, such as minimizing parasitic inductance and capacitance? Can you provide an example of a component you might choose for a high-frequency switching application in an EV and explain why it would be suitable?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "electronic",
+              "power"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "26409a59d2b4d6e6b547d05d62c34f2b9238774abea102ecfc02eeb03168b16d",
+          "question_generation_seed": 1023544
+        },
+        {
+          "turn": 23,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 2,
+          "raw_generated_question": "How would you approach designing a simple inverter circuit for an EV, considering the need for high efficiency and low switching losses, and what specific strategies or tools would you use to optimize the design for these objectives?",
+          "normalized_question": "How would you approach designing a simple inverter circuit for an EV, considering the need for high efficiency and low switching losses, and what specific strategies or tools would you use to optimize the design for these objectives?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "inverter"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "92ae10032c7794c10d308389f5854d5fc09b4169a35f5d6dd9b4bcdefae2a38d",
+          "question_generation_seed": 1023545
+        },
+        {
+          "turn": 24,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "PCB Design",
+          "target_skill_id": "pcb-design",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach designing a PCB layout for a power electronic circuit in an EV, ensuring that the layout minimizes electromagnetic interference (EMI) and maximizes efficiency, and what specific features of a PCB layout tool would you utilize to achieve these goals?",
+          "normalized_question": "How would you approach designing a PCB layout for a power electronic circuit in an EV, ensuring that the layout minimizes electromagnetic interference (EMI) and maximizes efficiency, and what specific features of a PCB layout tool would you utilize to achieve these goals?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "pcb-design",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "layout",
+              "pcb"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "7a0bbb426bfa97f0f828c206254539119c40da1f6ac8fa4b02ddf1e381cef0e5",
+          "question_generation_seed": 1024553
+        },
+        {
+          "turn": 25,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Electrical Circuits",
+          "target_skill_id": "electrical-circuits",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "normalized_question": "How would you approach analyzing a simple electrical circuit in an EV using Kirchhoff's laws, and what are the key steps in applying these laws to ensure the circuit operates safely and efficiently?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "electrical-circuits",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "electrical",
+              "kirchhoff",
+              "law"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "c8dec4ce585750f03d6626f573790c48413d70b4c23bfe53a57aa865d75fa8de",
+          "question_generation_seed": 1025562
+        },
+        {
+          "turn": 26,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Power Electronics",
+          "target_skill_id": "power-electronics",
+          "retry_number": 1,
+          "raw_generated_question": "How would you approach selecting and validating the performance of a power converter in an EV, considering factors such as efficiency, thermal management, and reliability, and what specific methods or tools would you use to ensure the converter meets these requirements?",
+          "normalized_question": "How would you approach selecting and validating the performance of a power converter in an EV, considering factors such as efficiency, thermal management, and reliability, and what specific methods or tools would you use to ensure the converter meets these requirements?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "converter",
+              "power"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "47b67a9f8a12d9365677d8120d88a907daf3722571eee0615ec2eadfe75ad662",
+          "question_generation_seed": 1026571
+        },
+        {
+          "turn": 28,
+          "action_idx": 1,
+          "action": "decrease_difficulty",
+          "target_skill": "Electrical Circuits",
+          "target_skill_id": "electrical-circuits",
+          "retry_number": 1,
+          "raw_generated_question": "What is the basic principle of Ohm's law, and how would you use it to calculate the current in a simple electrical circuit with a known voltage and resistance?",
+          "normalized_question": "What is the basic principle of Ohm's law, and how would you use it to calculate the current in a simple electrical circuit with a known voltage and resistance?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "electrical-circuits",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "circuit",
+              "current",
+              "electrical",
+              "law",
+              "ohm",
+              "resistance",
+              "voltage"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "98d5100e8617e08d2cdf0ef9b90e4aae2da5ce488f1135bcf7a692fea7195045",
+          "question_generation_seed": 1028395
+        }
+      ],
+      "fallback_questions": [
+        {
+          "turn": 3,
+          "action": "switch_topic",
+          "target_skill_id": "power-electronics",
+          "template_version": "aria-grounded-fallback-v1",
+          "question": "What is one important challenge in Power Electronics, and how would you address it?",
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "power-electronics",
+            "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+            "decision": "accept",
+            "valid": true,
+            "reasons": [],
+            "supporting_terms": [
+              "electronic",
+              "power"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          }
+        }
+      ]
+    },
+    "2": {
+      "episode_id": "episode_2",
+      "status": "complete",
+      "resume_file": "opensporks:31243710",
+      "jd_file": "Python C# .Net - JD.pdf",
+      "rejected_question_attempts": [
+        {
+          "turn": 6,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Design Patterns",
+          "target_skill_id": "design-patterns",
+          "retry_number": 1,
+          "raw_generated_question": "Can you explain the concept of a design pattern and provide an example of when you might use the Factory pattern in a software project?",
+          "normalized_question": "Can you explain the concept of a design pattern and provide an example of when you might use the Factory pattern in a software project?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "design-patterns",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "factory",
+              "pattern",
+              "software"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "b8fba3b7d4a292f3aad62db200024e1048053177769bb2316d5a09306dd1cbbd",
+          "question_generation_seed": 2006394
+        },
+        {
+          "turn": 10,
+          "action_idx": 6,
+          "action": "ask_situational",
+          "target_skill": "Python",
+          "target_skill_id": "python",
+          "retry_number": 1,
+          "raw_generated_question": "Suppose our system experiences a sudden increase in response time for API requests, and we suspect it might be due to a bottleneck in the database. How would you diagnose and fix this issue using Python? How would you write a Python script to monitor database performance and identify potential bottlenecks? What metrics would you collect, and how would you analyze them to determine the root cause?",
+          "normalized_question": "Suppose our system experiences a sudden increase in response time for API requests, and we suspect it might be due to a bottleneck in the database. How would you diagnose and fix this issue using Python? How would you write a Python script to monitor database performance and identify potential bottlenecks? What metrics would you collect, and how would you analyze them to determine the root cause?",
+          "validation_reasons": [
+            "question contains more than two assessment clauses"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question contains more than two assessment clauses"
+            ],
+            "supporting_terms": [
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "662c967882be161393aa7d2d2b2505a4c35e3e5358dd717cedf8ccc2db2db63e",
+          "question_generation_seed": 2010721
+        },
+        {
+          "turn": 10,
+          "action_idx": 6,
+          "action": "ask_situational",
+          "target_skill": "Python",
+          "target_skill_id": "python",
+          "retry_number": 2,
+          "raw_generated_question": "Suppose our system experiences a sudden increase in response time for API requests, and we suspect it might be due to a bottleneck in the network. How would you diagnose and fix this issue using Python? How would you write a Python script to monitor network performance and identify potential bottlenecks? What metrics would you collect, and how would you analyze them to determine the root cause?",
+          "normalized_question": "Suppose our system experiences a sudden increase in response time for API requests, and we suspect it might be due to a bottleneck in the network. How would you diagnose and fix this issue using Python? How would you write a Python script to monitor network performance and identify potential bottlenecks? What metrics would you collect, and how would you analyze them to determine the root cause?",
+          "validation_reasons": [
+            "question contains more than two assessment clauses"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question contains more than two assessment clauses"
+            ],
+            "supporting_terms": [
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "1989b6972cc51062c2179272f614811481b412b36be2f1334b5500027654f438",
+          "question_generation_seed": 2010722
+        },
+        {
+          "turn": 10,
+          "action_idx": 6,
+          "action": "ask_situational",
+          "target_skill": "Python",
+          "target_skill_id": "python",
+          "retry_number": 3,
+          "raw_generated_question": "Suppose our system experiences a sudden increase in response time for API requests, and we suspect it might be due to inefficient code execution in one of the microservices. How would you diagnose and fix this issue using Python? How would you write a Python script to profile the microservice and identify the bottlenecks in the code? What tools and metrics would you use to analyze the performance, and how would you optimize the code to improve the response time?",
+          "normalized_question": "Suppose our system experiences a sudden increase in response time for API requests, and we suspect it might be due to inefficient code execution in one of the microservices. How would you diagnose and fix this issue using Python? How would you write a Python script to profile the microservice and identify the bottlenecks in the code? What tools and metrics would you use to analyze the performance, and how would you optimize the code to improve the response time?",
+          "validation_reasons": [
+            "question contains more than two assessment clauses"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question contains more than two assessment clauses"
+            ],
+            "supporting_terms": [
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "46ae8c9e48b88b107b5b82dad304c86ae58de41a6ab065b553af08ede66eeb78",
+          "question_generation_seed": 2010723
+        },
+        {
+          "turn": 19,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Python",
+          "target_skill_id": "python",
+          "retry_number": 1,
+          "raw_generated_question": "Can you provide an example of a simple Python script that you have written to automate a task related to system administration, such as managing user accounts or monitoring system health? How does this script handle potential errors or edge cases?",
+          "normalized_question": "Can you provide an example of a simple Python script that you have written to automate a task related to system administration, such as managing user accounts or monitoring system health? How does this script handle potential errors or edge cases?",
+          "validation_reasons": [
+            "question duplicates accepted history"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question duplicates accepted history"
+            ],
+            "supporting_terms": [
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "d420753e4ac2be6f727b371771863036c00612e7444f5a2efc790f582e059369",
+          "question_generation_seed": 2019511
+        }
+      ],
+      "fallback_questions": [
+        {
+          "turn": 10,
+          "action": "ask_situational",
+          "target_skill_id": "python",
+          "template_version": "aria-grounded-fallback-v1",
+          "question": "Suppose a late requirement changes how Python must work; how would you adapt and verify the result?",
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "accept",
+            "valid": true,
+            "reasons": [],
+            "supporting_terms": [
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          }
+        }
+      ]
+    }
+  },
+  "combined_transition_count": 78,
+  "partial_combined_transition_count": null,
+  "deterministic_grounding_fallback_count": 3,
+  "new_deterministic_grounding_fallback_count": 3,
+  "combined_deterministic_grounding_fallback_count": 3,
+  "partial_combined_deterministic_grounding_fallback_count": null,
+  "pairing_records": [
+    {
+      "episode_id": "episode_0",
+      "episode_status": "complete",
+      "resume_file": "opensporks:25797445",
+      "jd_file": "JD_Battery DVP.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "d480ffa1c6a44bbe6d7a0bf822453051b34957a0213d01310f600ecaf27cadeb",
+      "explicit_jd_skill_ids": [
+        "battery-testing",
+        "mechanical-testing",
+        "test-validation",
+        "thermal-testing",
+        "battery-management-system",
+        "homologation",
+        "root-cause-analysis"
+      ],
+      "resume_overlap_skill_ids": [
+        "root-cause-analysis"
+      ],
+      "explicit_jd_skill_count": 7,
+      "resume_overlap_skill_count": 1,
+      "resume_overlap_ratio": 0.14285714285714285,
+      "pairing_class": "evidence_overlap"
+    },
+    {
+      "episode_id": "episode_1",
+      "episode_status": "complete",
+      "resume_file": "opensporks:21283365",
+      "jd_file": "JD_PE_DVP.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+      "explicit_jd_skill_ids": [
+        "electrical-circuits",
+        "pcb-design",
+        "power-electronics",
+        "electronic-components",
+        "emi-emc",
+        "product-development",
+        "root-cause-analysis",
+        "test-validation"
+      ],
+      "resume_overlap_skill_ids": [],
+      "explicit_jd_skill_count": 8,
+      "resume_overlap_skill_count": 0,
+      "resume_overlap_ratio": 0.0,
+      "pairing_class": "no_evidence_overlap"
+    },
+    {
+      "episode_id": "episode_2",
+      "episode_status": "complete",
+      "resume_file": "opensporks:31243710",
+      "jd_file": "Python C# .Net - JD.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+      "explicit_jd_skill_ids": [
+        "ci-cd",
+        "design-patterns",
+        "python",
+        "javascript",
+        "microservices",
+        "oop",
+        "rest-api",
+        "root-cause-analysis",
+        "system-design"
+      ],
+      "resume_overlap_skill_ids": [],
+      "explicit_jd_skill_count": 9,
+      "resume_overlap_skill_count": 0,
+      "resume_overlap_ratio": 0.0,
+      "pairing_class": "no_evidence_overlap"
+    }
+  ],
+  "partial_dataset_path": null,
+  "canonical_dataset_hash": "06ee817cea540f1e5e25940a20fcfede478fa6254188b7f7cec9277dad824576",
+  "partial_dataset_hash": null,
+  "canonical_dataset_restored": false,
+  "generation_finished_at": "2026-09-06T23:34:36.996654+00:00"
+}

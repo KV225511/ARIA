@@ -1,0 +1,73 @@
+{
+  "gate": "raw_evidence",
+  "num_transitions": 41,
+  "num_episodes": 3,
+  "independent_identity_components": 3,
+  "terminal_true_label_counts": {
+    "0": 1,
+    "1": 1,
+    "2": 1
+  },
+  "semantic_scores_by_class": {
+    "0": {
+      "count": 17,
+      "mean": 0.17941176470588235,
+      "std": 0.12254509797646858,
+      "min": 0.05,
+      "max": 0.4
+    },
+    "1": {
+      "count": 11,
+      "mean": 0.49090909090909096,
+      "std": 0.0995859195463938,
+      "min": 0.4,
+      "max": 0.6
+    },
+    "2": {
+      "count": 10,
+      "mean": 0.82,
+      "std": 0.059999999999999984,
+      "min": 0.75,
+      "max": 0.95
+    }
+  },
+  "adjacent_standardized_effects": {
+    "0_vs_1": 2.7897650355125525,
+    "1_vs_2": 4.002994721459702
+  },
+  "invalid_evaluations": 0,
+  "missing_evaluation_validity": 0,
+  "invalid_question_grounding": 0,
+  "missing_role_profile_provenance": 0,
+  "invalid_grounding_provenance": 0,
+  "question_generation_attempt_counts": {
+    "0": 38
+  },
+  "question_grounding_retry_rate": 0.0,
+  "pairing_class_counts": {},
+  "duplicate_questions_within_episode": 0,
+  "inconsistent_episode_grounding": 3,
+  "distinct_targets_per_episode": {
+    "count": 3,
+    "mean": 0.0,
+    "std": 0.0,
+    "min": 0.0,
+    "max": 0.0
+  },
+  "invalid_semantic_scores": 0,
+  "missing_semantic_scores": 0,
+  "split_leaking_resumes": [],
+  "split_leaking_jds": [],
+  "renamed_duplicate_resumes": {},
+  "renamed_duplicate_jds": {},
+  "candidate_models": [
+    "qwen2.5:7b"
+  ],
+  "evaluator_models": [
+    "gemma3:4b"
+  ],
+  "warnings": [
+    "Role-profile or ontology provenance changes within an episode."
+  ],
+  "passes_quality_gates": false
+}

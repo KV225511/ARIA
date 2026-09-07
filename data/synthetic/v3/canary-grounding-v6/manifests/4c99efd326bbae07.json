@@ -1,0 +1,777 @@
+{
+  "generation_run_id": "4c99efd326bbae07",
+  "plan_id": "c6c4ff494a8b7b44",
+  "status": "failed",
+  "generation_started_at": "2026-09-06T18:49:12.188145+00:00",
+  "source_dataset_hash": "new-corpus",
+  "simulation_seed": 42,
+  "start_episode_index": 0,
+  "planned_episodes": 3,
+  "planned_pairs_hash": "31d0bd10eeb5ac48acf10ef0a0de6babbd5a0faa0b5212167c0473e55aa0c9ec",
+  "document_sources_hash": "8cd0999c29483542d63ba28ed83d4a05a4698ce317434f33094d0eabb35eea6f",
+  "identity_component_targets": [
+    1,
+    1,
+    1
+  ],
+  "planned_document_pairs": [
+    {
+      "resume_file": "opensporks:25797445",
+      "jd_file": "JD_Battery DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:21283365",
+      "jd_file": "JD_PE_DVP.pdf"
+    },
+    {
+      "resume_file": "opensporks:31243710",
+      "jd_file": "Python C# .Net - JD.pdf"
+    }
+  ],
+  "persona_schedule": [
+    "BEGINNER",
+    "MID",
+    "EXPERT"
+  ],
+  "candidate_model": "qwen2.5:7b",
+  "evaluator_model": "gemma3:4b",
+  "generator_schema_version": "aria-simulator-v4",
+  "transition_schema_version": "aria-transition-v4",
+  "state_schema_version": "aria-state-v4",
+  "action_schema_version": "aria-action-v4",
+  "reward_schema_version": "aria-reward-v3",
+  "role_profile_schema_version": "aria-role-profile-v1",
+  "question_grounding_schema_version": "aria-question-grounding-v1",
+  "grounding_contract_hash": "8c7ee7727b1ad0fd5d6bf797da829a506b272c11114ab927464bc17a71962984",
+  "ollama_host": "http://localhost:11434",
+  "ollama_num_ctx": 4096,
+  "ollama_keep_alive": -1,
+  "episode_worker_concurrency": 3,
+  "candidate_request_concurrency": 3,
+  "evaluator_request_concurrency": 2,
+  "single_model_residency": true,
+  "resume_source": {
+    "source_type": "opensporks_csv",
+    "source_file": "data/external/opensporks/Resume/Resume.cleaned.csv",
+    "source_file_hash": "f5845c5cd65d8b5814bf61aaf45ab97c804a191cc5333aedf6b41970c2d12720",
+    "selected_categories": [
+      "ENGINEERING",
+      "INFORMATION-TECHNOLOGY"
+    ],
+    "selected_resume_count": 238,
+    "unique_content_hashes": 238
+  },
+  "job_description_source": {
+    "pdf_files": 39,
+    "filename_excluded_files": [
+      "AMVI_Foods_Food_Technologist_JD.pdf",
+      "Internship (Mechanical).pdf",
+      "JD - Assistant Manager (NEEV) (1).pdf",
+      "JD - Technical Sales and Application Specialist - Fresher - Biotechnology (1).pdf",
+      "JD - Technical Sales and Service Engineer - Freshers(0-1 year) Biomedical.pdf",
+      "Job Description BDA (2).pdf",
+      "Job Description_Biomedical - eInfochips (An Arrow Company) 2027.pdf",
+      "Linux Driver Intern JD.pdf"
+    ],
+    "unreadable_files": [],
+    "duplicate_content_groups": [],
+    "unique_readable_content_hashes": 31,
+    "groundable_role_profiles": 20,
+    "ungroundable_role_profiles": [
+      {
+        "file": "AD_26M_20-_20JD_20.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Analytics Data Science - JD.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Cyber Security Engineering - JD.pdf",
+        "reason": "JD yields 2 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Data Pipeline - Software.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Gartner_Campus JD_Intern - IT (LAUNCH) - Rotational Development Program 2025-26  - Internship (Chennai).pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD - JAVA ST (June 2026) (1).pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD_BTSA_2026.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "JD_DAA_2026.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Motor - DVP.pdf",
+        "reason": "JD yields 4 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Python Javascript - JD.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      },
+      {
+        "file": "Talview Software Developer Internship.pdf",
+        "reason": "JD yields 3 evidence-backed competencies; at least 5 are required"
+      }
+    ],
+    "grounded_skill_counts": {
+      "Aumovio jd.pdf": 5,
+      "Battery - Design and testing intern.pdf": 13,
+      "CSG - Undergraduate Intern.pdf": 9,
+      "Embedded_Software_Intern_JD.pdf": 6,
+      "FullStack_Developer_Intern_JD.pdf": 7,
+      "Hardware Design - General.pdf": 6,
+      "Intern - Aladdin Data.pdf": 5,
+      "Intern - Software Engineering.pdf": 7,
+      "JD - Intern - Quality & Engineering - Zetwerk Electronics (1).pdf": 5,
+      "JD-FY27 Software Engineer - Network_Embedded_Application Development01.pdf": 6,
+      "JD_Battery DVP.pdf": 8,
+      "JD_PE_DVP.pdf": 9,
+      "Job Description - AI Engineer.pdf": 10,
+      "Job Description Electrical Engineering  (1) (1).pdf": 7,
+      "Job Description for Campus.pdf": 5,
+      "MBD.pdf": 8,
+      "Mechanical Intern \u2013 Design (2D_3D).pdf": 6,
+      "Powertrain.pdf": 8,
+      "Python C# .Net - JD.pdf": 10,
+      "Testing_20_26_20Decom_20-_20JD_20.pdf": 5
+    }
+  },
+  "completed_episodes": 2,
+  "failed_episodes": {
+    "2": "question grounding failed after 3 attempts"
+  },
+  "failed_episode_diagnostics": {
+    "2": {
+      "episode_id": "episode_2",
+      "display_number": 3,
+      "resume_file": "opensporks:31243710",
+      "jd_file": "Python C# .Net - JD.pdf",
+      "persona_tier": "EXPERT",
+      "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+      "role_profile": {
+        "schema_version": "aria-role-profile-v1",
+        "normalized_document_hash": "4a0fbb4c6b5e821851657ab0cf54ce7f105d73010c7db4bdc07eb377d37d7a7a",
+        "role_title": "Job Summary",
+        "role_domain": "software",
+        "skills": [
+          {
+            "skill_id": "ci-cd",
+            "canonical_name": "CI/CD",
+            "definition": "Automated build, test, release, and deployment workflows.",
+            "domain": "software",
+            "aliases": [
+              "ci/cd",
+              "continuous integration",
+              "continuous deployment",
+              "jenkins",
+              "gitlab ci"
+            ],
+            "priority": "required",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "CI/CD",
+                "start": 1283,
+                "end": 1288
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "design-patterns",
+            "canonical_name": "Design Patterns",
+            "definition": "Context-appropriate reusable software design structures and trade-offs.",
+            "domain": "software",
+            "aliases": [
+              "design patterns",
+              "strategy pattern",
+              "factory pattern"
+            ],
+            "priority": "required",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "design patterns",
+                "start": 1121,
+                "end": 1136
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "oop"
+            ]
+          },
+          {
+            "skill_id": "python",
+            "canonical_name": "Python",
+            "definition": "Python programming, packaging, testing, and runtime behaviour.",
+            "domain": "software",
+            "aliases": [
+              "python"
+            ],
+            "priority": "required",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "Python",
+                "start": 108,
+                "end": 114
+              },
+              {
+                "source": "jd",
+                "text": "Python",
+                "start": 393,
+                "end": 399
+              },
+              {
+                "source": "jd",
+                "text": "Python",
+                "start": 869,
+                "end": 875
+              },
+              {
+                "source": "jd",
+                "text": "Python",
+                "start": 943,
+                "end": 949
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "javascript",
+            "canonical_name": "JavaScript",
+            "definition": "JavaScript language and application development.",
+            "domain": "software",
+            "aliases": [
+              "javascript",
+              "typescript",
+              "node.js",
+              "nodejs"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "JavaScript",
+                "start": 1377,
+                "end": 1387
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "microservices",
+            "canonical_name": "Microservices",
+            "definition": "Service boundaries, communication, resilience, and operability.",
+            "domain": "software",
+            "aliases": [
+              "microservices",
+              "microservice"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "microservices",
+                "start": 1011,
+                "end": 1024
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "rest-api",
+              "system-design"
+            ]
+          },
+          {
+            "skill_id": "oop",
+            "canonical_name": "Object-Oriented Programming",
+            "definition": "Object modelling, encapsulation, composition, and polymorphism.",
+            "domain": "software",
+            "aliases": [
+              "object-oriented",
+              "object oriented",
+              "oop"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "object-oriented",
+                "start": 1089,
+                "end": 1104
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "rest-api",
+            "canonical_name": "REST API",
+            "definition": "HTTP API design, resource modelling, validation, and failure handling.",
+            "domain": "software",
+            "aliases": [
+              "rest api",
+              "restful",
+              "api development",
+              "apis"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "RESTful",
+                "start": 997,
+                "end": 1004
+              },
+              {
+                "source": "jd",
+                "text": "APIs",
+                "start": 1005,
+                "end": 1009
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "root-cause-analysis",
+            "canonical_name": "Root Cause Analysis",
+            "definition": "Systematic isolation and verification of failure causes.",
+            "domain": "manufacturing_quality",
+            "aliases": [
+              "root cause analysis",
+              "root-cause analysis",
+              "failure analysis",
+              "troubleshoot"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "Troubleshoot",
+                "start": 702,
+                "end": 714
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": [
+              "test-validation"
+            ]
+          },
+          {
+            "skill_id": "system-design",
+            "canonical_name": "System Design",
+            "definition": "Architecture, scalability, reliability, interfaces, and trade-offs.",
+            "domain": "software",
+            "aliases": [
+              "system design",
+              "distributed system",
+              "architecture",
+              "scalability"
+            ],
+            "priority": "unspecified",
+            "support_type": "explicit_jd",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "architecture",
+                "start": 1025,
+                "end": 1037
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          },
+          {
+            "skill_id": "test-validation",
+            "canonical_name": "Test and Validation",
+            "definition": "Planning, executing, and documenting engineering verification and validation.",
+            "domain": "manufacturing_quality",
+            "aliases": [
+              "test plan",
+              "testing and validation",
+              "test and validation",
+              "validation activities",
+              "dvp",
+              "dvt",
+              "pvt"
+            ],
+            "priority": "prerequisite",
+            "support_type": "reviewed_prerequisite",
+            "jd_evidence": [
+              {
+                "source": "jd",
+                "text": "Troubleshoot",
+                "start": 702,
+                "end": 714
+              }
+            ],
+            "resume_evidence": [],
+            "prerequisite_ids": []
+          }
+        ],
+        "acronym_resolutions": []
+      },
+      "pairing_record": {
+        "schema_version": "aria-pairing-record-v1",
+        "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+        "explicit_jd_skill_ids": [
+          "ci-cd",
+          "design-patterns",
+          "python",
+          "javascript",
+          "microservices",
+          "oop",
+          "rest-api",
+          "root-cause-analysis",
+          "system-design"
+        ],
+        "resume_overlap_skill_ids": [],
+        "explicit_jd_skill_count": 9,
+        "resume_overlap_skill_count": 0,
+        "resume_overlap_ratio": 0.0,
+        "pairing_class": "no_evidence_overlap"
+      },
+      "ontology_hash": "d0e83047eba3dec8c903a7312f7ace946ab79a18e6f3efb5c3be84e85fc6fa9f",
+      "ontology_nodes": [
+        "CI/CD",
+        "Design Patterns",
+        "JavaScript",
+        "Microservices",
+        "Object-Oriented Programming",
+        "Python",
+        "REST API",
+        "Root Cause Analysis",
+        "System Design",
+        "Test and Validation"
+      ],
+      "rejected_question_attempts": [
+        {
+          "turn": 4,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Python",
+          "target_skill_id": "python",
+          "retry_number": 1,
+          "raw_generated_question": "Can you provide an example of a Python function that you have written and explain its purpose and functionality? How would you test this function to ensure it works correctly?",
+          "normalized_question": "Can you provide an example of a Python function that you have written and explain its purpose and functionality? How would you test this function to ensure it works correctly?",
+          "validation_reasons": [
+            "question must contain exactly one assessment request"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question must contain exactly one assessment request"
+            ],
+            "supporting_terms": [
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "ee890f065b327fc7218cdee8cfec469427c63877af8f905f119816208a5f81a7"
+        },
+        {
+          "turn": 4,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "Python",
+          "target_skill_id": "python",
+          "retry_number": 2,
+          "raw_generated_question": "Can you provide an example of a Python script that uses a class to represent a simple calculator with methods for addition, subtraction, multiplication, and division? How would you handle potential division by zero errors in this script?",
+          "normalized_question": "Can you provide an example of a Python script that uses a class to represent a simple calculator with methods for addition, subtraction, multiplication, and division? How would you handle potential division by zero errors in this script?",
+          "validation_reasons": [
+            "question must contain exactly one assessment request"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question must contain exactly one assessment request"
+            ],
+            "supporting_terms": [
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "3249eb8248834ce81ead3161973847d58e6310058bd41b80e5fc27e27335e830"
+        },
+        {
+          "turn": 5,
+          "action_idx": 0,
+          "action": "increase_difficulty",
+          "target_skill": "Python",
+          "target_skill_id": "python",
+          "retry_number": 1,
+          "raw_generated_question": "How would you design a Python script to manage the packaging and distribution of a software application, ensuring that it includes all necessary dependencies and can be installed on multiple operating systems? What steps would you take to handle versioning and ensure the integrity of the package during the distribution process?",
+          "normalized_question": "How would you design a Python script to manage the packaging and distribution of a software application, ensuring that it includes all necessary dependencies and can be installed on multiple operating systems? What steps would you take to handle versioning and ensure the integrity of the package during the distribution process?",
+          "validation_reasons": [
+            "question must contain exactly one assessment request"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "python",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question must contain exactly one assessment request"
+            ],
+            "supporting_terms": [
+              "packaging",
+              "python"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "df9e304cd20a34b5fdd4cf31e978c00ad44ef11763f38dd51fff11da715ce134"
+        },
+        {
+          "turn": 13,
+          "action_idx": 3,
+          "action": "switch_topic",
+          "target_skill": "CI/CD",
+          "target_skill_id": "ci-cd",
+          "retry_number": 1,
+          "raw_generated_question": "How would you configure a GitLab CI pipeline to ensure that your web application's build, test, and deployment processes are automated and reliable? What steps would you include in the pipeline to handle different environments like staging and production?",
+          "normalized_question": "How would you configure a GitLab CI pipeline to ensure that your web application's build, test, and deployment processes are automated and reliable? What steps would you include in the pipeline to handle different environments like staging and production?",
+          "validation_reasons": [
+            "question must contain exactly one assessment request"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "ci-cd",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question must contain exactly one assessment request"
+            ],
+            "supporting_terms": [
+              "automated",
+              "build",
+              "deployment",
+              "gitlab",
+              "test"
+            ],
+            "off_profile_skill_ids": [],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "6e244a3fe6a4835af5de378612171d17ce3f9743ad2321933ceaed04474a20c8"
+        },
+        {
+          "turn": 16,
+          "action_idx": 2,
+          "action": "ask_follow_up_same_topic",
+          "target_skill": "CI/CD",
+          "target_skill_id": "ci-cd",
+          "retry_number": 1,
+          "raw_generated_question": "How would you handle database migrations in your CI/CD pipeline to ensure that the database schema is updated correctly during the deployment process, and what specific steps would you include in your Jenkins pipeline to automate this task?",
+          "normalized_question": "How would you handle database migrations in your CI/CD pipeline to ensure that the database schema is updated correctly during the deployment process, and what specific steps would you include in your Jenkins pipeline to automate this task?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: database-design"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "ci-cd",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: database-design"
+            ],
+            "supporting_terms": [
+              "deployment",
+              "jenkin"
+            ],
+            "off_profile_skill_ids": [
+              "database-design"
+            ],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "69cadc6bb520b40b3521bfc686e9bad057152accf1de12da31b897295e8551f7"
+        },
+        {
+          "turn": 16,
+          "action_idx": 2,
+          "action": "ask_follow_up_same_topic",
+          "target_skill": "CI/CD",
+          "target_skill_id": "ci-cd",
+          "retry_number": 2,
+          "raw_generated_question": "How would you handle database migrations in your CI/CD pipeline when deploying a web application, and what steps would you include in the pipeline to ensure that the database schema is correctly updated without causing downtime or data loss?",
+          "normalized_question": "How would you handle database migrations in your CI/CD pipeline when deploying a web application, and what steps would you include in the pipeline to ensure that the database schema is correctly updated without causing downtime or data loss?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: database-design"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "ci-cd",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: database-design"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": [
+              "database-design"
+            ],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "852b78b4f996deb8b7ff960d8dd285b01ce2fff72c49431bb7aa3149f247b40e"
+        },
+        {
+          "turn": 16,
+          "action_idx": 2,
+          "action": "ask_follow_up_same_topic",
+          "target_skill": "CI/CD",
+          "target_skill_id": "ci-cd",
+          "retry_number": 3,
+          "raw_generated_question": "How would you handle database migrations in your CI/CD pipeline when deploying a web application, and what steps would you include in the pipeline to ensure that the database schema is correctly updated without causing downtime or data loss?",
+          "normalized_question": "How would you handle database migrations in your CI/CD pipeline when deploying a web application, and what steps would you include in the pipeline to ensure that the database schema is correctly updated without causing downtime or data loss?",
+          "validation_reasons": [
+            "question introduces off-profile competencies: database-design"
+          ],
+          "validation_result": {
+            "schema_version": "aria-question-grounding-v1",
+            "grounding_policy_version": "aria-grounding-policy-v2",
+            "target_skill_id": "ci-cd",
+            "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+            "decision": "reject",
+            "valid": false,
+            "reasons": [
+              "question introduces off-profile competencies: database-design"
+            ],
+            "supporting_terms": [],
+            "off_profile_skill_ids": [
+              "database-design"
+            ],
+            "contextual_skill_ids": []
+          },
+          "question_prompt_hash": "852b78b4f996deb8b7ff960d8dd285b01ce2fff72c49431bb7aa3149f247b40e"
+        }
+      ],
+      "status": "failed",
+      "failure_stage": "question_grounding",
+      "failure_turn": 16,
+      "failure_action": "ask_follow_up_same_topic",
+      "failure_target_skill": "CI/CD",
+      "failure_target_skill_id": "ci-cd",
+      "failure_reason": "question grounding failed after 3 attempts"
+    }
+  },
+  "combined_transition_count": 48,
+  "pairing_records": [
+    {
+      "episode_id": "episode_0",
+      "episode_status": "complete",
+      "resume_file": "opensporks:25797445",
+      "jd_file": "JD_Battery DVP.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "d480ffa1c6a44bbe6d7a0bf822453051b34957a0213d01310f600ecaf27cadeb",
+      "explicit_jd_skill_ids": [
+        "battery-testing",
+        "mechanical-testing",
+        "test-validation",
+        "thermal-testing",
+        "battery-management-system",
+        "homologation",
+        "root-cause-analysis"
+      ],
+      "resume_overlap_skill_ids": [
+        "root-cause-analysis"
+      ],
+      "explicit_jd_skill_count": 7,
+      "resume_overlap_skill_count": 1,
+      "resume_overlap_ratio": 0.14285714285714285,
+      "pairing_class": "evidence_overlap"
+    },
+    {
+      "episode_id": "episode_1",
+      "episode_status": "complete",
+      "resume_file": "opensporks:21283365",
+      "jd_file": "JD_PE_DVP.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "54d7dddbf68e7d6750a6f9238bde1c15e1f5a1626a3640e1309639109e5d3bda",
+      "explicit_jd_skill_ids": [
+        "electrical-circuits",
+        "pcb-design",
+        "power-electronics",
+        "electronic-components",
+        "emi-emc",
+        "product-development",
+        "root-cause-analysis",
+        "test-validation"
+      ],
+      "resume_overlap_skill_ids": [],
+      "explicit_jd_skill_count": 8,
+      "resume_overlap_skill_count": 0,
+      "resume_overlap_ratio": 0.0,
+      "pairing_class": "no_evidence_overlap"
+    },
+    {
+      "episode_id": "episode_2",
+      "episode_status": "failed",
+      "resume_file": "opensporks:31243710",
+      "jd_file": "Python C# .Net - JD.pdf",
+      "schema_version": "aria-pairing-record-v1",
+      "role_profile_hash": "d9b25fb555f6d7aefc7f580d6efcca7fad3e37dea45fe99d6a340fa1ad67d883",
+      "explicit_jd_skill_ids": [
+        "ci-cd",
+        "design-patterns",
+        "python",
+        "javascript",
+        "microservices",
+        "oop",
+        "rest-api",
+        "root-cause-analysis",
+        "system-design"
+      ],
+      "resume_overlap_skill_ids": [],
+      "explicit_jd_skill_count": 9,
+      "resume_overlap_skill_count": 0,
+      "resume_overlap_ratio": 0.0,
+      "pairing_class": "no_evidence_overlap"
+    }
+  ],
+  "partial_dataset_path": "data\\synthetic\\v3\\canary-grounding-v6\\failed_runs\\4c99efd326bbae07.partial.json",
+  "canonical_dataset_restored": true,
+  "generation_finished_at": "2026-09-06T19:05:53.923356+00:00"
+}
