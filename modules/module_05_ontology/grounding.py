@@ -346,6 +346,23 @@ def build_pairing_record(profile: RoleProfile) -> dict:
     }
 
 
+def document_skill_fingerprint(text: str, source: str) -> frozenset[str]:
+    """Return catalog skill IDs using the exact evidence matcher used by grounding."""
+    normalized = normalize_document_text(text.replace("--- END OF DOCUMENT ---", ""))
+    return frozenset(
+        definition.skill_id
+        for definition in _CATALOG
+        if _evidence(normalized, definition.aliases, source)
+    )
+
+
+def pairing_class_from_fingerprints(
+    jd_skill_ids: frozenset[str], resume_skill_ids: frozenset[str]
+) -> str:
+    """Classify a pair identically to ``build_pairing_record``'s explicit overlap."""
+    return "evidence_overlap" if jd_skill_ids & resume_skill_ids else "no_evidence_overlap"
+
+
 def normalize_generated_question(value: str) -> str:
     """Remove presentation-only wrappers without repairing semantic defects."""
     text = (value or "").strip()

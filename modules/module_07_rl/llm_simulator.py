@@ -1,5 +1,5 @@
 import asyncio
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import hashlib
 import itertools
@@ -17,7 +17,18 @@ from pathlib import Path
 
 # Adjust imports to local module structure
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_SKILLS_COVERED, MIN_INTERVIEW_TURNS
+from modules.module_07_rl.environment import ARIAInterviewEnv, MIN_INTERVIEW_TURNS, MIN_SKILLS_COVERED
+from modules.module_07_rl.generation_policy import (
+    BEHAVIOR_POLICY_VERSION,
+    COVERAGE_WEIGHTS,
+    FORCED_CONCLUSION_TURN,
+    POST_COVERAGE_WEIGHTS,
+    RECOVERY_TURN,
+    RECOVERY_WEIGHTS,
+    PAIR_PLAN_SCHEMA_VERSION,
+    TARGET_NO_OVERLAP_BAND,
+    TARGET_NO_OVERLAP_RATIO,
+)
 from modules.module_08_llm.generator import (
     LLMQuestionGenerator,
     build_grounded_fallback_question,
@@ -34,6 +45,7 @@ from modules.module_07_rl.data_loader import (
     get_resume_documents,
     get_resume_source_manifest,
     get_valid_jd_documents,
+    extract_text_from_pdf,
     is_valid_resume,
     is_valid_jd,
     load_random_pair,
@@ -59,6 +71,8 @@ from modules.module_05_ontology.grounding import (
     grounding_packet,
     normalize_generated_question,
     validate_grounded_question,
+    document_skill_fingerprint,
+    pairing_class_from_fingerprints,
 )
 from modules.module_07_rl.dataset_split import (
     SPLIT_NAMES,
@@ -94,6 +108,72 @@ _RETRYABLE_FAILURE_STAGES = frozenset({
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def build_pairing_class_map(
+    resumes: list[Path | ResumeDocument], jds: list[Path]
+) -> dict[tuple[str, str], str]:
+    """Classify candidate pairs before generation with grounding's evidence matcher."""
+    resume_skills = {}
+    for resume in resumes:
+        text = (
+            resume.prompt_text if isinstance(resume, ResumeDocument)
+            else extract_text_from_pdf(str(resume))
+        )
+        resume_skills[resume.name] = document_skill_fingerprint(text, "resume")
+    jd_skills = {
+        jd.name: document_skill_fingerprint(extract_text_from_pdf(str(jd)), "jd")
+        for jd in jds
+    }
+    return {
+        (resume.name, jd.name): pairing_class_from_fingerprints(
+            jd_skills[jd.name], resume_skills[resume.name]
+        )
+        for resume in resumes for jd in jds
+    }
+
+
+def balance_pairing_classes_by_persona(
+    pairs: list[tuple[str, str]], classes: dict[tuple[str, str], str], start_index: int
+) -> list[tuple[str, str]]:
+    """Place planned pair classes so the cyclic persona schedule stays balanced."""
+    if not classes:
+        return pairs
+    buckets = defaultdict(list)
+    for pair in pairs:
+        buckets[classes[pair]].append(pair)
+    no_overlap = len(buckets["no_evidence_overlap"])
+    slot_counts = Counter(
+        PERSONA_TIERS[(start_index + order) % len(PERSONA_TIERS)]
+        for order in range(len(pairs))
+    )
+    base = no_overlap // len(PERSONA_TIERS)
+    quotas = {tier: min(base, slot_counts[tier]) for tier in PERSONA_TIERS}
+    remaining = no_overlap - sum(quotas.values())
+    while remaining:
+        allocated = False
+        for tier in PERSONA_TIERS:
+            if quotas[tier] < slot_counts[tier]:
+                quotas[tier] += 1
+                remaining -= 1
+                allocated = True
+                if not remaining:
+                    break
+        if not allocated:
+            raise RuntimeError("Pairing classes exceed available persona slots")
+    result = []
+    for order in range(len(pairs)):
+        tier = PERSONA_TIERS[(start_index + order) % len(PERSONA_TIERS)]
+        desired = "no_evidence_overlap" if quotas[tier] else "evidence_overlap"
+        if not buckets[desired]:
+            desired = (
+                "evidence_overlap" if desired == "no_evidence_overlap"
+                else "no_evidence_overlap"
+            )
+        result.append(buckets[desired].pop())
+        if desired == "no_evidence_overlap":
+            quotas[tier] -= 1
+    return result
 
 
 def _can_use_deterministic_grounding_fallback(outputs: list[str]) -> bool:
@@ -320,12 +400,36 @@ def _three_way_counts(total: int, ratios=DATASET_SPLIT_RATIOS) -> list[int]:
     return counts
 
 
+def _proportional_capacity_counts(total: int, capacities: list[int]) -> list[int]:
+    """Allocate an exact total proportionally without exceeding any capacity."""
+    if total < 0 or total > sum(capacities):
+        raise ValueError("Allocation total must fit within the supplied capacities")
+    if not capacities or total == 0:
+        return [0] * len(capacities)
+    capacity_total = sum(capacities)
+    raw = [total * capacity / capacity_total for capacity in capacities]
+    counts = [int(value) for value in raw]
+    remainder = total - sum(counts)
+    eligible = sorted(
+        (index for index, capacity in enumerate(capacities) if counts[index] < capacity),
+        key=lambda index: (-(raw[index] - counts[index]), index),
+    )
+    for index in eligible[:remainder]:
+        counts[index] += 1
+    if sum(counts) != total:
+        raise ValueError("Could not allocate the requested total within split capacities")
+    return counts
+
+
 def build_split_safe_sweep_pairs(
     resumes: list[Path | ResumeDocument],
     jds: list[Path],
     max_episodes: int,
     seed: int,
     component_targets: tuple[int, int, int] = (20, 6, 6),
+    pairing_classes: dict[tuple[str, str], str] | None = None,
+    no_overlap_target: float = TARGET_NO_OVERLAP_RATIO,
+    _layout_attempt: int = 0,
 ) -> list[tuple[str, str]]:
     """Build many disconnected resume/JD components for train/val/test.
 
@@ -336,6 +440,8 @@ def build_split_safe_sweep_pairs(
     """
     if len(component_targets) != 3 or any(count <= 0 for count in component_targets):
         raise ValueError("component_targets must contain three positive counts")
+    if not 0.0 <= no_overlap_target <= 1.0:
+        raise ValueError("no_overlap_target must be between 0.0 and 1.0")
     required_components = sum(component_targets)
     if max_episodes < required_components:
         raise ValueError(
@@ -351,9 +457,11 @@ def build_split_safe_sweep_pairs(
             f"resumes={len(resumes)}, JDs={len(jds)}"
         )
 
+    source_resumes = list(resumes)
+    source_jds = list(jds)
     rng = random.Random(seed)
-    resumes = list(resumes)
-    jds = list(jds)
+    resumes = list(source_resumes)
+    jds = list(source_jds)
     rng.shuffle(resumes)
     rng.shuffle(jds)
 
@@ -371,7 +479,7 @@ def build_split_safe_sweep_pairs(
 
     resume_cursor = 0
     jd_cursor = 0
-    episodes_to_run = []
+    component_plans = []
     for split_index, (episode_count, component_count) in enumerate(zip(
         episode_counts, component_targets
     )):
@@ -397,18 +505,72 @@ def build_split_safe_sweep_pairs(
         base, remainder = divmod(episode_count, component_count)
         for component_index in range(component_count):
             component_episodes = base + int(component_index < remainder)
-            combinations = list(itertools.product(
+            combinations = [(resume.name, jd.name) for resume, jd in itertools.product(
                 resume_components[component_index],
                 jd_components[component_index],
-            ))
+            )]
             rng.shuffle(combinations)
-            episodes_to_run.extend(
-                (resume.name, jd.name)
-                for resume, jd in itertools.islice(
-                    itertools.cycle(combinations), component_episodes
-                )
-            )
+            if pairing_classes is None:
+                component_plans.append((component_episodes, {"all": combinations}))
+            else:
+                by_class = defaultdict(list)
+                for pair in combinations:
+                    by_class[pairing_classes[pair]].append(pair)
+                component_plans.append((component_episodes, dict(by_class)))
 
+    if pairing_classes is None:
+        return [
+            pair for capacity, pools in component_plans
+            for pair in itertools.islice(itertools.cycle(pools["all"]), capacity)
+        ]
+
+    target_no_overlap = int(max_episodes * no_overlap_target + 0.5)
+    required_no_overlap = sum(
+        capacity for capacity, pools in component_plans
+        if "no_evidence_overlap" in pools and "evidence_overlap" not in pools
+    )
+    possible_no_overlap = sum(
+        capacity for capacity, pools in component_plans
+        if "no_evidence_overlap" in pools
+    )
+    if not required_no_overlap <= target_no_overlap <= possible_no_overlap:
+        if _layout_attempt < 255:
+            return build_split_safe_sweep_pairs(
+                source_resumes,
+                source_jds,
+                max_episodes=max_episodes,
+                seed=seed + 1,
+                component_targets=component_targets,
+                pairing_classes=pairing_classes,
+                no_overlap_target=no_overlap_target,
+                _layout_attempt=_layout_attempt + 1,
+            )
+        raise ValueError(
+            "No leakage-safe identity layout satisfied the requested pairing mix "
+            "after 256 deterministic attempts: "
+            f"no-evidence-overlap quota: target={target_no_overlap}, "
+            f"feasible=[{required_no_overlap}, {possible_no_overlap}]"
+        )
+    remaining_no_overlap = target_no_overlap - required_no_overlap
+    episodes_to_run = []
+    for capacity, pools in component_plans:
+        only_no_overlap = "no_evidence_overlap" in pools and "evidence_overlap" not in pools
+        flexible = "no_evidence_overlap" in pools and "evidence_overlap" in pools
+        no_count = capacity if only_no_overlap else min(capacity, remaining_no_overlap) if flexible else 0
+        if flexible:
+            remaining_no_overlap -= no_count
+        overlap_count = capacity - no_count
+        if no_count:
+            episodes_to_run.extend(itertools.islice(
+                itertools.cycle(pools["no_evidence_overlap"]), no_count
+            ))
+        if overlap_count:
+            episodes_to_run.extend(itertools.islice(
+                itertools.cycle(pools["evidence_overlap"]), overlap_count
+            ))
+    if remaining_no_overlap:
+        raise RuntimeError("Pair-plan allocation did not consume the requested quota")
+    rng.shuffle(episodes_to_run)
     return episodes_to_run
 
 
@@ -490,6 +652,8 @@ def validate_append_provenance(
             )
         required_contracts = {
             "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+            "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+            "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
             "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
             "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
             "grounding_contract_hash": grounding_contract_hash(),
@@ -583,6 +747,8 @@ def build_append_sweep_pairs(
     max_episodes: int,
     seed: int,
     component_targets: tuple[int, int, int] = (20, 6, 6),
+    pairing_classes: dict[tuple[str, str], str] | None = None,
+    no_overlap_target: float = TARGET_NO_OVERLAP_RATIO,
 ) -> tuple[list[tuple[str, str]], str]:
     """Plan an append without connecting identities across existing splits.
 
@@ -592,6 +758,8 @@ def build_append_sweep_pairs(
     """
     if max_episodes < 3:
         raise ValueError("An append needs at least three episodes for split balance")
+    if not 0.0 <= no_overlap_target <= 1.0:
+        raise ValueError("no_overlap_target must be between 0.0 and 1.0")
     resume_by_name = {path.name: path for path in resumes}
     jd_by_name = {path.name: path for path in jds}
     used_resumes = {
@@ -605,7 +773,11 @@ def build_append_sweep_pairs(
     unused_resumes = [path for path in resumes if path.name not in used_resumes]
     unused_jds = [path for path in jds if path.name not in used_jds]
 
-    if len(unused_resumes) >= 3 and len(unused_jds) >= 3:
+    required_components = sum(component_targets)
+    if (
+        len(unused_resumes) >= required_components
+        and len(unused_jds) >= required_components
+    ):
         return (
             build_split_safe_sweep_pairs(
                 unused_resumes,
@@ -613,6 +785,8 @@ def build_append_sweep_pairs(
                 max_episodes=max_episodes,
                 seed=seed,
                 component_targets=component_targets,
+                pairing_classes=pairing_classes,
+                no_overlap_target=no_overlap_target,
             ),
             "new_identity_components",
         )
@@ -652,14 +826,53 @@ def build_append_sweep_pairs(
     }
     rng = random.Random(seed)
     planned = []
-    for split_name, episode_count in zip(SPLIT_NAMES, episode_counts):
+    existing_episodes = group_transitions_into_episodes(existing_transitions)
+    existing_no_overlap = sum(
+        next((item.get("pairing_record", {}).get("pairing_class") for item in episode
+              if item.get("pairing_record")), None) == "no_evidence_overlap"
+        for episode in existing_episodes
+    )
+    desired_new_no_overlap = None
+    if pairing_classes is not None:
+        desired_combined = int((len(existing_episodes) + max_episodes) * no_overlap_target + 0.5)
+        desired_new_no_overlap = max(0, min(max_episodes, desired_combined - existing_no_overlap))
+        projected_ratio = (
+            (existing_no_overlap + desired_new_no_overlap)
+            / (len(existing_episodes) + max_episodes)
+        )
+        if not TARGET_NO_OVERLAP_BAND[0] <= projected_ratio <= TARGET_NO_OVERLAP_BAND[1]:
+            raise ValueError(
+                "Append cannot bring the combined corpus into the no-evidence-overlap "
+                f"target band {TARGET_NO_OVERLAP_BAND}: projected={projected_ratio:.3f}. "
+                "Use --replace-existing or append a larger corrective batch."
+            )
+    no_overlap_counts = (
+        _proportional_capacity_counts(desired_new_no_overlap, episode_counts)
+        if desired_new_no_overlap is not None
+        else [0] * len(episode_counts)
+    )
+    for split_name, episode_count, split_quota in zip(
+        SPLIT_NAMES, episode_counts, no_overlap_counts
+    ):
         combinations = list(itertools.product(
             sorted(resume_pools[split_name]), sorted(jd_pools[split_name])
         ))
         rng.shuffle(combinations)
         fresh = [pair for pair in combinations if pair not in used_pairs]
         ordered = fresh + [pair for pair in combinations if pair in used_pairs]
-        planned.extend(itertools.islice(itertools.cycle(ordered), episode_count))
+        if pairing_classes is None:
+            planned.extend(itertools.islice(itertools.cycle(ordered), episode_count))
+            continue
+        by_class = defaultdict(list)
+        for pair in ordered:
+            by_class[pairing_classes[pair]].append(pair)
+        if split_quota and not by_class["no_evidence_overlap"]:
+            raise ValueError("Append pairing target is infeasible in an existing split")
+        if episode_count - split_quota and not by_class["evidence_overlap"]:
+            raise ValueError("Append pairing target is infeasible in an existing split")
+        planned.extend(itertools.islice(itertools.cycle(by_class["no_evidence_overlap"]), split_quota))
+        planned.extend(itertools.islice(itertools.cycle(by_class["evidence_overlap"]), episode_count - split_quota))
+    rng.shuffle(planned)
     return planned, "existing_identity_partitions"
 
 
@@ -709,7 +922,6 @@ def get_action_one_hot(action, action_dim):
 
 def behavior_action_distribution(env: ARIAInterviewEnv) -> tuple[list[float], str]:
     """Return the exact probability of every action under the behavior policy."""
-    epsilon = 0.25
     stop_index = ACTION_TO_INDEX["conclude_interview"]
     action_mask = env.get_action_mask().tolist()
     question_indices = [
@@ -719,36 +931,34 @@ def behavior_action_distribution(env: ARIAInterviewEnv) -> tuple[list[float], st
         raise RuntimeError("No legal question action is available")
     assessment = env.belief_updater.get_aggregate_assessment()
     coverage = len(assessment["visited_skills"])
-    required_coverage = min(MIN_SKILLS_COVERED, env.num_nodes)
+    required_coverage = getattr(
+        env, "required_skill_coverage",
+        min(MIN_SKILLS_COVERED, getattr(env, "num_nodes", MIN_SKILLS_COVERED)),
+    )
     if coverage < required_coverage:
-        heuristic_indices = [ACTION_TO_INDEX["switch_topic"]]
-        policy_name = "coverage_heuristic"
+        weights = RECOVERY_WEIGHTS if env.turn_id >= RECOVERY_TURN else COVERAGE_WEIGHTS
+        policy_name = "coverage_recovery" if env.turn_id >= RECOVERY_TURN else "coverage_policy"
     else:
         label = assessment["label"]
         if label is None:
             label = assessment["raw_label"]
-        candidates_by_label = {
-            0: ("probe_foundation", "decrease_difficulty", "switch_topic"),
-            1: ("ask_follow_up_same_topic", "ask_situational", "switch_topic"),
-            2: ("increase_difficulty", "ask_situational", "switch_topic"),
-        }
-        heuristic_indices = [ACTION_TO_INDEX[name] for name in candidates_by_label[label]]
-        policy_name = "belief_heuristic"
-
-    heuristic_indices = [
-        index for index in heuristic_indices if index in question_indices
-    ] or question_indices
+        weights = POST_COVERAGE_WEIGHTS[int(label)]
+        policy_name = f"belief_policy_{int(label)}"
 
     question_probs = {
-        index: epsilon / len(question_indices) for index in question_indices
+        index: float(weights[RL_ACTION_SPACE[index]]) for index in question_indices
     }
-    for index in heuristic_indices:
-        question_probs[index] += (1.0 - epsilon) / len(heuristic_indices)
+    normalizer = sum(question_probs.values())
+    if normalizer <= 0.0:
+        raise RuntimeError("No positive behavior-policy weight is available")
+    question_probs = {index: value / normalizer for index, value in question_probs.items()}
 
     probabilities = [0.0] * len(RL_ACTION_SPACE)
     if env.can_conclude():
-        stop_probability = min(
-            0.15 + 0.05 * (env.turn_id - MIN_INTERVIEW_TURNS), 0.60
+        stop_probability = (
+            1.0 if env.turn_id >= FORCED_CONCLUSION_TURN else min(
+                0.15 + 0.05 * (env.turn_id - MIN_INTERVIEW_TURNS), 0.60
+            )
         )
         for index in question_indices:
             probabilities[index] = (1.0 - stop_probability) * question_probs[index]
@@ -796,6 +1006,7 @@ async def simulate_episode(
     resume_csv_path: str | Path = DEFAULT_CLEANED_RESUME_CSV,
     resume_categories: tuple[str, ...] | list[str] | None = DEFAULT_RESUME_CATEGORIES,
     failure_diagnostics: dict[int, dict] | None = None,
+    planned_pairing_class: str | None = None,
 ) -> list:
     """Simulates a single episode, isolated to its own environment to avoid state conflicts."""
     async with semaphore:
@@ -843,6 +1054,14 @@ async def simulate_episode(
         if role_profile is None:
             raise RuntimeError("Ontology adaptation returned no role profile")
         pairing_record = build_pairing_record(role_profile)
+        if (
+            planned_pairing_class is not None
+            and pairing_record["pairing_class"] != planned_pairing_class
+        ):
+            raise ValueError(
+                "Planned pairing class differs from grounded pairing class: "
+                f"planned={planned_pairing_class}, actual={pairing_record['pairing_class']}"
+            )
         grounding_contract = grounding_contract_hash()
         ontology_nodes = sorted(env.ontology.get_all_skills())
         ontology_edges = sorted(
@@ -877,6 +1096,7 @@ async def simulate_episode(
             "role_profile_hash": role_profile.profile_hash,
             "role_profile": role_profile.to_dict(),
             "pairing_record": pairing_record,
+            "planned_pairing_class": planned_pairing_class,
             "ontology_hash": ontology_hash,
             "ontology_nodes": ontology_nodes,
             "rejected_question_attempts": [],
@@ -900,6 +1120,7 @@ async def simulate_episode(
             env.ontology, "inferred_experience", "Mid-Level"
         )
         while not done:
+            conclusion_status_before = env.conclusion_status()
             action_idx, behavior_policy, behavior_probabilities = select_behavior_action(
                 env, rng, include_probabilities=True
             )
@@ -939,11 +1160,14 @@ async def simulate_episode(
                     "resume_category": loaded_pair.resume_category,
                     "resume_source_file_hash": loaded_pair.resume_source_file_hash,
                     "true_label": episode_true_label,
+                    "persona_tier": persona_tier,
                     "aria_label": aria_label,
                     "aggregate_belief": assessment["belief"].tolist(),
                     "aggregate_confidence": assessment["confidence"],
                     "skills_covered": len(assessment["visited_skills"]),
                     "valid_evidence_count": env.valid_evidence_count,
+                    "conclusion_status": info.get("conclusion_status"),
+                    "conclusion_status_before": conclusion_status_before,
                     "target_skill": None,
                     "target_skill_id": None,
                     "target_skill_source": None,
@@ -966,6 +1190,9 @@ async def simulate_episode(
                     "evaluator_confidence": None,
                     "rubric_evidence": [],
                     "behavior_policy": behavior_policy,
+                    "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+                    "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
+                    "planned_pairing_class": planned_pairing_class,
                     "candidate_model": CANDIDATE_MODEL,
                     "evaluator_model": EVALUATOR_MODEL,
                     "simulation_seed": seed + ep,
@@ -1250,11 +1477,14 @@ async def simulate_episode(
                 "resume_category": loaded_pair.resume_category,
                 "resume_source_file_hash": loaded_pair.resume_source_file_hash,
                 "true_label": true_label,
+                "persona_tier": persona_tier,
                 "aria_label": aria_label,
                 "aggregate_belief": assessment["belief"].tolist(),
                 "aggregate_confidence": assessment["confidence"],
                 "skills_covered": len(assessment["visited_skills"]),
                 "valid_evidence_count": env.valid_evidence_count,
+                "conclusion_status": info.get("conclusion_status"),
+                "conclusion_status_before": conclusion_status_before,
                 "target_skill": target_skill,
                 "target_skill_id": target_metadata.skill_id,
                 "target_skill_source": target_metadata.support_type,
@@ -1297,6 +1527,9 @@ async def simulate_episode(
                 "evaluator_confidence": float(evaluator_confidence),
                 "rubric_evidence": rubric_evidence,
                 "behavior_policy": behavior_policy,
+                "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+                "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
+                "planned_pairing_class": planned_pairing_class,
                 "candidate_model": CANDIDATE_MODEL,
                 "evaluator_model": EVALUATOR_MODEL,
                 "simulation_seed": seed + ep,
@@ -1328,6 +1561,10 @@ async def simulate_episode(
             f"| ID: episode_{ep} | Transitions: {len(episode_transitions)} ---"
         )
         episode_diagnostic["status"] = "complete"
+        if episode_transitions:
+            episode_diagnostic["terminal_conclusion_status_before"] = (
+                episode_transitions[-1].get("conclusion_status_before")
+            )
         return episode_transitions
 
 async def run_simulation(
@@ -1348,6 +1585,7 @@ async def run_simulation(
     resume_csv_path: str | Path = DEFAULT_CLEANED_RESUME_CSV,
     resume_categories: tuple[str, ...] | list[str] | None = DEFAULT_RESUME_CATEGORIES,
     episode_retries: int = DEFAULT_EPISODE_RETRIES,
+    no_evidence_overlap_target: float = TARGET_NO_OVERLAP_RATIO,
 ):
     dataset_path = Path(dataset_file)
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1358,6 +1596,8 @@ async def run_simulation(
         raise ValueError("max_concurrent must be positive")
     if candidate_request_concurrency <= 0 or evaluator_request_concurrency <= 0:
         raise ValueError("Ollama request concurrency limits must be positive")
+    if not 0.0 <= no_evidence_overlap_target <= 1.0:
+        raise ValueError("no_evidence_overlap_target must be between 0.0 and 1.0")
     if isinstance(episode_retries, bool) or not isinstance(episode_retries, int):
         raise ValueError("episode_retries must be a non-negative integer")
     if episode_retries < 0:
@@ -1453,6 +1693,7 @@ async def run_simulation(
             f"Sweep pool: {len(resumes)} valid {resume_source} resumes x "
             f"{len(jds)} valid JDs (filtered from {jd_manifest['pdf_files']} JDs)"
         )
+        pairing_class_map = build_pairing_class_map(resumes, jds)
 
         if append and existing:
             episodes_to_run, append_mode = build_append_sweep_pairs(
@@ -1462,6 +1703,8 @@ async def run_simulation(
                 max_episodes=max_episodes,
                 seed=seed,
                 component_targets=identity_component_targets,
+                pairing_classes=pairing_class_map,
+                no_overlap_target=no_evidence_overlap_target,
             )
             print(f"Append identity mode: {append_mode}")
             if append_mode == "existing_identity_partitions":
@@ -1477,6 +1720,8 @@ async def run_simulation(
                 max_episodes=max_episodes,
                 seed=seed,
                 component_targets=identity_component_targets,
+                pairing_classes=pairing_class_map,
+                no_overlap_target=no_evidence_overlap_target,
             )
 
         print(
@@ -1487,6 +1732,7 @@ async def run_simulation(
         num_eps = min(2, max_episodes) # fallback for small tests
         print(f"Starting Multi-Agent Simulation with {num_eps} random episodes...")
         episodes_to_run = [None] * num_eps
+        pairing_class_map = {}
 
     semaphore = asyncio.Semaphore(max_concurrent)
     ollama_client = BoundedOllamaClient(
@@ -1507,6 +1753,9 @@ async def run_simulation(
         )
 
     start_index = _next_episode_index(existing)
+    episodes_to_run = balance_pairing_classes_by_persona(
+        episodes_to_run, pairing_class_map, start_index
+    )
     source_hash = (
         hashlib.sha256(dataset_path.read_bytes()).hexdigest()
         if dataset_path.exists() and existing else "new-corpus"
@@ -1515,6 +1764,10 @@ async def run_simulation(
     planned_pairs_hash = _sha256_text(json.dumps(
         episodes_to_run,
         ensure_ascii=False,
+        separators=(",", ":"),
+    ))
+    pairing_compatibility_hash = _sha256_text(json.dumps(
+        sorted((resume, jd, pairing_class) for (resume, jd), pairing_class in pairing_class_map.items()),
         separators=(",", ":"),
     ))
     document_sources_hash = _sha256_text(json.dumps(
@@ -1533,6 +1786,7 @@ async def run_simulation(
         f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}|"
         f"{FALLBACK_QUESTION_TEMPLATE_VERSION}|"
         f"{document_sources_hash}|{planned_pairs_hash}|{grounding_hash}|"
+        f"{no_evidence_overlap_target}|"
         f"{TRANSITION_SCHEMA_VERSION}|{STATE_SCHEMA_VERSION}|"
         f"{ACTION_SCHEMA_VERSION}|{REWARD_SCHEMA_VERSION}"
     )
@@ -1553,12 +1807,19 @@ async def run_simulation(
         "start_episode_index": start_index,
         "planned_episodes": total_eps,
         "planned_pairs_hash": planned_pairs_hash,
+        "pairing_compatibility_hash": pairing_compatibility_hash,
         "document_sources_hash": document_sources_hash,
         "identity_component_targets": list(identity_component_targets),
         "planned_document_pairs": [
-            None if pair is None else {"resume_file": pair[0], "jd_file": pair[1]}
+            None if pair is None else {
+                "resume_file": pair[0], "jd_file": pair[1],
+                "pairing_class": pairing_class_map.get(pair),
+            }
             for pair in episodes_to_run
         ],
+        "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
+        "pairing_target_no_evidence_overlap_ratio": no_evidence_overlap_target,
+        "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
         "persona_schedule": [
             PERSONA_TIERS[(start_index + order) % len(PERSONA_TIERS)]
             for order in range(total_eps)
@@ -1620,6 +1881,9 @@ async def run_simulation(
                     resume_csv_path=resume_csv_path,
                     resume_categories=resume_categories,
                     failure_diagnostics=local_diagnostics,
+                    planned_pairing_class=(
+                        None if pair is None else pairing_class_map.get(pair)
+                    ),
                 )
             except Exception as caught_error:
                 error = caught_error
@@ -1887,6 +2151,10 @@ if __name__ == "__main__":
         help="Independent resume/JD component targets for each split",
     )
     parser.add_argument("--seed", type=int, default=42, help="Simulation seed")
+    parser.add_argument(
+        "--no-evidence-overlap-target", type=float,
+        default=TARGET_NO_OVERLAP_RATIO,
+    )
     parser.add_argument("--dataset-file", default=str(DATASET_FILE))
     parser.add_argument(
         "--resume-source",
@@ -1939,6 +2207,7 @@ if __name__ == "__main__":
             resume_source=args.resume_source,
             resume_csv_path=args.resume_csv,
             resume_categories=tuple(args.resume_categories),
+            no_evidence_overlap_target=args.no_evidence_overlap_target,
         ))
     except (OSError, ValueError, RuntimeError, httpx.HTTPError) as error:
         parser.exit(1, f"[ERROR] {error}\n")

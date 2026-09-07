@@ -84,11 +84,32 @@ def test_step_updates_explicit_target_skill(env):
     assert env.belief_updater.get_visited_skills() == [target]
 
 
+def test_coverage_routing_prefers_unvisited_skill_over_priority(env, monkeypatch):
+    env.reset()
+    current, visited_skill = env.nodes[:2]
+    env.last_target_skill = current
+    env.belief_updater.update_belief(visited_skill, 0.8, "low", 0.8)
+
+    def metadata(skill):
+        return type("Metadata", (), {
+            "selection_priority": 0 if skill == visited_skill else 5,
+        })()
+
+    monkeypatch.setattr(env.ontology, "get_skill_metadata", metadata)
+    selected = env.select_target_skill(ACTION_TO_INDEX["switch_topic"])
+    assert selected != visited_skill
+    assert selected not in env.belief_updater.get_visited_skills()
+
+
 def test_behavior_policy_prioritizes_coverage(env):
     env.reset()
-    action_idx, policy_name = select_behavior_action(env, random.Random(0))
-    assert action_idx == ACTION_TO_INDEX["switch_topic"]
-    assert policy_name == "coverage_heuristic"
+    _, policy_name = select_behavior_action(env, random.Random(0))
+    assert policy_name == "coverage_policy"
+    probabilities, _ = behavior_action_distribution(env)
+    assert probabilities[ACTION_TO_INDEX["switch_topic"]] > max(
+        probabilities[ACTION_TO_INDEX["ask_behavioral"]],
+        probabilities[ACTION_TO_INDEX["increase_difficulty"]],
+    )
 
 
 def test_behavior_policy_logs_normalized_support_and_masks_stop(env):
@@ -104,6 +125,25 @@ def test_behavior_policy_logs_normalized_support_and_masks_stop(env):
         if index != follow_up
     )
     assert probabilities[7] == 0.0
+
+
+def test_conclusion_status_reports_each_blocker(env):
+    env.reset()
+    status = env.conclusion_status()
+    assert status["turn"]["ready"] is False
+    assert status["coverage"]["required"] == 5
+    assert status["valid_evidence"]["ready"] is False
+
+
+def test_behavior_policy_forces_stop_after_turn_25_when_eligible(env):
+    env.reset()
+    env.turn_id = 25
+    env.valid_evidence_count = 5
+    for skill in env.nodes[:5]:
+        env.belief_updater.update_belief(skill, 0.8, "low", 0.8)
+    probabilities, policy_name = behavior_action_distribution(env)
+    assert probabilities[ACTION_TO_INDEX["conclude_interview"]] == pytest.approx(1.0)
+    assert policy_name.endswith("_with_stop")
 
 
 def test_question_turn_does_not_auto_terminate_on_confidence(env):

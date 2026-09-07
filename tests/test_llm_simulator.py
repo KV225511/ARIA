@@ -18,6 +18,7 @@ from modules.module_07_rl.llm_simulator import (
     _format_duration,
     generate_llm_response,
     _next_episode_index,
+    _proportional_capacity_counts,
     _three_way_counts,
     report_ollama_capacity,
     run_simulation,
@@ -40,6 +41,10 @@ from modules.module_07_rl.transition_schema import (
     FALLBACK_QUESTION_TEMPLATE_VERSION,
     GENERATOR_SCHEMA_VERSION,
 )
+from modules.module_07_rl.generation_policy import (
+    BEHAVIOR_POLICY_VERSION,
+    PAIR_PLAN_SCHEMA_VERSION,
+)
 from modules.module_08_llm.generator import (
     FALLBACK_QUESTION_CAPACITY,
     LLMQuestionGenerator,
@@ -60,10 +65,22 @@ def _terminal(ep, pair):
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
         "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+        "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
         "role_profile_schema_version": "aria-role-profile-v1",
         "question_grounding_schema_version": "aria-question-grounding-v1",
         "grounding_contract_hash": grounding_contract_hash(),
         "done": True,
+    }
+
+
+def _test_pairing_class_map(resumes, jds):
+    return {
+        (resume.name, jd.name): (
+            "no_evidence_overlap" if index % 3 == 0 else "evidence_overlap"
+        )
+        for index, resume in enumerate(resumes)
+        for jd in jds
     }
 
 
@@ -191,11 +208,57 @@ def test_production_pair_plan_builds_32_independent_identity_components():
     assert len(connected_identity_components(transitions)) == 32
 
 
+def test_pair_plan_hits_requested_no_overlap_quota():
+    resumes = [Path(f"resume-{index}.pdf") for index in range(9)]
+    jds = [Path(f"jd-{index}.pdf") for index in range(9)]
+    classes = {
+        (resume.name, jd.name): (
+            "no_evidence_overlap" if (r_index + j_index) % 3 == 0
+            else "evidence_overlap"
+        )
+        for r_index, resume in enumerate(resumes)
+        for j_index, jd in enumerate(jds)
+    }
+    pairs = build_split_safe_sweep_pairs(
+        resumes, jds, max_episodes=30, seed=42,
+        component_targets=(1, 1, 1), pairing_classes=classes,
+        no_overlap_target=0.30,
+    )
+    assert len(pairs) == 30
+    assert sum(classes[pair] == "no_evidence_overlap" for pair in pairs) == 9
+
+
+def test_pair_plan_counts_required_no_overlap_components_once():
+    resumes = [Path(f"resume-{index}.pdf") for index in range(3)]
+    jds = [Path(f"jd-{index}.pdf") for index in range(3)]
+    classes = {
+        (resume.name, jd.name): "no_evidence_overlap"
+        for resume in resumes for jd in jds
+    }
+    pairs = build_split_safe_sweep_pairs(
+        resumes, jds, max_episodes=6, seed=42,
+        component_targets=(1, 1, 1), pairing_classes=classes,
+        no_overlap_target=1.0,
+    )
+    assert len(pairs) == 6
+    assert all(classes[pair] == "no_evidence_overlap" for pair in pairs)
+
+
 @pytest.mark.parametrize("total", range(3, 101))
 def test_three_way_counts_are_nonempty_and_exact(total):
     counts = _three_way_counts(total)
     assert sum(counts) == total
     assert all(count >= 1 for count in counts)
+
+
+@pytest.mark.parametrize(
+    ("total", "capacities"),
+    ((0, [42, 9, 9]), (1, [42, 9, 9]), (7, [5, 1, 1]), (18, [42, 9, 9]), (60, [42, 9, 9])),
+)
+def test_proportional_capacity_counts_are_exact_and_bounded(total, capacities):
+    counts = _proportional_capacity_counts(total, capacities)
+    assert sum(counts) == total
+    assert all(0 <= count <= capacity for count, capacity in zip(counts, capacities))
 
 
 @pytest.mark.parametrize("seed", range(10))
@@ -465,6 +528,16 @@ def test_simulate_episode_recovers_after_three_duplicate_llm_questions():
         def get_action_mask(self):
             return np.ones(8, dtype=np.float32)
 
+        def conclusion_status(self):
+            return {
+                "turn": {"actual": self.turn_id, "required": 10, "ready": False},
+                "coverage": {"actual": 1, "required": 5, "ready": False},
+                "valid_evidence": {
+                    "actual": self.valid_evidence_count, "required": 5, "ready": False,
+                },
+                "can_conclude": False,
+            }
+
         def select_target_skill(self, _action_idx):
             return "Python"
 
@@ -634,6 +707,44 @@ def test_append_fallback_does_not_cross_existing_identity_partitions():
         assert identities["validation"].isdisjoint(identities["test"])
 
 
+def test_append_with_three_unused_documents_uses_existing_partitions():
+    resumes = [Path(f"resume-{index}.pdf") for index in range(9)]
+    jds = [Path(f"jd-{index}.pdf") for index in range(12)]
+    original_pairs = build_split_safe_sweep_pairs(
+        resumes[:6], jds[:9], max_episodes=30, seed=42,
+        component_targets=(1, 1, 1),
+    )
+    existing = [_terminal(index, pair) for index, pair in enumerate(original_pairs)]
+    appended, mode = build_append_sweep_pairs(
+        existing, resumes, jds, max_episodes=30, seed=43,
+    )
+    assert mode == "existing_identity_partitions"
+    assert len(appended) == 30
+
+
+def test_append_rejects_unrecoverable_pairing_skew():
+    resumes = [Path(f"resume-{index}.pdf") for index in range(6)]
+    jds = [Path(f"jd-{index}.pdf") for index in range(9)]
+    pairs = build_split_safe_sweep_pairs(
+        resumes, jds, max_episodes=30, seed=42,
+        component_targets=(1, 1, 1),
+    )
+    existing = []
+    for index, pair in enumerate(pairs):
+        item = _terminal(index, pair)
+        item["pairing_record"] = {"pairing_class": "no_evidence_overlap"}
+        existing.append(item)
+    classes = {
+        (resume.name, jd.name): "evidence_overlap"
+        for resume in resumes for jd in jds
+    }
+    with pytest.raises(ValueError, match="cannot bring the combined corpus"):
+        build_append_sweep_pairs(
+            existing, resumes, jds, max_episodes=3, seed=43,
+            component_targets=(1, 1, 1), pairing_classes=classes,
+        )
+
+
 def test_append_provenance_and_episode_ids_are_protected():
     existing = [
         {
@@ -642,6 +753,8 @@ def test_append_provenance_and_episode_ids_are_protected():
             "evaluator_model": "gemma3:4b",
             "transition_schema_version": "aria-transition-v4",
             "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+            "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+            "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
             "role_profile_schema_version": "aria-role-profile-v1",
             "question_grounding_schema_version": "aria-question-grounding-v1",
             "grounding_contract_hash": grounding_contract_hash(),
@@ -936,6 +1049,8 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
             "evaluator_model": "gemma3:4b",
             "transition_schema_version": "aria-transition-v4",
             "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+            "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+            "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
             "role_profile_schema_version": "aria-role-profile-v1",
             "question_grounding_schema_version": "aria-question-grounding-v1",
             "grounding_contract_hash": grounding_contract_hash(),
@@ -983,6 +1098,7 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
         ),
         patch("modules.module_07_rl.llm_simulator.is_valid_resume", return_value=True),
         patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
+        patch("modules.module_07_rl.llm_simulator.build_pairing_class_map", side_effect=_test_pairing_class_map),
         patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fake_episode),
     ):
         combined = asyncio.run(run_simulation(
@@ -1081,6 +1197,7 @@ def test_episode_exception_is_isolated_and_other_results_are_checkpointed(tmp_pa
         patch("modules.module_07_rl.llm_simulator.get_all_pdfs", side_effect=fake_get_all_pdfs),
         patch("modules.module_07_rl.llm_simulator.is_valid_resume", return_value=True),
         patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
+        patch("modules.module_07_rl.llm_simulator.build_pairing_class_map", side_effect=_test_pairing_class_map),
         patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fake_episode),
     ):
         with pytest.raises(RuntimeError, match="partial output is not eligible"):
@@ -1136,6 +1253,7 @@ def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
         patch("modules.module_07_rl.llm_simulator.get_all_pdfs", side_effect=fake_get_all_pdfs),
         patch("modules.module_07_rl.llm_simulator.is_valid_resume", return_value=True),
         patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
+        patch("modules.module_07_rl.llm_simulator.build_pairing_class_map", side_effect=_test_pairing_class_map),
         patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fail_episode),
     ):
         with pytest.raises(RuntimeError, match="partial output is not eligible"):
@@ -1182,6 +1300,7 @@ def test_retryable_episode_is_retried_transactionally_and_recorded(tmp_path):
         patch("modules.module_07_rl.llm_simulator.get_all_pdfs", side_effect=fake_get_all_pdfs),
         patch("modules.module_07_rl.llm_simulator.is_valid_resume", return_value=True),
         patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
+        patch("modules.module_07_rl.llm_simulator.build_pairing_class_map", side_effect=_test_pairing_class_map),
         patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fake_episode),
     ):
         combined = asyncio.run(run_simulation(
@@ -1236,6 +1355,7 @@ def test_run_never_exceeds_requested_episode_concurrency(tmp_path):
         patch("modules.module_07_rl.llm_simulator.get_all_pdfs", side_effect=fake_get_all_pdfs),
         patch("modules.module_07_rl.llm_simulator.is_valid_resume", return_value=True),
         patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
+        patch("modules.module_07_rl.llm_simulator.build_pairing_class_map", side_effect=_test_pairing_class_map),
         patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fake_episode),
     ):
         asyncio.run(run_simulation(
@@ -1283,6 +1403,7 @@ def test_csv_sweep_records_resume_source_manifest(tmp_path):
             }),
         ),
         patch("modules.module_07_rl.llm_simulator.get_resume_documents", return_value=resumes),
+        patch("modules.module_07_rl.llm_simulator.build_pairing_class_map", side_effect=_test_pairing_class_map),
         patch(
             "modules.module_07_rl.llm_simulator.get_resume_source_manifest",
             return_value={
@@ -1325,6 +1446,8 @@ def test_csv_append_requires_matching_source_hash():
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
         "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+        "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
         "role_profile_schema_version": "aria-role-profile-v1",
         "question_grounding_schema_version": "aria-question-grounding-v1",
         "grounding_contract_hash": grounding_contract_hash(),
@@ -1348,6 +1471,8 @@ def test_csv_append_rejects_missing_source_provenance():
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
         "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+        "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
         "role_profile_schema_version": "aria-role-profile-v1",
         "question_grounding_schema_version": "aria-question-grounding-v1",
         "grounding_contract_hash": grounding_contract_hash(),

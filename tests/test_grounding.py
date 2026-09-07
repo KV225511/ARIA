@@ -9,6 +9,8 @@ from modules.module_05_ontology.grounding import (
     normalized_text_hash,
     validate_grounded_question,
     validate_role_profile,
+    document_skill_fingerprint,
+    pairing_class_from_fingerprints,
 )
 
 
@@ -61,6 +63,16 @@ def test_pairing_record_is_descriptive_not_a_filter():
     record = build_pairing_record(profile)
     assert record["pairing_class"] == "evidence_overlap"
     assert 0 < record["resume_overlap_ratio"] <= 1
+
+
+def test_pairing_fingerprints_match_role_profile_overlap():
+    profile = build_role_profile(JD, "Battery testing and thermal testing experience.")
+    expected = build_pairing_record(profile)["pairing_class"]
+    actual = pairing_class_from_fingerprints(
+        document_skill_fingerprint(JD, "jd"),
+        document_skill_fingerprint("Battery testing and thermal testing experience.", "resume"),
+    )
+    assert actual == expected
 
 
 def test_question_validator_rejects_wrong_bms_expansion_and_duplicates():

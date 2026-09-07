@@ -14,6 +14,7 @@ import numpy as np
 from modules.module_07_rl.dataset_split import (
     connected_identity_components,
     group_transitions_into_episodes,
+    split_by_resume_jd_group,
 )
 from modules.module_07_rl.transition_schema import (
     GENERATOR_SCHEMA_VERSION,
@@ -27,11 +28,168 @@ from modules.module_05_ontology.grounding import (
     ROLE_PROFILE_SCHEMA_VERSION,
     grounding_contract_hash,
 )
+from modules.module_07_rl.generation_policy import (
+    BEHAVIOR_POLICY_VERSION,
+    HARD_MAX_SWITCH_SHARE,
+    HARD_MAX_TURN_RATE,
+    HARD_NO_OVERLAP_BAND,
+    MIN_DISTRIBUTION_GATE_EPISODES,
+    PAIR_PLAN_SCHEMA_VERSION,
+    TARGET_MAX_TURN_RATE,
+    TARGET_NO_OVERLAP_BAND,
+    TARGET_SWITCH_SHARE,
+)
 
 
 MIN_QUALITY_GATE_EPISODES = 200
 MAX_DETERMINISTIC_FALLBACK_RATE = 0.10
 MAX_CROSS_COMPONENT_FALLBACK_DUPLICATE_RATE = 0.25
+
+
+def audit_generation_distribution(transitions: list[dict]) -> dict:
+    """Measure policy and pair-plan targets without counting stop decisions as questions."""
+    episodes = group_transitions_into_episodes(transitions)
+    questions = [
+        item for item in transitions
+        if item.get("transition_kind") != "stop" and item.get("action_idx") != 7
+    ]
+    action_counts = Counter(
+        item.get("action_name") or f"action_{item.get('action_idx')}"
+        for item in questions
+    )
+    switch_count = sum(
+        item.get("action_name") == "switch_topic" or item.get("action_idx") == 3
+        for item in questions
+    )
+    switch_share = switch_count / len(questions) if questions else 0.0
+    terminal = _terminal_records(transitions)
+    max_turn_count = sum(item.get("termination_reason") == "max_turns" for item in terminal)
+    max_turn_rate = max_turn_count / len(terminal) if terminal else 0.0
+    pairing = Counter()
+    blockers = Counter()
+    stratified = {
+        "persona": defaultdict(Counter),
+        "dataset_split": defaultdict(Counter),
+        "ontology_size_band": defaultdict(Counter),
+    }
+    derived_splits = {}
+    if episodes and not all(
+        episode and episode[0].get("dataset_split") for episode in episodes
+    ):
+        for split_name, split_transitions in split_by_resume_jd_group(transitions).items():
+            for item in split_transitions:
+                derived_splits[item.get("episode_id")] = split_name
+    for episode in episodes:
+        first = episode[0] if episode else {}
+        pairing_record = next((item.get("pairing_record") for item in episode if item.get("pairing_record")), {})
+        if pairing_record.get("pairing_class"):
+            pairing[pairing_record["pairing_class"]] += 1
+        final = episode[-1] if episode else {}
+        ontology_size = int(first.get("ontology_size", 0) or 0)
+        size_band = "1-5" if ontology_size <= 5 else "6-10" if ontology_size <= 10 else "11+"
+        persona = first.get("persona_tier") or {
+            0: "BEGINNER", 1: "MID", 2: "EXPERT",
+        }.get(first.get("true_label"), "unknown")
+        dimensions = {
+            "persona": str(persona),
+            "dataset_split": str(
+                first.get("dataset_split")
+                or derived_splits.get(first.get("episode_id"))
+                or "unassigned"
+            ),
+            "ontology_size_band": size_band,
+        }
+        episode_questions = [
+            item for item in episode
+            if item.get("transition_kind") != "stop" and item.get("action_idx") != 7
+        ]
+        episode_switches = sum(
+            item.get("action_name") == "switch_topic" or item.get("action_idx") == 3
+            for item in episode_questions
+        )
+        for dimension, key in dimensions.items():
+            row = stratified[dimension][key]
+            row["episodes"] += 1
+            row["questions"] += len(episode_questions)
+            row["switch_topic"] += episode_switches
+            row["max_turns"] += int(final.get("termination_reason") == "max_turns")
+            row["no_evidence_overlap"] += int(
+                pairing_record.get("pairing_class") == "no_evidence_overlap"
+            )
+        if final.get("termination_reason") == "max_turns":
+            status_before = final.get("conclusion_status_before") or final.get("conclusion_status") or {}
+            if isinstance(status_before, dict):
+                for name, status in status_before.items():
+                    if (
+                        name != "can_conclude"
+                        and isinstance(status, dict)
+                        and not status.get("ready", False)
+                    ):
+                        blockers[name] += 1
+    paired_episodes = sum(pairing.values())
+    no_overlap_rate = (
+        pairing["no_evidence_overlap"] / paired_episodes if paired_episodes else 0.0
+    )
+    current_contract = bool(transitions) and all(
+        item.get("generator_schema_version") == GENERATOR_SCHEMA_VERSION
+        for item in transitions
+    )
+    has_sample = len(terminal) >= MIN_DISTRIBUTION_GATE_EPISODES
+    complete_current_contract = (
+        current_contract
+        and len(terminal) == len(episodes)
+        and paired_episodes == len(episodes)
+    )
+    stratified_report = {}
+    for dimension, rows in stratified.items():
+        stratified_report[dimension] = {
+            key: {
+                **dict(values),
+                "switch_topic_question_share": (
+                    values["switch_topic"] / values["questions"]
+                    if values["questions"] else None
+                ),
+                "max_turn_episode_rate": values["max_turns"] / values["episodes"],
+                "no_evidence_overlap_rate": (
+                    values["no_evidence_overlap"] / values["episodes"]
+                ),
+            }
+            for key, values in sorted(rows.items())
+        }
+    target = (
+        TARGET_SWITCH_SHARE[0] <= switch_share <= TARGET_SWITCH_SHARE[1]
+        and max_turn_rate <= TARGET_MAX_TURN_RATE
+        and TARGET_NO_OVERLAP_BAND[0] <= no_overlap_rate <= TARGET_NO_OVERLAP_BAND[1]
+    )
+    hard = (
+        switch_share <= HARD_MAX_SWITCH_SHARE
+        and max_turn_rate <= HARD_MAX_TURN_RATE
+        and HARD_NO_OVERLAP_BAND[0] <= no_overlap_rate <= HARD_NO_OVERLAP_BAND[1]
+    )
+    return {
+        "gate": "generation_distribution",
+        "num_episodes": len(episodes),
+        "question_action_counts": dict(action_counts),
+        "switch_topic_question_share": switch_share,
+        "max_turn_episode_count": max_turn_count,
+        "max_turn_episode_rate": max_turn_rate,
+        "pairing_class_counts": dict(pairing),
+        "no_evidence_overlap_rate": no_overlap_rate,
+        "max_turn_conclusion_blockers": dict(blockers),
+        "stratified_metrics": stratified_report,
+        "target_metrics": {
+            "switch_topic_question_share": list(TARGET_SWITCH_SHARE),
+            "maximum_turn_rate": TARGET_MAX_TURN_RATE,
+            "no_evidence_overlap_rate": list(TARGET_NO_OVERLAP_BAND),
+        },
+        "distribution_contract_complete": complete_current_contract,
+        "meets_target_metrics": (
+            target and complete_current_contract if has_sample and current_contract else None
+        ),
+        "passes_distribution_gates": (
+            hard and complete_current_contract if has_sample and current_contract else None
+        ),
+    }
 
 
 def _valid_grounding_provenance(item: dict) -> bool:
@@ -179,6 +337,8 @@ def audit_raw_evidence(
     current_contract = {
         "transition_schema_version": TRANSITION_SCHEMA_VERSION,
         "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+        "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
         "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
         "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
         "grounding_contract_hash": grounding_contract_hash(),
@@ -308,6 +468,7 @@ def audit_raw_evidence(
             item.get("target_skill_id") for item in episode
             if item.get("target_skill_id")
         }))
+    distribution = audit_generation_distribution(transitions)
     warnings = []
     if len(episodes) < min_episodes:
         warnings.append(
@@ -366,6 +527,10 @@ def audit_raw_evidence(
     ]
     if weak_pairs:
         warnings.append("Adjacent semantic-score classes have negligible standardized separation.")
+    if distribution["passes_distribution_gates"] is False:
+        warnings.append("Generation distribution exceeds hard policy or pairing limits.")
+    elif distribution["meets_target_metrics"] is False:
+        warnings.append("Generation distribution misses one or more production target metrics.")
     return {
         "gate": "raw_evidence",
         "num_transitions": len(transitions),
@@ -403,6 +568,7 @@ def audit_raw_evidence(
             cross_component_fallback_duplicates
         ),
         "pairing_class_counts": dict(pairing_classes),
+        "generation_distribution": distribution,
         "duplicate_questions_within_episode": duplicate_questions,
         "inconsistent_episode_grounding": inconsistent_episode_grounding,
         "distinct_targets_per_episode": _summary(distinct_targets_per_episode),
@@ -675,6 +841,7 @@ def audit_file(dataset_file, output_file=None, min_episodes=MIN_QUALITY_GATE_EPI
         "calibration_validation": lambda: audit_calibration_validation(transitions),
         "locked_test": lambda: audit_locked_test(transitions),
         "offline_rl": lambda: audit_offline_rl_support(transitions),
+        "generation_distribution": lambda: audit_generation_distribution(transitions),
         "learned_policy": lambda: audit_learned_policy_evaluation(transitions),
         "composite": lambda: audit_dataset(transitions, min_episodes=min_episodes),
     }
@@ -693,7 +860,7 @@ if __name__ == "__main__":
         "--stage",
         choices=(
             "raw", "belief", "calibration_validation", "locked_test",
-            "offline_rl", "learned_policy", "composite",
+            "offline_rl", "generation_distribution", "learned_policy", "composite",
         ),
         default="composite",
     )

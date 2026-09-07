@@ -1,7 +1,7 @@
 """Versioned contract for generated and replayed offline-RL transitions."""
 
 TRANSITION_SCHEMA_VERSION = "aria-transition-v4"
-GENERATOR_SCHEMA_VERSION = "aria-simulator-v7"
+GENERATOR_SCHEMA_VERSION = "aria-simulator-v8"
 FALLBACK_QUESTION_TEMPLATE_VERSION = "aria-grounded-fallback-v2"
 QUESTION_GENERATION_MODES = frozenset({
     "llm",

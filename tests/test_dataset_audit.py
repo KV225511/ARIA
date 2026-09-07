@@ -3,12 +3,17 @@ from modules.module_07_rl.dataset_audit import (
     audit_learned_policy_evaluation,
     audit_belief_predictions,
     audit_dataset,
+    audit_generation_distribution,
     audit_raw_evidence,
 )
 from modules.module_07_rl.transition_schema import (
     FALLBACK_QUESTION_TEMPLATE_VERSION,
     GENERATOR_SCHEMA_VERSION,
     TRANSITION_SCHEMA_VERSION,
+)
+from modules.module_07_rl.generation_policy import (
+    BEHAVIOR_POLICY_VERSION,
+    PAIR_PLAN_SCHEMA_VERSION,
 )
 from modules.module_05_ontology.grounding import (
     GROUNDING_POLICY_VERSION,
@@ -61,7 +66,6 @@ def test_validation_and_policy_gates_remain_distinct():
     assert validation["gate"] == "calibration_validation"
     assert "ordinal_mae" in validation
     assert "confusion_matrix" in validation
-
     fixed_offline_report = {
         "evaluation_type": "stored_belief_verdict",
         "evaluates_learned_policy": False,
@@ -79,11 +83,37 @@ def test_validation_and_policy_gates_remain_distinct():
     assert audit_learned_policy_evaluation(rollout_report)["passes_quality_gates"]
 
 
+def test_generation_distribution_enforces_ideal_metrics_at_60_episodes():
+    transitions = []
+    for index in range(60):
+        item = {
+            "episode_id": f"episode-{index}",
+            "done": True,
+            "transition_kind": "question",
+            "termination_reason": "explicit_conclusion",
+            "action_idx": 3 if index < 18 else 0,
+            "action_name": "switch_topic" if index < 18 else "increase_difficulty",
+            "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+            "pairing_record": {
+                "pairing_class": (
+                    "no_evidence_overlap" if index < 18 else "evidence_overlap"
+                )
+            },
+        }
+        transitions.append(item)
+    report = audit_generation_distribution(transitions)
+    assert report["switch_topic_question_share"] == 0.30
+    assert report["no_evidence_overlap_rate"] == 0.30
+    assert report["meets_target_metrics"] is True
+    assert report["passes_distribution_gates"] is True
+
 def _current_grounded_transition(episode: str, label: int) -> dict:
     item = _transition(episode, label, label, True, 0.1)
     item.update({
         "transition_schema_version": TRANSITION_SCHEMA_VERSION,
         "generator_schema_version": GENERATOR_SCHEMA_VERSION,
+        "behavior_policy_version": BEHAVIOR_POLICY_VERSION,
+        "pair_plan_schema_version": PAIR_PLAN_SCHEMA_VERSION,
         "role_profile_schema_version": ROLE_PROFILE_SCHEMA_VERSION,
         "question_grounding_schema_version": GROUNDING_SCHEMA_VERSION,
         "grounding_contract_hash": grounding_contract_hash(),

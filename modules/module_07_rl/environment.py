@@ -116,11 +116,14 @@ class ARIAInterviewEnv(gym.Env):
             metadata = self.ontology.get_skill_metadata(skill)
             return metadata.selection_priority if metadata is not None else 5
 
-        # The JD requirement is the primary ordering. Evidence and uncertainty
-        # adapt the interview only within equally important requirements.
+        visited = set(self.belief_updater.get_visited_skills())
+        coverage_incomplete = len(visited) < self.required_skill_coverage
+        # Until the conclusion contract is met, do not repeatedly prefer a
+        # small set of high-priority requirements over untouched skills.
         return min(
             candidates,
             key=lambda skill: (
+                0 if coverage_incomplete and skill not in visited else 1,
                 requirement_priority(skill),
                 self.belief_updater.get_evidence_count(skill),
                 -self.belief_updater._calculate_entropy(
@@ -130,16 +133,41 @@ class ARIAInterviewEnv(gym.Env):
             ),
         )
 
-    def can_conclude(self):
-        required_coverage = min(
+    @property
+    def required_skill_coverage(self):
+        return min(
             max(MIN_SKILLS_COVERED, self.belief_config.minimum_skill_coverage),
             self.num_nodes,
         )
-        return (
-            self.turn_id >= MIN_INTERVIEW_TURNS
-            and len(self.belief_updater.get_visited_skills()) >= required_coverage
-            and self.valid_evidence_count >= 5
+
+    def conclusion_status(self):
+        assessment = self.belief_updater.get_aggregate_assessment()
+        visited = len(assessment["visited_skills"])
+        status = {
+            "turn": {
+                "actual": self.turn_id,
+                "required": MIN_INTERVIEW_TURNS,
+                "ready": self.turn_id >= MIN_INTERVIEW_TURNS,
+            },
+            "coverage": {
+                "actual": visited,
+                "required": self.required_skill_coverage,
+                "ready": visited >= self.required_skill_coverage,
+            },
+            "valid_evidence": {
+                "actual": self.valid_evidence_count,
+                "required": 5,
+                "ready": self.valid_evidence_count >= 5,
+            },
+            "can_conclude": False,
+        }
+        status["can_conclude"] = all(
+            status[name]["ready"] for name in ("turn", "coverage", "valid_evidence")
         )
+        return status
+
+    def can_conclude(self):
+        return self.conclusion_status()["can_conclude"]
 
     def get_action_mask(self):
         mask = build_action_mask(self)
@@ -192,6 +220,8 @@ class ARIAInterviewEnv(gym.Env):
         # mutate beliefs, select a skill, or consume an interview turn.
         if action_name == "conclude_interview":
             conclusion_allowed = self.can_conclude()
+            conclusion_status = self.conclusion_status()
+            conclusion_status["can_conclude"] = conclusion_allowed
             assessment = self.belief_updater.get_aggregate_assessment()
             return self._get_obs(), compute_stop_reward(not conclusion_allowed), bool(
                 conclusion_allowed
@@ -200,6 +230,7 @@ class ARIAInterviewEnv(gym.Env):
                 "action": action_name,
                 "target_skill": None,
                 "conclusion_allowed": conclusion_allowed,
+                "conclusion_status": conclusion_status,
                 "conclude_blocked": not conclusion_allowed,
                 "skills_covered": len(assessment["visited_skills"]),
                 "valid_evidence_count": self.valid_evidence_count,
@@ -257,6 +288,8 @@ class ARIAInterviewEnv(gym.Env):
 
         assessment = self.belief_updater.get_aggregate_assessment()
         conclusion_allowed = self.can_conclude()
+        conclusion_status = self.conclusion_status()
+        conclusion_status["can_conclude"] = conclusion_allowed
         terminated = False
         termination_reason = None
         truncated = False
@@ -290,6 +323,7 @@ class ARIAInterviewEnv(gym.Env):
             "action": action_name,
             "target_skill": target_skill,
             "conclusion_allowed": conclusion_allowed,
+            "conclusion_status": conclusion_status,
             "conclude_blocked": action_name == "conclude_interview" and not conclusion_allowed,
             "skills_covered": len(assessment["visited_skills"]),
             "valid_evidence_count": self.valid_evidence_count,
