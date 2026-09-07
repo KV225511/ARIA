@@ -39,7 +39,7 @@ Before the production run, use a three-component canary:
 
 ```powershell
 python -m modules.module_07_rl.generation_preflight --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --identity-components 1 1 1 --output data/synthetic/v3/reports/input_preflight_canary.json
-python -m modules.module_07_rl.llm_simulator --sweep --max_episodes 3 --max_concurrent 3 --candidate-request-concurrency 3 --evaluator-request-concurrency 2 --identity-components 1 1 1 --seed 42 --resume-source csv --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --replace-existing --dataset-file data/synthetic/v3/canary/qwen_rl_dataset.json
+python -m modules.module_07_rl.llm_simulator --sweep --max_episodes 3 --max_concurrent 3 --candidate-request-concurrency 3 --evaluator-request-concurrency 2 --episode-retries 2 --identity-components 1 1 1 --seed 42 --resume-source csv --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --replace-existing --dataset-file data/synthetic/v3/canary/qwen_rl_dataset.json
 ```
 
 Audit the canary structurally before scaling. Canary metrics are diagnostic and
@@ -49,7 +49,7 @@ Run the simulator with an explicit replacement path for a new corpus. The
 production target is 600 episodes and 32 independent identity components.
 
 ```powershell
-python -m modules.module_07_rl.llm_simulator --sweep --max_episodes 600 --max_concurrent 4 --candidate-request-concurrency 3 --evaluator-request-concurrency 2 --identity-components 20 6 6 --seed 42 --resume-source csv --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --replace-existing --dataset-file data/synthetic/v3/qwen_rl_dataset.json
+python -m modules.module_07_rl.llm_simulator --sweep --max_episodes 600 --max_concurrent 4 --candidate-request-concurrency 3 --evaluator-request-concurrency 2 --episode-retries 2 --identity-components 20 6 6 --seed 42 --resume-source csv --resume-csv data/external/opensporks/Resume/Resume.cleaned.csv --resume-categories INFORMATION-TECHNOLOGY ENGINEERING --replace-existing --dataset-file data/synthetic/v3/qwen_rl_dataset.json
 ```
 
 CSV generation uses `Resume_prompt` for the model context and

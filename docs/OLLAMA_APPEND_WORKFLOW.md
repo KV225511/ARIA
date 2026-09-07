@@ -110,6 +110,7 @@ python -m modules.module_07_rl.llm_simulator `
   --append `
   --max_episodes 6 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 43 `
   --gpu-vram-gb 8
 ```
@@ -119,6 +120,10 @@ all six finish before trusting the estimate: model warm-up and the first swap
 make the first one or two samples pessimistic. If two-way concurrency causes
 host RAM pressure, GPU fallback, or request timeouts, use concurrency 1; a
 higher number is not recommended on this 8 GB GPU.
+
+`--episode-retries 2` permits two fresh, transactional attempts after a failed
+episode. Failed-attempt transitions are discarded; the run manifest records
+every attempt and seed, while a final failure still restores the canonical file.
 
 If possible, add new de-identified resumes and JDs before appending. More turns
 over the same identities increase sample count but not the number of independent
@@ -137,6 +142,7 @@ python -m modules.module_07_rl.llm_simulator `
   --append `
   --max_episodes 100 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 43 `
   --gpu-vram-gb 8
 ```

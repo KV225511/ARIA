@@ -221,6 +221,7 @@ python -m modules.module_07_rl.llm_simulator `
   --sweep `
   --max_episodes 300 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 42
 ```
 

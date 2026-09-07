@@ -185,6 +185,7 @@ ollama list | Out-File -Encoding utf8 "$CanaryRoot\ollama-models.txt"
   --max_concurrent 3 `
   --candidate-request-concurrency 3 `
   --evaluator-request-concurrency 2 `
+  --episode-retries 2 `
   --identity-components 1 1 1 `
   --seed 42 `
   --resume-source csv `
@@ -308,6 +309,7 @@ ollama list | Out-File -Encoding utf8 "$ProdRoot\ollama-models.txt"
   --max_concurrent 4 `
   --candidate-request-concurrency 3 `
   --evaluator-request-concurrency 2 `
+  --episode-retries 2 `
   --identity-components 20 6 6 `
   --seed 42 `
   --resume-source csv `

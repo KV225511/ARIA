@@ -134,6 +134,7 @@ $CanaryDataset = "data\synthetic\v3\canary\qwen_rl_dataset.json"
   --max_concurrent 3 `
   --candidate-request-concurrency 3 `
   --evaluator-request-concurrency 2 `
+  --episode-retries 2 `
   --identity-components 1 1 1 `
   --seed 42 `
   --resume-source csv `
@@ -191,6 +192,7 @@ $ProductionDataset = "data\synthetic\v3\qwen_rl_dataset.json"
   --max_concurrent 4 `
   --candidate-request-concurrency 3 `
   --evaluator-request-concurrency 2 `
+  --episode-retries 2 `
   --identity-components 20 6 6 `
   --seed 42 `
   --resume-source csv `

@@ -83,6 +83,13 @@ ACTION_TO_INDEX = {name: index for index, name in enumerate(RL_ACTION_SPACE)}
 DEFAULT_SWEEP_EPISODES = 300
 MIN_RECOMMENDED_EPISODES = 200
 DATASET_SPLIT_RATIOS = (0.70, 0.15, 0.15)
+DEFAULT_EPISODE_RETRIES = 2
+EPISODE_RETRY_SEED_STRIDE = 100_000_007
+_RETRYABLE_FAILURE_STAGES = frozenset({
+    "question_grounding",
+    "candidate_generation",
+    "answer_evaluation",
+})
 
 
 def _sha256_text(value: str) -> str:
@@ -94,6 +101,16 @@ def _can_use_deterministic_grounding_fallback(outputs: list[str]) -> bool:
     return len(outputs) == 3 and all(
         isinstance(output, str) and bool(output.strip()) for output in outputs
     )
+
+
+def _is_retryable_episode_failure(
+    error: Exception | None,
+    diagnostic: dict,
+) -> bool:
+    """Identify failures that may succeed from a fresh transactional episode."""
+    if diagnostic.get("failure_stage") in _RETRYABLE_FAILURE_STAGES:
+        return True
+    return isinstance(error, (httpx.HTTPError, TimeoutError, ConnectionError))
 
 
 async def generate_llm_response(
@@ -1330,6 +1347,7 @@ async def run_simulation(
     resume_source: str = "csv",
     resume_csv_path: str | Path = DEFAULT_CLEANED_RESUME_CSV,
     resume_categories: tuple[str, ...] | list[str] | None = DEFAULT_RESUME_CATEGORIES,
+    episode_retries: int = DEFAULT_EPISODE_RETRIES,
 ):
     dataset_path = Path(dataset_file)
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1340,6 +1358,10 @@ async def run_simulation(
         raise ValueError("max_concurrent must be positive")
     if candidate_request_concurrency <= 0 or evaluator_request_concurrency <= 0:
         raise ValueError("Ollama request concurrency limits must be positive")
+    if isinstance(episode_retries, bool) or not isinstance(episode_retries, int):
+        raise ValueError("episode_retries must be a non-negative integer")
+    if episode_retries < 0:
+        raise ValueError("episode_retries must be a non-negative integer")
     if append and replace_existing:
         raise ValueError("Choose --append or --replace-existing, not both")
     if resume_source not in {"pdf", "csv"}:
@@ -1506,7 +1528,8 @@ async def run_simulation(
     ))
     grounding_hash = grounding_contract_hash()
     run_material = (
-        f"{source_hash}|{seed}|{start_index}|{total_eps}|"
+        f"{source_hash}|{seed}|{start_index}|{total_eps}|{episode_retries}|"
+        f"{EPISODE_RETRY_SEED_STRIDE}|"
         f"{CANDIDATE_MODEL}|{EVALUATOR_MODEL}|{GENERATOR_SCHEMA_VERSION}|"
         f"{FALLBACK_QUESTION_TEMPLATE_VERSION}|"
         f"{document_sources_hash}|{planned_pairs_hash}|{grounding_hash}|"
@@ -1525,6 +1548,8 @@ async def run_simulation(
         "generation_started_at": generation_started_at,
         "source_dataset_hash": source_hash,
         "simulation_seed": seed,
+        "episode_retry_limit": episode_retries,
+        "episode_retry_seed_stride": EPISODE_RETRY_SEED_STRIDE,
         "start_episode_index": start_index,
         "planned_episodes": total_eps,
         "planned_pairs_hash": planned_pairs_hash,
@@ -1569,30 +1594,37 @@ async def run_simulation(
 
     async def run_one(order, pair):
         global_index = start_index + order
-        try:
-            transitions = await simulate_episode(
-                global_index,
-                pair,
-                total_eps,
-                semaphore,
-                persona_tier=PERSONA_TIERS[global_index % len(PERSONA_TIERS)],
-                seed=seed,
-                display_number=order + 1,
-                generation_run_id=generation_run_id,
-                plan_id=plan_id,
-                generation_started_at=generation_started_at,
-                ollama_client=ollama_client,
-                resume_source=resume_source,
-                resume_csv_path=resume_csv_path,
-                resume_categories=resume_categories,
-                failure_diagnostics=episode_diagnostics,
-            )
-            return order, transitions, None
-        except Exception as error:
-            # A transient Ollama/document failure must not cancel every other
-            # episode in a run that may already have consumed many GPU-hours.
-            message = f"{type(error).__name__}: {error}"
-            diagnostic = episode_diagnostics.setdefault(global_index, {
+        attempt_diagnostics = []
+        final_error = None
+        final_diagnostic = None
+
+        for attempt_index in range(episode_retries + 1):
+            attempt_seed = seed + attempt_index * EPISODE_RETRY_SEED_STRIDE
+            local_diagnostics: dict[int, dict] = {}
+            transitions = []
+            error = None
+            try:
+                transitions = await simulate_episode(
+                    global_index,
+                    pair,
+                    total_eps,
+                    semaphore,
+                    persona_tier=PERSONA_TIERS[global_index % len(PERSONA_TIERS)],
+                    seed=attempt_seed,
+                    display_number=order + 1,
+                    generation_run_id=generation_run_id,
+                    plan_id=plan_id,
+                    generation_started_at=generation_started_at,
+                    ollama_client=ollama_client,
+                    resume_source=resume_source,
+                    resume_csv_path=resume_csv_path,
+                    resume_categories=resume_categories,
+                    failure_diagnostics=local_diagnostics,
+                )
+            except Exception as caught_error:
+                error = caught_error
+
+            diagnostic = local_diagnostics.get(global_index, {
                 "episode_id": f"episode_{global_index}",
                 "display_number": order + 1,
                 "resume_file": None if pair is None else pair[0],
@@ -1600,12 +1632,64 @@ async def run_simulation(
                 "rejected_question_attempts": [],
                 "fallback_questions": [],
             })
-            diagnostic.update({
-                "status": "failed",
-                "failure_stage": diagnostic.get("failure_stage", "episode_exception"),
-                "failure_reason": diagnostic.get("failure_reason", message),
-            })
-            return order, [], message
+            if error is not None:
+                message = f"{type(error).__name__}: {error}"
+                diagnostic.update({
+                    "status": "failed",
+                    "failure_stage": diagnostic.get("failure_stage", "episode_exception"),
+                    "failure_reason": diagnostic.get("failure_reason", message),
+                })
+            elif not transitions:
+                diagnostic.update({
+                    "status": "failed",
+                    "failure_stage": diagnostic.get("failure_stage", "episode_empty"),
+                    "failure_reason": diagnostic.get(
+                        "failure_reason", "episode returned no valid transitions"
+                    ),
+                })
+            else:
+                diagnostic["status"] = "complete"
+
+            diagnostic["attempt_index"] = attempt_index
+            diagnostic["attempt_number"] = attempt_index + 1
+            diagnostic["attempt_seed"] = attempt_seed
+            diagnostic["simulation_seed"] = attempt_seed + global_index
+            attempt_diagnostics.append(dict(diagnostic))
+            final_diagnostic = diagnostic
+            final_error = error
+
+            if transitions:
+                successful_diagnostic = dict(diagnostic)
+                successful_diagnostic["attempt_count"] = len(attempt_diagnostics)
+                successful_diagnostic["successful_attempt_index"] = attempt_index
+                successful_diagnostic["episode_attempts"] = attempt_diagnostics
+                episode_diagnostics[global_index] = successful_diagnostic
+                return order, transitions, None
+
+            if (
+                attempt_index < episode_retries
+                and _is_retryable_episode_failure(error, diagnostic)
+            ):
+                print(
+                    f"[WARN] New episode {order + 1} attempt {attempt_index + 1}/"
+                    f"{episode_retries + 1} failed; retrying transactionally: "
+                    f"{diagnostic['failure_reason']}"
+                )
+                continue
+            break
+
+        assert final_diagnostic is not None
+        final_diagnostic = dict(final_diagnostic)
+        final_diagnostic["attempt_count"] = len(attempt_diagnostics)
+        final_diagnostic["successful_attempt_index"] = None
+        final_diagnostic["episode_attempts"] = attempt_diagnostics
+        episode_diagnostics[global_index] = final_diagnostic
+        message = (
+            f"{type(final_error).__name__}: {final_error}"
+            if final_error is not None
+            else final_diagnostic["failure_reason"]
+        )
+        return order, [], message
 
     tasks = [
         asyncio.create_task(run_one(order, pair))
@@ -1704,6 +1788,16 @@ async def run_simulation(
             str(order): episode_diagnostics.get(start_index + order, {})
             for order in sorted(failed)
         },
+        "episode_attempt_counts": {
+            diagnostic.get("episode_id", f"episode_{global_index}"):
+            diagnostic.get("attempt_count", 1)
+            for global_index, diagnostic in sorted(episode_diagnostics.items())
+        },
+        "retried_episode_diagnostics": {
+            diagnostic.get("episode_id", f"episode_{global_index}"): diagnostic
+            for global_index, diagnostic in sorted(episode_diagnostics.items())
+            if diagnostic.get("attempt_count", 1) > 1
+        },
         "successful_fallback_episode_diagnostics": {
             str(global_index): {
                 "episode_id": diagnostic.get("episode_id"),
@@ -1779,6 +1873,12 @@ if __name__ == "__main__":
     parser.add_argument("--candidate-request-concurrency", type=int, default=3)
     parser.add_argument("--evaluator-request-concurrency", type=int, default=2)
     parser.add_argument(
+        "--episode-retries",
+        type=int,
+        default=DEFAULT_EPISODE_RETRIES,
+        help="Whole-episode retries after the initial transactional attempt",
+    )
+    parser.add_argument(
         "--identity-components",
         type=int,
         nargs=3,
@@ -1827,6 +1927,7 @@ if __name__ == "__main__":
             max_concurrent=args.max_concurrent,
             candidate_request_concurrency=args.candidate_request_concurrency,
             evaluator_request_concurrency=args.evaluator_request_concurrency,
+            episode_retries=args.episode_retries,
             identity_component_targets=tuple(args.identity_components),
             seed=args.seed,
             dataset_file=args.dataset_file,

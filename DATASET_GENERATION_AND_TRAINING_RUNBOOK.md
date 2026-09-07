@@ -132,6 +132,7 @@ python -m modules.module_07_rl.llm_simulator `
   --append `
   --max_episodes 6 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 43 `
   --dataset-file $rawDataset `
   --gpu-vram-gb 8
@@ -190,6 +191,7 @@ python -m modules.module_07_rl.llm_simulator `
   --append `
   --max_episodes 94 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 44 `
   --dataset-file $rawDataset `
   --gpu-vram-gb 8
@@ -203,6 +205,7 @@ python -m modules.module_07_rl.llm_simulator `
   --append `
   --max_episodes 100 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 45 `
   --dataset-file $rawDataset `
   --gpu-vram-gb 8
@@ -216,6 +219,7 @@ python -m modules.module_07_rl.llm_simulator `
   --append `
   --max_episodes 100 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 46 `
   --dataset-file $rawDataset `
   --gpu-vram-gb 8
@@ -241,6 +245,7 @@ python -m modules.module_07_rl.llm_simulator `
   --append `
   --max_episodes 3 `
   --max_concurrent 2 `
+  --episode-retries 2 `
   --seed 47 `
   --dataset-file $rawDataset `
   --gpu-vram-gb 8

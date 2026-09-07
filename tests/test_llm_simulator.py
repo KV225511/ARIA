@@ -26,6 +26,7 @@ from modules.module_07_rl.llm_simulator import (
 )
 from modules.module_07_rl.ollama_client import BoundedOllamaClient
 from modules.module_07_rl.data_loader import LoadedDocumentPair, ResumeDocument
+from modules.module_07_rl.environment import MAX_TURNS
 from modules.module_07_rl.dataset_split import (
     connected_identity_components,
     split_by_resume_jd_group,
@@ -40,7 +41,10 @@ from modules.module_07_rl.transition_schema import (
     GENERATOR_SCHEMA_VERSION,
 )
 from modules.module_08_llm.generator import (
+    FALLBACK_QUESTION_CAPACITY,
     LLMQuestionGenerator,
+    _ACTION_FALLBACK_TEMPLATES,
+    _build_fallback_candidates,
     build_grounded_fallback_question,
     build_question_retry_correction,
     normalize_ollama_keep_alive,
@@ -55,7 +59,7 @@ def _terminal(ep, pair):
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
-        "generator_schema_version": "aria-simulator-v6",
+        "generator_schema_version": GENERATOR_SCHEMA_VERSION,
         "role_profile_schema_version": "aria-role-profile-v1",
         "question_grounding_schema_version": "aria-question-grounding-v1",
         "grounding_contract_hash": grounding_contract_hash(),
@@ -273,7 +277,49 @@ def test_grounded_fallback_is_action_specific_and_never_exactly_repeats_history(
     assert "Python" in second
     assert first.endswith("?")
     assert second.endswith("?")
-    assert FALLBACK_QUESTION_TEMPLATE_VERSION == "aria-grounded-fallback-v1"
+    assert FALLBACK_QUESTION_TEMPLATE_VERSION == "aria-grounded-fallback-v2"
+
+
+def test_grounded_fallback_has_capacity_for_every_possible_question_turn():
+    assert FALLBACK_QUESTION_CAPACITY >= MAX_TURNS
+    for action in _ACTION_FALLBACK_TEMPLATES:
+        candidates = _build_fallback_candidates(action, "Python")
+        assert len(candidates) == FALLBACK_QUESTION_CAPACITY
+        assert len(candidates) == len(set(candidates))
+
+
+def test_grounded_fallback_exhausts_only_after_full_episode_capacity():
+    packet = {
+        "target_skill_id": "python",
+        "target_skill": "Python",
+        "target_aliases": ["Python"],
+        "target_definition": "Python programming",
+        "jd_evidence": ["Python programming"],
+        "allowed_skill_ids": ["python"],
+        "acronym_resolutions": [],
+    }
+    history = []
+    questions = []
+    for _ in range(FALLBACK_QUESTION_CAPACITY):
+        question = build_grounded_fallback_question(
+            "switch_topic", "Python", history, variation_key="fixed"
+        )
+        assert validate_grounded_question(question, packet, history)["valid"]
+        questions.append(question)
+        history.append({"q": question, "a": "answer"})
+
+    assert len(questions) == len(set(questions)) == FALLBACK_QUESTION_CAPACITY
+    with pytest.raises(RuntimeError, match="capacity exhausted"):
+        build_grounded_fallback_question(
+            "switch_topic", "Python", history, variation_key="fixed"
+        )
+
+
+def test_grounded_fallback_rejects_invalid_action_or_target():
+    with pytest.raises(ValueError, match="target"):
+        build_grounded_fallback_question("switch_topic", "", [])
+    with pytest.raises(ValueError, match="unsupported"):
+        build_grounded_fallback_question("unknown_action", "Python", [])
 
 
 def test_deterministic_grounding_fallback_never_masks_an_api_outage():
@@ -319,18 +365,9 @@ def test_deterministic_grounding_fallback_never_masks_an_api_outage():
 def test_grounded_fallback_variation_preserves_logged_action_semantics(
     action, semantic_markers
 ):
-    questions = {
-        build_grounded_fallback_question(
-            action,
-            "Python",
-            [],
-            grounding_context={"role_title": "Job Summary"},
-            variation_key=f"resume|jd|{turn}|{action}",
-        )
-        for turn in range(100)
-    }
+    questions = set(_build_fallback_candidates(action, "Python"))
 
-    assert len(questions) == 6
+    assert len(questions) == FALLBACK_QUESTION_CAPACITY
     assert all("job summary" not in question.casefold() for question in questions)
     assert all(
         any(marker in question.casefold() for marker in semantic_markers)
@@ -358,18 +395,9 @@ def test_grounded_fallback_recovers_the_observed_v8_targets(
         "allowed_skill_ids": [target_skill_id],
         "acronym_resolutions": [],
     }
-    questions = {
-        build_grounded_fallback_question(
-            action,
-            target_skill,
-            [],
-            grounding_context=packet,
-            variation_key=f"resume|jd|{turn}|{action}",
-        )
-        for turn in range(100)
-    }
+    questions = set(_build_fallback_candidates(action, target_skill))
 
-    assert len(questions) == 6
+    assert len(questions) == FALLBACK_QUESTION_CAPACITY
     assert all(
         validate_grounded_question(question, packet, [])["valid"]
         for question in questions
@@ -613,7 +641,7 @@ def test_append_provenance_and_episode_ids_are_protected():
             "candidate_model": "qwen2.5:7b",
             "evaluator_model": "gemma3:4b",
             "transition_schema_version": "aria-transition-v4",
-            "generator_schema_version": "aria-simulator-v6",
+            "generator_schema_version": GENERATOR_SCHEMA_VERSION,
             "role_profile_schema_version": "aria-role-profile-v1",
             "question_grounding_schema_version": "aria-question-grounding-v1",
             "grounding_contract_hash": grounding_contract_hash(),
@@ -907,7 +935,7 @@ def test_append_run_preserves_existing_data_and_checkpoints_new_episodes(tmp_pat
             "candidate_model": "qwen2.5:7b",
             "evaluator_model": "gemma3:4b",
             "transition_schema_version": "aria-transition-v4",
-            "generator_schema_version": "aria-simulator-v6",
+            "generator_schema_version": GENERATOR_SCHEMA_VERSION,
             "role_profile_schema_version": "aria-role-profile-v1",
             "question_grounding_schema_version": "aria-question-grounding-v1",
             "grounding_contract_hash": grounding_contract_hash(),
@@ -1125,6 +1153,66 @@ def test_all_episode_failures_preserve_original_bytes_and_raise(tmp_path):
     assert dataset_file.read_bytes() == original_bytes
 
 
+def test_retryable_episode_is_retried_transactionally_and_recorded(tmp_path):
+    dataset_file = tmp_path / "dataset.json"
+    resumes = [Path(f"resume-{index}.pdf") for index in range(6)]
+    jds = [Path(f"jd-{index}.pdf") for index in range(6)]
+    calls = {}
+
+    async def fake_episode(ep, pair, total_eps, semaphore, **kwargs):
+        calls[ep] = calls.get(ep, 0) + 1
+        if ep == 1 and calls[ep] == 1:
+            kwargs["failure_diagnostics"][ep] = {
+                "episode_id": f"episode_{ep}",
+                "resume_file": pair[0],
+                "jd_file": pair[1],
+                "status": "failed",
+                "failure_stage": "question_grounding",
+                "failure_reason": "question grounding failed after 3 attempts",
+                "rejected_question_attempts": [],
+                "fallback_questions": [],
+            }
+            return []
+        return [_terminal(ep, pair)]
+
+    def fake_get_all_pdfs(directory):
+        return resumes if "resume" in str(directory).lower() else jds
+
+    with (
+        patch("modules.module_07_rl.llm_simulator.get_all_pdfs", side_effect=fake_get_all_pdfs),
+        patch("modules.module_07_rl.llm_simulator.is_valid_resume", return_value=True),
+        patch("modules.module_07_rl.llm_simulator.is_valid_jd", return_value=True),
+        patch("modules.module_07_rl.llm_simulator.simulate_episode", side_effect=fake_episode),
+    ):
+        combined = asyncio.run(run_simulation(
+            sweep=True,
+            max_episodes=3,
+            max_concurrent=2,
+            identity_component_targets=(1, 1, 1),
+            dataset_file=dataset_file,
+            replace_existing=True,
+            check_ollama_capacity=False,
+            resume_source="pdf",
+            episode_retries=2,
+        ))
+
+    assert len(combined) == 3
+    assert [item["episode_id"] for item in combined] == [
+        "episode_0", "episode_1", "episode_2"
+    ]
+    assert calls[1] == 2
+    assert calls[0] == calls[2] == 1
+    manifest_path = next((tmp_path / "manifests").glob("*.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "complete"
+    assert manifest["episode_attempt_counts"]["episode_1"] == 2
+    retry = manifest["retried_episode_diagnostics"]["episode_1"]
+    assert retry["successful_attempt_index"] == 1
+    assert len(retry["episode_attempts"]) == 2
+    assert retry["episode_attempts"][0]["attempt_seed"] == 42
+    assert retry["episode_attempts"][1]["attempt_seed"] == 42 + 100_000_007
+
+
 def test_run_never_exceeds_requested_episode_concurrency(tmp_path):
     dataset_file = tmp_path / "dataset.json"
     resumes = [Path(f"resume-{index}.pdf") for index in range(6)]
@@ -1236,7 +1324,7 @@ def test_csv_append_requires_matching_source_hash():
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
-        "generator_schema_version": "aria-simulator-v6",
+        "generator_schema_version": GENERATOR_SCHEMA_VERSION,
         "role_profile_schema_version": "aria-role-profile-v1",
         "question_grounding_schema_version": "aria-question-grounding-v1",
         "grounding_contract_hash": grounding_contract_hash(),
@@ -1259,7 +1347,7 @@ def test_csv_append_rejects_missing_source_provenance():
         "candidate_model": "qwen2.5:7b",
         "evaluator_model": "gemma3:4b",
         "transition_schema_version": "aria-transition-v4",
-        "generator_schema_version": "aria-simulator-v6",
+        "generator_schema_version": GENERATOR_SCHEMA_VERSION,
         "role_profile_schema_version": "aria-role-profile-v1",
         "question_grounding_schema_version": "aria-question-grounding-v1",
         "grounding_contract_hash": grounding_contract_hash(),
