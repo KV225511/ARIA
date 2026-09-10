@@ -509,8 +509,16 @@ def migrate_split_manifest(transitions: list[dict], parent_manifest: dict, targe
     return manifest
 
 
-def freeze_development_splits(raw_file, parent_manifest_file, output_dir, seed=42):
+def freeze_development_splits(
+    raw_file, parent_manifest_file, output_dir, seed=42,
+    dependency_lock_path=None, expected_counts=None,
+):
     """Create immutable train/validation inputs without replaying locked test."""
+    existing_protocol = Path(output_dir) / "protocol" / "calibration_protocol_v4.json"
+    if existing_protocol.exists():
+        raise FileExistsError(
+            f"calibration protocol v4 is already frozen: {existing_protocol}"
+        )
     raw_path = Path(raw_file)
     before_bytes = raw_path.read_bytes()
     transitions = json.loads(before_bytes.decode("utf-8"))
@@ -522,33 +530,164 @@ def freeze_development_splits(raw_file, parent_manifest_file, output_dir, seed=4
         items = []
         for episode in group_transitions_into_episodes(transitions):
             if episode and assignments[str(episode[0].get("episode_id"))] == split_name:
-                items.extend(episode)
+                items.extend({**transition, "dataset_split": split_name} for transition in episode)
         destination = output / "raw-splits" / ("locked" if split_name == "test" else "") / f"{split_name}.json"
         _atomic_json_write(destination, items)
+    from modules.module_07_rl.calibration_protocol import file_sha256, freeze_calibration_protocol
+    lock_path = dependency_lock_path or Path(__file__).resolve().parents[2] / "requirements.txt"
+    protocol = freeze_calibration_protocol(
+        raw_path, manifest, output, lock_path,
+        expected_counts=expected_counts,
+    )
+    manifest.update({
+        "producer_version": "aria-belief-calibration-v4",
+        "supported_consumer_versions": ["aria-split-manifest-v4"],
+        "protocol_hash": protocol["protocol_hash"],
+        "raw_file_sha256": protocol["raw_file_sha256"],
+        "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
+        "git_commit": protocol["code_commit"],
+        "parent_artifact_hashes": {"split_manifest_v3": manifest["parent_manifest_hash"]},
+    })
+    manifest.pop("manifest_hash", None)
+    manifest["manifest_hash"] = canonical_json_hash(manifest)
     _atomic_json_write(output / "manifests" / "split_manifest_v4.json", manifest)
+    raw_split_inventory = {
+        "schema_version": "aria-raw-split-inventory-v1",
+        "producer_version": "aria-belief-calibration-v4",
+        "supported_consumer_versions": ["aria-raw-split-inventory-v1"],
+        "protocol_hash": protocol["protocol_hash"],
+        "raw_file_sha256": protocol["raw_file_sha256"],
+        "raw_dataset_hash": protocol["raw_dataset_hash"],
+        "split_manifest_hash": manifest["manifest_hash"],
+        "parent_artifact_hashes": {"raw_corpus": protocol["raw_file_sha256"]},
+        "git_commit": protocol["code_commit"],
+        "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
+        "artifacts": {
+            "train": file_sha256(output / "raw-splits" / "train.json"),
+            "validation": file_sha256(output / "raw-splits" / "validation.json"),
+            "locked_test": file_sha256(output / "raw-splits" / "locked" / "test.json"),
+        },
+    }
+    raw_split_inventory["inventory_hash"] = canonical_json_hash(raw_split_inventory)
+    _atomic_json_write(output / "manifests" / "raw_split_inventory_v1.json", raw_split_inventory)
+    for directory in ("calibration", "replayed", "audits", "release"):
+        (output / directory).mkdir(parents=True, exist_ok=True)
     after_bytes = raw_path.read_bytes()
     if after_bytes != before_bytes:
         raise RuntimeError("raw dataset changed while freezing development splits")
     return manifest
 
 
-def prepare_development_calibration(train_file, validation_file, manifest_file, output_dir, bootstrap_samples=100):
+def prepare_development_calibration(
+    train_file, validation_file, manifest_file, protocol_file, output_dir,
+    bootstrap_samples=1000,
+):
     """Fit/replay development data only; this function has no test-data input."""
-    from modules.module_07_rl.belief_calibration import calibrate_belief_model
+    from modules.module_07_rl.belief_calibration import (
+        select_training_only_calibration,
+        validate_selected_calibration,
+    )
+    from modules.module_07_rl.calibration_protocol import (
+        DEVELOPMENT_BUNDLE_VERSION,
+        atomic_json_write,
+        file_sha256,
+        update_protocol_status,
+        validate_calibration_protocol,
+    )
     manifest = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
     if manifest.get("schema_version") != "aria-split-manifest-v4":
         raise ValueError("development calibration requires split_manifest_v4")
+    unsigned_manifest = dict(manifest)
+    stored_manifest_hash = unsigned_manifest.pop("manifest_hash", None)
+    if not stored_manifest_hash or stored_manifest_hash != canonical_json_hash(unsigned_manifest):
+        raise ValueError("development split manifest hash is invalid")
+    protocol = validate_calibration_protocol(protocol_file, split_manifest=manifest)
+    if protocol["protocol_status"] != "FROZEN_FOR_DEVELOPMENT":
+        raise ValueError("protocol is not frozen for a first development validation")
+    if int(protocol.get("validation_executions", 0)) != 0:
+        raise ValueError("validation has already executed for this protocol")
     training = json.loads(Path(train_file).read_text(encoding="utf-8"))
-    validation = json.loads(Path(validation_file).read_text(encoding="utf-8"))
-    if any(item.get("dataset_split") == "test" for item in training + validation):
-        raise ValueError("development calibration input contains locked test data")
+    if any(item.get("dataset_split") != "train" for item in training):
+        raise ValueError("development calibration training input contains a non-train split")
     raw_hash = manifest["raw_dataset_hash"]
-    calibration = calibrate_belief_model(
-        training, validation, raw_dataset_hash=raw_hash,
-        split_manifest_hash=manifest["manifest_hash"], bootstrap_samples=bootstrap_samples,
-        select_on_validation=False,
+    if raw_hash != protocol["raw_dataset_hash"]:
+        raise ValueError("manifest and protocol raw dataset hashes differ")
+    selection = select_training_only_calibration(
+        training, raw_dataset_hash=raw_hash,
+        split_manifest_hash=manifest["manifest_hash"],
+        protocol_hash=protocol["protocol_hash"],
     )
-    config = calibration["config"]
+    output = Path(output_dir)
+    serializable_selection = dict(selection)
+    if isinstance(serializable_selection.get("config"), BeliefModelConfig):
+        serializable_selection["config"] = serializable_selection["config"].to_dict()
+    serializable_selection.update({
+        "raw_file_sha256": protocol["raw_file_sha256"],
+        "parent_artifact_hashes": {"split_manifest": manifest["manifest_hash"]},
+        "git_commit": protocol["code_commit"],
+        "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
+    })
+    serializable_selection.pop("report_hash", None)
+    serializable_selection["report_hash"] = canonical_json_hash(serializable_selection)
+    selection_artifact_hash = serializable_selection["report_hash"]
+    _atomic_json_write(output / "calibration" / "training_cv_report_v1.json", serializable_selection)
+    if selection["selection_status"] != "ELIGIBLE":
+        updated = update_protocol_status(protocol_file, "FAILED")
+        return {
+            "schema_version": "aria-development-calibration-v4",
+            "protocol_hash": updated["protocol_hash"],
+            "selection_status": "FAILED",
+            "validation_evaluated": False,
+            "test_metrics_locked": True,
+        }
+    config = selection["config"]
+    metadata = dict(config.fit_metadata)
+    metadata.update({
+        "protocol_freeze_hash": protocol["protocol_hash"],
+        "raw_file_sha256": protocol["raw_file_sha256"],
+        "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
+        "git_commit": protocol["code_commit"],
+        "producer_version": "aria-belief-calibration-v4",
+        "supported_consumer_versions": ["belief-v2"],
+        "parent_artifact_hashes": {
+            "split_manifest": manifest["manifest_hash"],
+            "training_cv_report": selection_artifact_hash,
+        },
+    })
+    # Metadata and behavior are frozen together. The config hash below is the
+    # exact hash evaluated on validation and later admitted by the protocol.
+    config = config.with_updates(fit_metadata=metadata)
+    config.save(output / "calibration" / "belief_model_v2.json")
+    # Claim the sole validation execution before reading any validation labels.
+    # An interruption leaves validation_executions=1 and therefore fails closed.
+    claimed_protocol = update_protocol_status(
+        protocol_file, "FROZEN_FOR_DEVELOPMENT",
+        validation_executions=1, validation_state="STARTED",
+    )
+    # Validation is intentionally not opened until selection is final and the
+    # single execution has been durably claimed.
+    try:
+        validation = json.loads(Path(validation_file).read_text(encoding="utf-8"))
+        if any(item.get("dataset_split") != "validation" for item in validation):
+            raise ValueError("development validation input contains a non-validation split")
+        validation_result = validate_selected_calibration(
+            validation, config, bootstrap_samples=bootstrap_samples,
+        )
+    except BaseException:
+        update_protocol_status(
+            protocol_file, "FAILED", validation_executions=1,
+            validation_state="INTERRUPTED", belief_config_hash=config.config_hash,
+        )
+        raise
+    validation_passed = validation_result["passes_quality_gates"]
+    validation_result["belief_config_hash"] = config.config_hash
+    updated_protocol = update_protocol_status(
+        protocol_file,
+        "PROVISIONAL_SYNTHETIC" if validation_passed else "FAILED",
+        validation_executions=1,
+        validation_state="COMPLETED",
+        belief_config_hash=config.config_hash,
+    )
     replayed = {}
     for split_name, transitions in (("train", training), ("validation", validation)):
         rows = []
@@ -556,21 +695,77 @@ def prepare_development_calibration(train_file, validation_file, manifest_file, 
             rows.extend(replay_one_episode(episode, config, raw_hash, manifest["manifest_hash"]))
         for row in rows:
             row["dataset_split"] = split_name
+            row.update({
+                "schema_version": REPLAY_SCHEMA_VERSION,
+                "producer_version": "aria-belief-calibration-v4",
+                "supported_consumer_versions": [REPLAY_SCHEMA_VERSION],
+                "protocol_hash": updated_protocol["protocol_hash"],
+                "raw_file_sha256": updated_protocol["raw_file_sha256"],
+                "environment_fingerprint_hash": updated_protocol["environment_fingerprint_hash"],
+                "git_commit": updated_protocol["code_commit"],
+                "parent_artifact_hashes": {
+                    "split_manifest": manifest["manifest_hash"],
+                    "belief_config": config.config_hash,
+                },
+                "belief_config_hash": config.config_hash,
+            })
         replayed[split_name] = rows
-    output = Path(output_dir)
-    config.save(output / "calibration" / "belief_model_v2.json")
     for split_name, rows in replayed.items():
         _atomic_json_write(output / "replayed" / f"{split_name}.json", rows)
     report = {
-        "schema_version": "aria-development-calibration-v1",
+        "schema_version": "aria-development-calibration-v4",
+        "producer_version": "aria-belief-calibration-v4",
+        "supported_consumer_versions": ["aria-development-calibration-v4"],
+        "protocol_hash": updated_protocol["protocol_hash"],
+        "raw_file_sha256": updated_protocol["raw_file_sha256"],
         "raw_dataset_hash": raw_hash,
         "split_manifest_hash": manifest["manifest_hash"],
         "belief_config_hash": config.config_hash,
+        "parent_artifact_hashes": {
+            "training_cv_report": selection_artifact_hash,
+            "split_manifest": manifest["manifest_hash"],
+        },
+        "git_commit": updated_protocol["code_commit"],
+        "environment_fingerprint_hash": updated_protocol["environment_fingerprint_hash"],
         "validation_used_for_selection": False,
+        "validation_execution_count": 1,
         "test_metrics_locked": True,
-        "calibration": {key: value.to_dict() if isinstance(value, BeliefModelConfig) else value for key, value in calibration.items()},
+        "calibration": {
+            "config_hash": config.config_hash,
+            "selection_report_hash": selection_artifact_hash,
+            "candidate_count": selection["candidate_count"],
+            "validation": validation_result,
+        },
     }
-    _atomic_json_write(output / "calibration" / "development_calibration_report_v1.json", report)
+    _atomic_json_write(output / "calibration" / "development_calibration_report_v4.json", report)
+    artifacts = {
+        "split_manifest": {"path": str(Path(manifest_file).resolve()), "sha256": file_sha256(manifest_file)},
+        "replayed_train": {"path": str(output / "replayed" / "train.json"), "sha256": file_sha256(output / "replayed" / "train.json"), "split": "train"},
+        "replayed_validation": {"path": str(output / "replayed" / "validation.json"), "sha256": file_sha256(output / "replayed" / "validation.json"), "split": "validation"},
+        "belief_config": {"path": str(output / "calibration" / "belief_model_v2.json"), "sha256": file_sha256(output / "calibration" / "belief_model_v2.json")},
+        "validation_report": {"path": str(output / "calibration" / "development_calibration_report_v4.json"), "sha256": file_sha256(output / "calibration" / "development_calibration_report_v4.json")},
+    }
+    bundle = {
+        "schema_version": DEVELOPMENT_BUNDLE_VERSION,
+        "producer_version": "aria-belief-calibration-v4",
+        "supported_consumer_versions": [DEVELOPMENT_BUNDLE_VERSION],
+        "protocol_hash": updated_protocol["protocol_hash"],
+        "raw_file_sha256": updated_protocol["raw_file_sha256"],
+        "raw_dataset_hash": raw_hash,
+        "split_manifest_hash": manifest["manifest_hash"],
+        "belief_config_hash": config.config_hash,
+        "parent_artifact_hashes": {
+            "protocol": updated_protocol["protocol_hash"],
+            "split_manifest": manifest["manifest_hash"],
+            "training_cv_report": selection_artifact_hash,
+        },
+        "git_commit": updated_protocol["code_commit"],
+        "environment_fingerprint_hash": updated_protocol["environment_fingerprint_hash"],
+        "artifacts": artifacts,
+    }
+    bundle["bundle_hash"] = canonical_json_hash(bundle)
+    atomic_json_write(output / "manifests" / "development_bundle_v1.json", bundle)
+    report["development_bundle_hash"] = bundle["bundle_hash"]
     return report
 
 
@@ -693,78 +888,11 @@ def prepare_calibrate_replay(
     split_seed=42,
     bootstrap_samples=100,
 ):
-    """Split raw evidence, fit/tune calibration, and replay without test metrics."""
-    from modules.module_07_rl.belief_calibration import calibrate_belief_model
-
-    raw_path = Path(raw_file)
-    before_hash = hashlib.sha256(raw_path.read_bytes()).hexdigest()
-    transitions = json.loads(raw_path.read_text(encoding="utf-8"))
-    raw_hash = canonical_json_hash(transitions)
-    manifest = create_split_manifest(transitions, seed=split_seed)
-    assignments = manifest["assignments"]
-    raw_splits = {name: [] for name in SPLIT_NAMES}
-    for episode in group_transitions_into_episodes(transitions):
-        if episode:
-            raw_splits[assignments[str(episode[0].get("episode_id"))]].extend(episode)
-    calibration = calibrate_belief_model(
-        raw_splits["train"],
-        raw_splits["validation"],
-        raw_dataset_hash=raw_hash,
-        split_manifest_hash=manifest["manifest_hash"],
-        bootstrap_samples=bootstrap_samples,
+    """Disabled legacy workflow that replayed all splits, including test."""
+    raise RuntimeError(
+        "legacy calibrate/replay is disabled; use freeze_development_splits and "
+        "prepare_development_calibration under protocol v4"
     )
-    config = calibration["config"]
-    fit_metadata = dict(config.fit_metadata)
-    fit_metadata.update({
-        "state_schema_version": STATE_SCHEMA_VERSION,
-        "state_feature_names": list(STATE_FEATURE_NAMES),
-        "reward_schema_version": REWARD_SCHEMA_VERSION,
-        "replay_schema_version": REPLAY_SCHEMA_VERSION,
-        "test_metrics_locked_at_freeze": True,
-    })
-    config = config.with_updates(fit_metadata=fit_metadata)
-    calibration["config"] = config
-    calibration["config_hash"] = config.config_hash
-    replayed, manifest, comparison = replay_dataset(
-        transitions, config, manifest, unlock_test_report=False
-    )
-    after_hash = hashlib.sha256(raw_path.read_bytes()).hexdigest()
-    if before_hash != after_hash:
-        raise RuntimeError("Raw dataset changed during calibration/replay")
-
-    output = Path(output_dir)
-    config.save(output / "belief_model_v2.json")
-    _atomic_json_write(output / "split_manifest_v3.json", manifest)
-    _atomic_json_write(output / "qwen_rl_dataset_belief_v3.json", replayed)
-    _atomic_json_write(output / "replay_comparison_v3.json", comparison)
-    calibration_payload = {
-        key: value.to_dict() if isinstance(value, BeliefModelConfig) else value
-        for key, value in calibration.items()
-    }
-    calibration_report = {
-        "schema_version": "aria-calibration-report-v3",
-        "raw_dataset_hash": raw_hash,
-        "split_manifest_hash": manifest["manifest_hash"],
-        "belief_config_hash": config.config_hash,
-        "belief_schema_version": config.schema_version,
-        "state_schema_version": STATE_SCHEMA_VERSION,
-        "state_feature_names": list(STATE_FEATURE_NAMES),
-        "reward_schema_version": REWARD_SCHEMA_VERSION,
-        "replay_schema_version": REPLAY_SCHEMA_VERSION,
-        "test_metrics_locked": True,
-        "calibration": calibration_payload,
-    }
-    _atomic_json_write(output / "calibration_report_v3.json", calibration_report)
-    for split_name in SPLIT_NAMES:
-        _atomic_json_write(
-            output / "splits" / f"{split_name}.json",
-            [item for item in replayed if item["dataset_split"] == split_name],
-        )
-    return {
-        "calibration": calibration_report,
-        "comparison": comparison,
-        "test_metrics_locked": True,
-    }
 
 
 if __name__ == "__main__":

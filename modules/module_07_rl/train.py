@@ -39,6 +39,12 @@ from modules.module_07_rl.transition_schema import (
     TRANSITION_SCHEMA_VERSION,
     has_valid_question_generation_provenance,
 )
+from modules.module_07_rl.calibration_protocol import (
+    DEVELOPMENT_BUNDLE_VERSION,
+    file_sha256,
+    validate_calibration_protocol,
+    validate_development_bundle,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -245,6 +251,8 @@ def train_iql_policy(
     train_file=DEFAULT_TRAIN_FILE,
     validation_file=DEFAULT_VALIDATION_FILE,
     belief_config_file=DEFAULT_CONFIG_FILE,
+    development_bundle_file=None,
+    calibration_protocol_file=None,
     output_file=DEFAULT_CHECKPOINT,
     total_epochs=100,
     batch_size=256,
@@ -258,13 +266,66 @@ def train_iql_policy(
     early_stopping_min_delta=1e-4,
 ):
     """Train without loading the locked test split."""
+    if development_bundle_file is None or calibration_protocol_file is None:
+        raise ValueError(
+            "training requires a development bundle manifest and calibration protocol"
+        )
     train_path = Path(train_file)
     validation_path = Path(validation_file)
+    protocol = validate_calibration_protocol(calibration_protocol_file)
+    if protocol["protocol_status"] not in {
+        "PROVISIONAL_SYNTHETIC", "VALIDATED_SYNTHETIC",
+    }:
+        raise ValueError("calibration protocol status does not permit training")
     config = BeliefModelConfig.load(belief_config_file)
+    if config.schema_version != "belief-v2":
+        raise ValueError("training requires belief-v2 configuration")
+    if config.config_hash != protocol.get("belief_config_hash"):
+        raise ValueError("belief configuration hash mismatch")
+    bundle_preview = json.loads(Path(development_bundle_file).read_text(encoding="utf-8"))
+    if bundle_preview.get("schema_version") != DEVELOPMENT_BUNDLE_VERSION:
+        raise ValueError("unsupported development bundle schema version")
+    split_record = bundle_preview.get("artifacts", {}).get("split_manifest", {})
+    split_manifest_path = split_record.get("path")
+    if not split_manifest_path:
+        raise ValueError("development bundle does not reference its split manifest")
+    if split_record.get("sha256") != file_sha256(split_manifest_path):
+        raise ValueError("development bundle split manifest file hash mismatch")
+    bundle = validate_development_bundle(
+        bundle_preview,
+        protocol=protocol,
+        belief_config_hash=config.config_hash,
+        split_manifest=split_manifest_path,
+        train_file=train_path,
+        validation_file=validation_path,
+    )
+    config_artifact = bundle["artifacts"].get("belief_config", {})
+    if config_artifact.get("sha256") != file_sha256(belief_config_file):
+        raise ValueError("development bundle belief configuration file hash mismatch")
     training_source = json.loads(train_path.read_text(encoding="utf-8"))
     validation_source = json.loads(validation_path.read_text(encoding="utf-8"))
     validate_replayed_dataset(training_source, config, "train")
     validate_replayed_dataset(validation_source, config, "validation")
+    provenance_expected = {
+        "protocol_hash": protocol["protocol_hash"],
+        "raw_file_sha256": protocol["raw_file_sha256"],
+        "raw_dataset_hash": protocol["raw_dataset_hash"],
+        "split_manifest_hash": bundle["split_manifest_hash"],
+        "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
+    }
+    for split_name, rows in (("train", training_source), ("validation", validation_source)):
+        for index, transition in enumerate(rows):
+            if transition.get("schema_version") != "aria-replay-v4":
+                raise ValueError(f"{split_name} transition {index} has unsupported artifact schema")
+            if "aria-replay-v4" not in transition.get("supported_consumer_versions", []):
+                raise ValueError(f"{split_name} transition {index} is consumer-incompatible")
+            if transition.get("dataset_split") == "test":
+                raise ValueError("training rejects test transitions")
+            for field, expected in provenance_expected.items():
+                if transition.get(field) != expected:
+                    raise ValueError(
+                        f"{split_name} transition {index} {field} mismatch"
+                    )
 
     combined_for_integrity = training_source + validation_source
     raw_gate = audit_raw_evidence(
@@ -395,12 +456,26 @@ def train_iql_policy(
             epochs_without_improvement = 0
             checkpoint = {
                 "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
+                "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                "producer_version": "aria-iql-training-v4",
+                "supported_consumer_versions": [CHECKPOINT_SCHEMA_VERSION],
                 "model_state_dict": nets.state_dict(),
                 "state_schema_version": STATE_SCHEMA_VERSION,
                 "state_feature_names": list(STATE_FEATURE_NAMES),
                 "belief_config": config.to_dict(),
                 "belief_config_hash": config.config_hash,
                 "split_manifest_hash": config.split_manifest_hash,
+                "protocol_hash": protocol["protocol_hash"],
+                "development_bundle_hash": bundle["bundle_hash"],
+                "raw_file_sha256": protocol["raw_file_sha256"],
+                "raw_dataset_hash": protocol["raw_dataset_hash"],
+                "git_commit": protocol["code_commit"],
+                "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
+                "parent_artifact_hashes": {
+                    "development_bundle": bundle["bundle_hash"],
+                    "belief_config": config.config_hash,
+                    "split_manifest": config.split_manifest_hash,
+                },
                 "training": {
                     "best_epoch": best_epoch,
                     "validation_selection_metric": "offline_iql_validation_objective",
@@ -458,6 +533,8 @@ if __name__ == "__main__":
     parser.add_argument("--train-file", default=str(DEFAULT_TRAIN_FILE))
     parser.add_argument("--validation-file", default=str(DEFAULT_VALIDATION_FILE))
     parser.add_argument("--belief-config", default=str(DEFAULT_CONFIG_FILE))
+    parser.add_argument("--development-bundle", required=True)
+    parser.add_argument("--calibration-protocol", required=True)
     parser.add_argument("--output", default=str(DEFAULT_CHECKPOINT))
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -470,6 +547,8 @@ if __name__ == "__main__":
             train_file=args.train_file,
             validation_file=args.validation_file,
             belief_config_file=args.belief_config,
+            development_bundle_file=args.development_bundle,
+            calibration_protocol_file=args.calibration_protocol,
             output_file=args.output,
             total_epochs=args.epochs,
             batch_size=args.batch_size,

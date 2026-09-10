@@ -1,6 +1,7 @@
 import json
 from unittest.mock import patch
 
+import pytest
 import torch
 
 from modules.module_06_belief.belief_config import BeliefModelConfig
@@ -14,6 +15,18 @@ from modules.module_07_rl.train import (
     train_iql_policy,
     validate_replayed_dataset,
 )
+from modules.module_07_rl.calibration_protocol import (
+    CALIBRATION_ALGORITHM_VERSION,
+    CALIBRATION_CANDIDATE_VALUES,
+    CALIBRATION_PROTOCOL_VERSION,
+    CALIBRATION_STAGE_SEQUENCE,
+    DEVELOPMENT_BUNDLE_VERSION,
+    NUMERICAL_TOLERANCES,
+    canonical_json_hash,
+    file_sha256,
+)
+from modules.module_07_rl.dataset_audit import CALIBRATION_GATE_THRESHOLDS, VALIDATION_GATE_VERSION
+from modules.module_07_rl.metrics import METRICS_SCHEMA_VERSION
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
 from modules.module_07_rl.transition_schema import (
@@ -91,6 +104,82 @@ def _transition(index, split):
     }
 
 
+def _write_training_contract(tmp_path, train, validation):
+    manifest = {
+        "schema_version": "aria-split-manifest-v4",
+        "raw_dataset_hash": "raw-canonical-hash",
+        "locked_test_assignment_hash": "locked-assignment-hash",
+        "assignments": {},
+    }
+    manifest["manifest_hash"] = canonical_json_hash(manifest)
+    manifest_file = tmp_path / "split_manifest_v4.json"
+    manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+    config = BeliefModelConfig(
+        split_manifest_hash=manifest["manifest_hash"],
+        raw_dataset_hash=manifest["raw_dataset_hash"],
+    )
+    config_file = tmp_path / "belief.json"
+    config.save(config_file)
+    protocol = {
+        "protocol_schema_version": CALIBRATION_PROTOCOL_VERSION,
+        "protocol_status": "PROVISIONAL_SYNTHETIC",
+        "raw_file_path": "fixture.json", "raw_file_sha256": "raw-byte-hash",
+        "raw_dataset_hash": manifest["raw_dataset_hash"], "episode_count": 184,
+        "transition_count": 184, "identity_component_count": 184,
+        "parent_split_manifest_hash": "parent", "locked_test_assignment_hash": "locked-assignment-hash",
+        "target_component_counts": [21, 6, 6], "metric_schema_version": METRICS_SCHEMA_VERSION,
+        "gate_policy_version": VALIDATION_GATE_VERSION, "gate_thresholds": CALIBRATION_GATE_THRESHOLDS,
+        "split_migration_algorithm": "train-to-validation-component-rebalance-v1",
+        "cross_validation_algorithm": "grouped-identity-component-3fold-greedy-v1",
+        "calibration_algorithm_version": CALIBRATION_ALGORITHM_VERSION,
+        "calibration_stage_sequence": CALIBRATION_STAGE_SEQUENCE,
+        "candidate_values": CALIBRATION_CANDIDATE_VALUES,
+        "candidate_selection_rule": ["highest_macro_f1", "lowest_ordinal_mae", "lowest_ece", "lowest_abstention_rate", "lexicographically_smallest_parameters"],
+        "bootstrap_method": "paired-identity-component-percentile-v1", "bootstrap_samples": 1000,
+        "all_random_seeds": {"split": 42, "cross_validation": 42, "bootstrap": 42},
+        "numerical_tolerances": NUMERICAL_TOLERANCES, "code_commit": "fixture", "git_dirty": True,
+        "dependency_lock_path": "requirements.txt", "dependency_lock_hash": "lock-hash",
+        "environment_fingerprint_hash": "environment-hash", "maximum_validation_executions": 1,
+        "validation_executions": 1, "locked_test_policy": "application-level-one-attempt-guard-v1",
+        "belief_config_hash": config.config_hash,
+    }
+    protocol["protocol_hash"] = canonical_json_hash(protocol)
+    protocol_file = tmp_path / "calibration_protocol_v4.json"
+    protocol_file.write_text(json.dumps(protocol), encoding="utf-8")
+    for rows, split in ((train, "train"), (validation, "validation")):
+        for row in rows:
+            row.update({
+                "dataset_split": split, "belief_config_hash": config.config_hash,
+                "schema_version": "aria-replay-v4",
+                "supported_consumer_versions": ["aria-replay-v4"],
+                "protocol_hash": protocol["protocol_hash"], "raw_file_sha256": protocol["raw_file_sha256"],
+                "raw_dataset_hash": protocol["raw_dataset_hash"], "split_manifest_hash": manifest["manifest_hash"],
+                "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
+            })
+    train_file = tmp_path / "train.json"
+    validation_file = tmp_path / "validation.json"
+    train_file.write_text(json.dumps(train), encoding="utf-8")
+    validation_file.write_text(json.dumps(validation), encoding="utf-8")
+    bundle = {
+        "schema_version": DEVELOPMENT_BUNDLE_VERSION, "producer_version": CALIBRATION_ALGORITHM_VERSION,
+        "supported_consumer_versions": [DEVELOPMENT_BUNDLE_VERSION], "protocol_hash": protocol["protocol_hash"],
+        "raw_file_sha256": protocol["raw_file_sha256"], "raw_dataset_hash": protocol["raw_dataset_hash"],
+        "split_manifest_hash": manifest["manifest_hash"], "belief_config_hash": config.config_hash,
+        "environment_fingerprint_hash": protocol["environment_fingerprint_hash"], "parent_artifact_hashes": {},
+        "git_commit": "fixture",
+        "artifacts": {
+            "split_manifest": {"path": str(manifest_file), "sha256": file_sha256(manifest_file)},
+            "replayed_train": {"path": str(train_file), "sha256": file_sha256(train_file), "split": "train"},
+            "replayed_validation": {"path": str(validation_file), "sha256": file_sha256(validation_file), "split": "validation"},
+            "belief_config": {"path": str(config_file), "sha256": file_sha256(config_file)},
+        },
+    }
+    bundle["bundle_hash"] = canonical_json_hash(bundle)
+    bundle_file = tmp_path / "development_bundle_v1.json"
+    bundle_file.write_text(json.dumps(bundle), encoding="utf-8")
+    return config, config_file, train_file, validation_file, bundle_file, protocol_file
+
+
 def test_dataset_validation_rejects_wrong_schema():
     transition = _transition(0, "train")
     transition["state_schema_version"] = "legacy"
@@ -102,16 +191,27 @@ def test_dataset_validation_rejects_wrong_schema():
         raise AssertionError("Expected incompatible schema rejection")
 
 
+def test_dataset_validation_rejects_test_transition_for_training():
+    transition = _transition(0, "test")
+    with pytest.raises(ValueError, match="wrong split"):
+        validate_replayed_dataset([transition], BeliefModelConfig(), "train")
+
+
+def test_training_requires_protocol_and_development_bundle(tmp_path):
+    with pytest.raises(ValueError, match="development bundle manifest and calibration protocol"):
+        train_iql_policy(
+            train_file=tmp_path / "train.json",
+            validation_file=tmp_path / "validation.json",
+            belief_config_file=tmp_path / "belief.json",
+            output_file=tmp_path / "checkpoint.pth",
+            total_epochs=1,
+        )
+
+
 def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
-    config = BeliefModelConfig()
-    config_file = tmp_path / "belief.json"
-    config.save(config_file)
     train = [_transition(index, "train") for index in range(160)]
     validation = [_transition(index, "validation") for index in range(24)]
-    train_file = tmp_path / "train.json"
-    validation_file = tmp_path / "validation.json"
-    train_file.write_text(json.dumps(train), encoding="utf-8")
-    validation_file.write_text(json.dumps(validation), encoding="utf-8")
+    config, config_file, train_file, validation_file, bundle_file, protocol_file = _write_training_contract(tmp_path, train, validation)
     checkpoint_file = tmp_path / "checkpoint.pth"
 
     with patch(
@@ -125,6 +225,8 @@ def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
             train_file=train_file,
             validation_file=validation_file,
             belief_config_file=config_file,
+            development_bundle_file=bundle_file,
+            calibration_protocol_file=protocol_file,
             output_file=checkpoint_file,
             total_epochs=1,
             batch_size=64,
@@ -140,18 +242,10 @@ def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
 
 
 def test_training_stops_after_validation_patience(tmp_path):
-    config = BeliefModelConfig()
-    config_file = tmp_path / "belief.json"
-    config.save(config_file)
-    train_file = tmp_path / "train.json"
-    validation_file = tmp_path / "validation.json"
-    train_file.write_text(
-        json.dumps([_transition(index, "train") for index in range(160)]),
-        encoding="utf-8",
-    )
-    validation_file.write_text(
-        json.dumps([_transition(index, "validation") for index in range(24)]),
-        encoding="utf-8",
+    config, config_file, train_file, validation_file, bundle_file, protocol_file = _write_training_contract(
+        tmp_path,
+        [_transition(index, "train") for index in range(160)],
+        [_transition(index, "validation") for index in range(24)],
     )
 
     with patch(
@@ -168,6 +262,8 @@ def test_training_stops_after_validation_patience(tmp_path):
             train_file=train_file,
             validation_file=validation_file,
             belief_config_file=config_file,
+            development_bundle_file=bundle_file,
+            calibration_protocol_file=protocol_file,
             output_file=tmp_path / "checkpoint.pth",
             total_epochs=20,
             batch_size=160,

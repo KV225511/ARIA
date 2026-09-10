@@ -633,6 +633,7 @@ def audit_belief_predictions(
         "abstention_rate": finite(detailed.get("abstention_rate")) and detailed["abstention_rate"] <= threshold["maximum_abstention_rate"],
         "expected_calibration_error": finite(detailed.get("expected_calibration_error")) and detailed["expected_calibration_error"] <= threshold["maximum_expected_calibration_error"],
         "identity_components": components >= threshold["minimum_identity_components"],
+        "all_true_classes_present": set(map(int, detailed.get("true_label_counts", {}))) == {0, 1, 2},
         "all_classes_predicted": len(detailed.get("decision_prediction_counts", {})) == 3,
     }
     warnings = [name for name, passed in gate_results.items() if not passed]

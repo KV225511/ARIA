@@ -473,7 +473,7 @@ if ($LASTEXITCODE -ne 0) {
 Get-FileHash -Algorithm SHA256 $Checkpoint
 ```
 
-Never use `--allow-belief-gate-failure` for a production checkpoint.
+The former belief-gate bypass has been removed; training fails closed.
 
 ## 16. Mandatory stopping point
 

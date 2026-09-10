@@ -322,8 +322,8 @@ python -m modules.module_07_rl.train `
 The trainer atomically retains the best validation checkpoint and stops after
 ten epochs without meaningful validation improvement.
 
-Do not use `--allow-belief-gate-failure` unless calibration genuinely fails and
-the resulting run is explicitly labelled experimental and uncalibrated.
+The former belief-gate bypass has been removed. A failed calibration protocol
+cannot be used for training; changes require a new protocol version.
 
 ## 13. Run the locked-test evaluation
 

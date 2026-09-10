@@ -235,6 +235,5 @@ interpreted as actions or returns produced by the trained IQL policy.
 
 Do not delete the combined raw corpus. Keep its audit and calibration failure
 report, inspect Low-class validation episodes, identity-component counts, and
-abstention thresholds, and only use `--allow-belief-gate-failure` for an
-explicitly experimental policy-training run. A bypassed run must not be reported
-as a calibrated benchmark result.
+abstention thresholds. The former gate-bypass option has been removed; further
+calibration changes require a new protocol version.
