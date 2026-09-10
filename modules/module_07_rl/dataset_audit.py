@@ -45,6 +45,17 @@ MIN_QUALITY_GATE_EPISODES = 200
 MAX_DETERMINISTIC_FALLBACK_RATE = 0.10
 MAX_CROSS_COMPONENT_FALLBACK_DUPLICATE_RATE = 0.25
 
+VALIDATION_GATE_VERSION = "aria-calibration-gate-v2"
+CALIBRATION_GATE_THRESHOLDS = {
+    "minimum_overall_accuracy": 0.60,
+    "minimum_macro_f1": 0.60,
+    "minimum_class_recall": 0.50,
+    "maximum_classified_prediction_share": 0.60,
+    "maximum_abstention_rate": 0.15,
+    "maximum_expected_calibration_error": 0.15,
+    "minimum_identity_components": 6,
+}
+
 
 def audit_generation_distribution(transitions: list[dict]) -> dict:
     """Measure policy and pair-plan targets without counting stop decisions as questions."""
@@ -590,73 +601,61 @@ def audit_belief_predictions(
     collapse_threshold=0.60,
     gate_name="belief_predictions",
 ):
+    from modules.module_07_rl.metrics import component_bootstrap_intervals, compute_classification_metrics
     terminal = _terminal_records(transitions)
     pairs = [
         (int(item["true_label"]), item.get("aria_label"), item)
         for item in terminal
         if item.get("true_label") in (0, 1, 2)
     ]
-    missing_predictions = sum(prediction not in (0, 1, 2) for _, prediction, _ in pairs)
-    classified = [(truth, int(prediction)) for truth, prediction, _ in pairs if prediction in (0, 1, 2)]
-    true_counts = Counter(truth for truth, _, _ in pairs)
-    predicted_counts = Counter(prediction for _, prediction in classified)
-    accuracy = (
-        float(np.mean([
-            prediction in (0, 1, 2) and int(prediction) == truth
-            for truth, prediction, _ in pairs
-        ]))
-        if pairs else None
-    )
-    per_class = {}
-    f1_values = []
-    recalls = []
-    for label in (0, 1, 2):
-        tp = sum(truth == label and pred == label for truth, pred in classified)
-        fp = sum(truth != label and pred == label for truth, pred in classified)
-        fn = sum(truth == label and pred != label for truth, pred in classified) + sum(
-            truth == label and prediction not in (0, 1, 2)
-            for truth, prediction, _ in pairs
-        )
-        precision = 0.0 if tp + fp == 0 else tp / (tp + fp)
-        recall = 0.0 if tp + fn == 0 else tp / (tp + fn)
-        f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
-        per_class[label] = {"precision": precision, "recall": recall, "f1": f1}
-        f1_values.append(f1)
-        recalls.append(recall)
-    max_share = max(predicted_counts.values(), default=0) / max(len(pairs), 1)
-    warnings = []
-    if max_share > collapse_threshold:
-        warnings.append("More than 60% of terminal predictions collapse to one class.")
-    if len(predicted_counts) < 3:
-        warnings.append("Terminal predictions do not contain all three classes.")
-    from modules.module_07_rl.metrics import (
-        component_bootstrap_intervals,
-        compute_response_metrics,
-    )
-
     beliefs = [item.get("aggregate_belief") for _, _, item in pairs]
-    detailed = compute_response_metrics(
-        [prediction for _, prediction, _ in pairs],
+    probability_input = beliefs
+    try:
+        probability_array = np.asarray(probability_input, dtype=float)
+        if probability_array.shape != (len(pairs), 3) or not np.all(np.isfinite(probability_array)):
+            probability_input = None
+    except (TypeError, ValueError):
+        probability_input = None
+    detailed = compute_classification_metrics(
         [truth for truth, _, _ in pairs],
-        beliefs=beliefs,
+        [prediction for _, prediction, _ in pairs],
+        probability_input,
     ) if pairs else {}
+    threshold = dict(CALIBRATION_GATE_THRESHOLDS)
+    threshold["maximum_classified_prediction_share"] = collapse_threshold
+    finite = lambda value: value is not None and math.isfinite(float(value))
+    components = len(connected_identity_components(transitions))
+    gate_results = {
+        "overall_accuracy": finite(detailed.get("overall_accuracy")) and detailed["overall_accuracy"] >= threshold["minimum_overall_accuracy"],
+        "macro_f1": finite(detailed.get("macro_f1")) and detailed["macro_f1"] >= threshold["minimum_macro_f1"],
+        "minimum_class_recall": finite(detailed.get("minimum_class_recall")) and detailed["minimum_class_recall"] >= threshold["minimum_class_recall"],
+        "prediction_collapse": finite(detailed.get("maximum_classified_prediction_share")) and detailed["maximum_classified_prediction_share"] <= threshold["maximum_classified_prediction_share"],
+        "abstention_rate": finite(detailed.get("abstention_rate")) and detailed["abstention_rate"] <= threshold["maximum_abstention_rate"],
+        "expected_calibration_error": finite(detailed.get("expected_calibration_error")) and detailed["expected_calibration_error"] <= threshold["maximum_expected_calibration_error"],
+        "identity_components": components >= threshold["minimum_identity_components"],
+        "all_classes_predicted": len(detailed.get("decision_prediction_counts", {})) == 3,
+    }
+    warnings = [name for name, passed in gate_results.items() if not passed]
     return {
         "gate": gate_name,
-        "terminal_micro_f1": accuracy,
-        "terminal_macro_f1": float(np.mean(f1_values)) if f1_values else None,
-        "terminal_balanced_accuracy": float(np.mean(recalls)) if recalls else None,
-        "terminal_true_label_counts": dict(true_counts),
-        "terminal_prediction_counts": dict(predicted_counts),
-        "missing_or_abstained_predictions": missing_predictions,
-        "per_class": per_class,
+        "gate_policy_version": VALIDATION_GATE_VERSION,
+        "gate_thresholds": threshold,
+        "gate_results": gate_results,
+        "terminal_micro_f1": detailed.get("overall_accuracy"),
+        "terminal_macro_f1": detailed.get("macro_f1"),
+        "terminal_balanced_accuracy": detailed.get("balanced_accuracy"),
+        "terminal_true_label_counts": detailed.get("true_label_counts", {}),
+        "terminal_prediction_counts": detailed.get("decision_prediction_counts", {}),
+        "missing_or_abstained_predictions": detailed.get("num_abstained", 0),
+        "per_class": detailed.get("per_class", {}),
         "ordinal_mae": detailed.get("ordinal_mae"),
         "confusion_matrix": detailed.get("confusion_matrix"),
         "expected_calibration_error": detailed.get("expected_calibration_error"),
         "brier_score": detailed.get("brier_score"),
         "component_bootstrap_intervals": component_bootstrap_intervals(transitions),
-        "max_prediction_share": max_share,
+        "max_prediction_share": detailed.get("maximum_classified_prediction_share"),
         "warnings": warnings,
-        "passes_quality_gates": not warnings,
+        "passes_quality_gates": bool(pairs) and all(gate_results.values()),
     }
 
 

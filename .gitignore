@@ -1,5 +1,6 @@
 .venv/
 .env
+
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -12,7 +13,22 @@ data/resumes/
 data/jds/
 
 models/
+
 *.wav
 *.mp4
 *.pkl
 *.safetensors
+
+node_modules/
+.tmp/
+
+.codex-finalizer-review2/
+.codex-finalizer-review2-expanded/
+.docx-work/
+
+vit-logo.jpg
+
+ARIA_BCSE497J_Project_I_Report.docx
+ARIA_BCSE497J_Project_I_Report_Humanized.docx
+
+output

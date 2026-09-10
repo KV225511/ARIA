@@ -408,6 +408,172 @@ def create_split_manifest(transitions: list[dict], seed=42):
     return manifest
 
 
+def migrate_split_manifest(transitions: list[dict], parent_manifest: dict, target_component_counts=(21, 6, 6), seed=42):
+    """Move whole train components to validation without touching locked test.
+
+    Selection uses only structural identity information and episode counts.
+    """
+    if parent_manifest.get("schema_version") != "aria-split-manifest-v3":
+        raise ValueError("split migration requires an aria-split-manifest-v3 parent")
+    unsigned_parent = dict(parent_manifest)
+    stored_parent_hash = unsigned_parent.pop("manifest_hash", None)
+    if not stored_parent_hash or stored_parent_hash != canonical_json_hash(unsigned_parent):
+        raise ValueError("parent split manifest hash is invalid")
+    raw_hash = canonical_json_hash(transitions)
+    if parent_manifest.get("raw_dataset_hash") != raw_hash:
+        raise ValueError("parent split manifest does not match raw transitions")
+    if tuple(target_component_counts) != (21, 6, 6):
+        raise ValueError("v4 migration supports only component targets (21, 6, 6)")
+    assignments = dict(parent_manifest.get("assignments", {}))
+    episodes = group_transitions_into_episodes(transitions)
+    known_ids = {str(episode[0].get("episode_id")) for episode in episodes if episode}
+    if set(assignments) != known_ids:
+        raise ValueError("parent split assignments do not exactly match raw episodes")
+    components = connected_identity_components(transitions)
+    by_split = {name: [] for name in SPLIT_NAMES}
+    for component in components:
+        episode_ids = sorted(str(episode[0].get("episode_id")) for episode in component if episode)
+        splits = {assignments[episode_id] for episode_id in episode_ids}
+        if len(splits) != 1:
+            raise ValueError("identity component crosses a parent split")
+        split_name = next(iter(splits))
+        if split_name not in by_split:
+            raise ValueError("parent manifest contains an unknown split")
+        by_split[split_name].append(component)
+    counts = tuple(len(by_split[name]) for name in SPLIT_NAMES)
+    if counts[2] != 6 or counts[1] > 6 or counts[0] < 21:
+        raise ValueError(f"unsupported parent component allocation: {counts}")
+    needed = 6 - counts[1]
+    if counts[0] - needed != 21:
+        raise ValueError(f"parent allocation cannot reach (21, 6, 6): {counts}")
+
+    validation_episode_count = sum(len(component) for component in by_split["validation"])
+    candidates = []
+    for component in by_split["train"]:
+        first_records = [episode[0] for episode in component if episode]
+        if not first_records or any(not item.get("resume_content_hash") or not item.get("jd_content_hash") for item in first_records):
+            continue
+        identity = {
+            "episode_ids": sorted(str(item.get("episode_id")) for item in first_records),
+            "resume_content_hashes": sorted(str(item["resume_content_hash"]) for item in first_records),
+            "jd_content_hashes": sorted(str(item["jd_content_hash"]) for item in first_records),
+            "seed": int(seed),
+        }
+        candidates.append((component, abs(validation_episode_count + len(component) - 90), canonical_json_hash(identity)))
+    candidates.sort(key=lambda item: (item[1], item[2]))
+    if len(candidates) < needed:
+        raise ValueError("not enough structurally eligible train components for migration")
+    moved = [item[0] for item in candidates[:needed]]
+    moved_ids = {str(episode[0].get("episode_id")) for component in moved for episode in component if episode}
+    for episode_id in moved_ids:
+        assignments[episode_id] = "validation"
+
+    split_items = {name: [] for name in SPLIT_NAMES}
+    for episode in episodes:
+        if episode:
+            split_items[assignments[str(episode[0].get("episode_id"))]].extend(episode)
+    summary = {}
+    for name, items in split_items.items():
+        summary[name] = {
+            "transitions": len(items),
+            "episodes": len(group_transitions_into_episodes(items)),
+            "identity_components": len(connected_identity_components(items)),
+            "resume_content_hashes": sorted({str(item["resume_content_hash"]) for item in items if item.get("resume_content_hash")}),
+            "jd_content_hashes": sorted({str(item["jd_content_hash"]) for item in items if item.get("jd_content_hash")}),
+        }
+    actual = tuple(summary[name]["identity_components"] for name in SPLIT_NAMES)
+    if actual != tuple(target_component_counts):
+        raise RuntimeError(f"migration produced unexpected component allocation: {actual}")
+    locked_payload = {
+        "episode_ids": sorted(key for key, value in assignments.items() if value == "test"),
+        "resume_content_hashes": summary["test"]["resume_content_hashes"],
+        "jd_content_hashes": summary["test"]["jd_content_hashes"],
+    }
+    locked_hash = canonical_json_hash(locked_payload)
+    if locked_hash != parent_manifest.get("locked_test_assignment_hash"):
+        raise RuntimeError("locked test assignment changed during migration")
+    manifest = {
+        "schema_version": "aria-split-manifest-v4",
+        "parent_manifest_hash": stored_parent_hash,
+        "raw_dataset_hash": raw_hash,
+        "seed": int(seed),
+        "migration_algorithm_version": "train-to-validation-component-rebalance-v1",
+        "requested_component_counts": list(target_component_counts),
+        "actual_component_counts": list(actual),
+        "assignments": assignments,
+        "summary": summary,
+        "locked_test_assignment_hash": locked_hash,
+        "locked_test_assignment_preserved": True,
+    }
+    manifest["manifest_hash"] = canonical_json_hash(manifest)
+    return manifest
+
+
+def freeze_development_splits(raw_file, parent_manifest_file, output_dir, seed=42):
+    """Create immutable train/validation inputs without replaying locked test."""
+    raw_path = Path(raw_file)
+    before_bytes = raw_path.read_bytes()
+    transitions = json.loads(before_bytes.decode("utf-8"))
+    parent = json.loads(Path(parent_manifest_file).read_text(encoding="utf-8"))
+    manifest = migrate_split_manifest(transitions, parent, seed=seed)
+    output = Path(output_dir)
+    assignments = manifest["assignments"]
+    for split_name in SPLIT_NAMES:
+        items = []
+        for episode in group_transitions_into_episodes(transitions):
+            if episode and assignments[str(episode[0].get("episode_id"))] == split_name:
+                items.extend(episode)
+        destination = output / "raw-splits" / ("locked" if split_name == "test" else "") / f"{split_name}.json"
+        _atomic_json_write(destination, items)
+    _atomic_json_write(output / "manifests" / "split_manifest_v4.json", manifest)
+    after_bytes = raw_path.read_bytes()
+    if after_bytes != before_bytes:
+        raise RuntimeError("raw dataset changed while freezing development splits")
+    return manifest
+
+
+def prepare_development_calibration(train_file, validation_file, manifest_file, output_dir, bootstrap_samples=100):
+    """Fit/replay development data only; this function has no test-data input."""
+    from modules.module_07_rl.belief_calibration import calibrate_belief_model
+    manifest = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != "aria-split-manifest-v4":
+        raise ValueError("development calibration requires split_manifest_v4")
+    training = json.loads(Path(train_file).read_text(encoding="utf-8"))
+    validation = json.loads(Path(validation_file).read_text(encoding="utf-8"))
+    if any(item.get("dataset_split") == "test" for item in training + validation):
+        raise ValueError("development calibration input contains locked test data")
+    raw_hash = manifest["raw_dataset_hash"]
+    calibration = calibrate_belief_model(
+        training, validation, raw_dataset_hash=raw_hash,
+        split_manifest_hash=manifest["manifest_hash"], bootstrap_samples=bootstrap_samples,
+        select_on_validation=False,
+    )
+    config = calibration["config"]
+    replayed = {}
+    for split_name, transitions in (("train", training), ("validation", validation)):
+        rows = []
+        for episode in group_transitions_into_episodes(transitions):
+            rows.extend(replay_one_episode(episode, config, raw_hash, manifest["manifest_hash"]))
+        for row in rows:
+            row["dataset_split"] = split_name
+        replayed[split_name] = rows
+    output = Path(output_dir)
+    config.save(output / "calibration" / "belief_model_v2.json")
+    for split_name, rows in replayed.items():
+        _atomic_json_write(output / "replayed" / f"{split_name}.json", rows)
+    report = {
+        "schema_version": "aria-development-calibration-v1",
+        "raw_dataset_hash": raw_hash,
+        "split_manifest_hash": manifest["manifest_hash"],
+        "belief_config_hash": config.config_hash,
+        "validation_used_for_selection": False,
+        "test_metrics_locked": True,
+        "calibration": {key: value.to_dict() if isinstance(value, BeliefModelConfig) else value for key, value in calibration.items()},
+    }
+    _atomic_json_write(output / "calibration" / "development_calibration_report_v1.json", report)
+    return report
+
+
 def _classification_summary(pairs):
     valid = [(true, pred) for true, pred in pairs if true is not None]
     if not valid:

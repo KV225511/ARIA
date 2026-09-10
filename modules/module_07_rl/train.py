@@ -254,7 +254,6 @@ def train_iql_policy(
     expectile=0.8,
     beta=3.0,
     seed=42,
-    enforce_belief_quality_gate=True,
     early_stopping_patience=10,
     early_stopping_min_delta=1e-4,
 ):
@@ -284,7 +283,7 @@ def train_iql_policy(
         raise RuntimeError("Raw evidence gate failed; training is not permitted")
     if not offline_gate["passes_quality_gates"]:
         raise RuntimeError("Offline-RL support gate failed; training is not permitted")
-    if enforce_belief_quality_gate and not belief_gate["passes_quality_gates"]:
+    if not belief_gate["passes_quality_gates"]:
         raise RuntimeError("Validation belief gate failed; freeze calibration before training")
 
     training = [dict(item) for item in training_source]
@@ -465,11 +464,6 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--early-stopping-patience", type=int, default=10)
     parser.add_argument("--early-stopping-min-delta", type=float, default=1e-4)
-    parser.add_argument(
-        "--allow-belief-gate-failure",
-        action="store_true",
-        help="Experimental only; raw-evidence and offline-RL gates remain enforced.",
-    )
     args = parser.parse_args()
     try:
         train_iql_policy(
@@ -482,7 +476,6 @@ if __name__ == "__main__":
             seed=args.seed,
             early_stopping_patience=args.early_stopping_patience,
             early_stopping_min_delta=args.early_stopping_min_delta,
-            enforce_belief_quality_gate=not args.allow_belief_gate_failure,
         )
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"[ERROR] {error}\n")

@@ -24,6 +24,90 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+METRICS_SCHEMA_VERSION = "aria-classification-metrics-v2"
+CLASS_LABELS = (0, 1, 2)
+
+
+def compute_classification_metrics(true_labels, decision_predictions, class_probabilities=None, bins=10):
+    """Canonical abstention-aware classification metrics for ARIA."""
+    if len(true_labels) != len(decision_predictions):
+        raise ValueError("true_labels and decision_predictions must have equal length")
+    if not true_labels:
+        return {}
+    if any(label not in CLASS_LABELS for label in true_labels):
+        raise ValueError("true_labels must contain only 0, 1, or 2")
+    predictions = []
+    for prediction in decision_predictions:
+        if prediction in CLASS_LABELS:
+            predictions.append(int(prediction))
+        elif prediction is None or prediction == -1:
+            predictions.append(-1)
+        else:
+            raise ValueError("prediction must be 0, 1, 2, None, or -1")
+    total = len(true_labels)
+    classified = [(truth, prediction) for truth, prediction in zip(true_labels, predictions) if prediction != -1]
+    counts = Counter(prediction for _, prediction in classified)
+    confusion = [[0, 0, 0, 0] for _ in CLASS_LABELS]
+    for truth, prediction in zip(true_labels, predictions):
+        confusion[int(truth)][3 if prediction == -1 else prediction] += 1
+    per_class, f1s, recalls = {}, [], []
+    for label in CLASS_LABELS:
+        tp = confusion[label][label]
+        fp = sum(confusion[truth][label] for truth in CLASS_LABELS if truth != label)
+        fn = sum(confusion[label][column] for column in range(4) if column != label)
+        precision = 0.0 if tp + fp == 0 else tp / (tp + fp)
+        recall = 0.0 if tp + fn == 0 else tp / (tp + fn)
+        f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+        per_class[label] = {"precision": precision, "recall": recall, "f1": f1}
+        f1s.append(f1)
+        recalls.append(recall)
+    num_classified = len(classified)
+    correct = sum(truth == prediction for truth, prediction in classified)
+    result = {
+        "metrics_schema_version": METRICS_SCHEMA_VERSION,
+        "num_examples": total,
+        "num_classified": num_classified,
+        "num_abstained": total - num_classified,
+        "coverage": num_classified / total,
+        "abstention_rate": (total - num_classified) / total,
+        "overall_accuracy": correct / total,
+        "selective_accuracy": correct / num_classified if num_classified else 0.0,
+        "selective_risk": 1.0 - (correct / num_classified if num_classified else 0.0),
+        "macro_f1": float(np.mean(f1s)),
+        "balanced_accuracy": float(np.mean(recalls)),
+        "minimum_class_recall": float(min(recalls)),
+        "maximum_classified_prediction_share": max(counts.values()) / num_classified if num_classified else 1.0,
+        "ordinal_mae": float(np.mean([2.0 if p == -1 else abs(int(t) - p) for t, p in zip(true_labels, predictions)])),
+        "true_label_counts": dict(Counter(true_labels)),
+        "decision_prediction_counts": dict(counts),
+        "per_class": per_class,
+        "confusion_matrix": confusion,
+        "accuracy": correct / total,
+        "micro_f1": correct / total,
+        "terminal_micro_f1": correct / total,
+    }
+    if class_probabilities is None:
+        return {**result, "brier_score": None, "expected_calibration_error": None, "argmax_prediction_counts": {}}
+    probabilities = np.asarray(class_probabilities, dtype=float)
+    if probabilities.shape != (total, 3) or not np.all(np.isfinite(probabilities)):
+        raise ValueError("class_probabilities must be finite with shape (N, 3)")
+    if np.any(probabilities < 0) or not np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-6):
+        raise ValueError("class_probabilities must be non-negative and sum to one")
+    argmax = probabilities.argmax(axis=1)
+    confidence = probabilities.max(axis=1)
+    argmax_correct = (argmax == np.asarray(true_labels, dtype=int)).astype(float)
+    ece, edges = 0.0, np.linspace(0.0, 1.0, bins + 1)
+    for index in range(bins):
+        mask = (confidence >= edges[index]) & (confidence <= edges[index + 1] if index == bins - 1 else confidence < edges[index + 1])
+        if np.any(mask):
+            ece += float(np.mean(mask)) * abs(float(confidence[mask].mean()) - float(argmax_correct[mask].mean()))
+    one_hot = np.eye(3)[np.asarray(true_labels, dtype=int)]
+    return {**result,
+        "brier_score": float(np.mean(np.sum((probabilities - one_hot) ** 2, axis=1))),
+        "expected_calibration_error": float(ece),
+        "argmax_prediction_counts": dict(Counter(int(value) for value in argmax)),
+    }
+
 def compute_rl_metrics(episodes_data):
     """Describe fixed logged trajectories; do not imply policy evaluation."""
     if not episodes_data:
@@ -63,9 +147,21 @@ def compute_response_metrics(
     jd_text="",
     beliefs=None,
 ):
-    """Compute Accuracy, F1, Kappa, Confusion Matrix, and optional ROUGE-L."""
+    """Compatibility wrapper around the canonical classification contract."""
     if not aria_labels or not true_labels:
         return {}
+    probabilities = beliefs
+    if probabilities is not None:
+        try:
+            array = np.asarray(probabilities, dtype=float)
+            if array.shape != (len(true_labels), 3) or not np.all(np.isfinite(array)):
+                probabilities = None
+        except (TypeError, ValueError):
+            probabilities = None
+    result = compute_classification_metrics(true_labels, aria_labels, probabilities)
+    result["aria_label_counts"] = dict(Counter(aria_labels))
+    result["rouge_L"] = 0.0
+    return result
         
     # Assuming labels are categorical (0: beginner, 1: mid, 2: expert)
     normalized_predictions = [label if label in (0, 1, 2) else -1 for label in aria_labels]
@@ -239,7 +335,7 @@ def component_bootstrap_intervals(dataset, samples=200, seed=42):
                 pairs.append((episode[-1]["true_label"], episode[-1].get("aria_label")))
         component_pairs.append(pairs)
     rng = np.random.default_rng(seed)
-    micro_values, macro_values = [], []
+    micro_values, macro_values, balanced_values, abstention_values = [], [], [], []
     for _ in range(samples):
         pairs = []
         for index in rng.integers(0, len(component_pairs), size=len(component_pairs)):
@@ -250,8 +346,10 @@ def component_bootstrap_intervals(dataset, samples=200, seed=42):
             [prediction for _, prediction in pairs],
             [truth for truth, _ in pairs],
         )
-        micro_values.append(metrics["micro_f1"])
+        micro_values.append(metrics["overall_accuracy"])
         macro_values.append(metrics["macro_f1"])
+        balanced_values.append(metrics["balanced_accuracy"])
+        abstention_values.append(metrics["abstention_rate"])
     if not micro_values:
         return {"available": False, "reason": "no_terminal_pairs"}
     return {
@@ -260,6 +358,8 @@ def component_bootstrap_intervals(dataset, samples=200, seed=42):
         "samples": len(micro_values),
         "micro_f1_95_ci": np.percentile(micro_values, [2.5, 97.5]).tolist(),
         "macro_f1_95_ci": np.percentile(macro_values, [2.5, 97.5]).tolist(),
+        "balanced_accuracy_95_ci": np.percentile(balanced_values, [2.5, 97.5]).tolist(),
+        "abstention_rate_95_ci": np.percentile(abstention_values, [2.5, 97.5]).tolist(),
     }
 
 

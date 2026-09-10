@@ -121,3 +121,33 @@ def test_stable_state_feature_names_match_vector_positions():
     assert second["semantic_available"] == 1.0
     assert abs(second["previous_semantic_score"] - 0.1) < 1e-6
     assert "action_mask" not in STATE_FEATURE_NAMES
+def test_split_migration_moves_one_component_without_changing_locked_test():
+    from modules.module_07_rl.replay_dataset import canonical_json_hash, migrate_split_manifest
+    transitions = []
+    assignments = {}
+    for index in range(33):
+        episode_id = f"episode-{index}"
+        split = "train" if index < 22 else "validation" if index < 27 else "test"
+        assignments[episode_id] = split
+        transitions.append({
+            "episode_id": episode_id,
+            "resume_content_hash": f"resume-{index}",
+            "jd_content_hash": f"jd-{index}",
+            "done": True,
+        })
+    test_ids = sorted(key for key, value in assignments.items() if value == "test")
+    parent = {
+        "schema_version": "aria-split-manifest-v3",
+        "raw_dataset_hash": canonical_json_hash(transitions),
+        "assignments": assignments,
+        "locked_test_assignment_hash": canonical_json_hash({
+            "episode_ids": test_ids,
+            "resume_content_hashes": [f"resume-{index}" for index in range(27, 33)],
+            "jd_content_hashes": [f"jd-{index}" for index in range(27, 33)],
+        }),
+    }
+    parent["manifest_hash"] = canonical_json_hash(parent)
+    migrated = migrate_split_manifest(transitions, parent)
+    assert migrated["actual_component_counts"] == [21, 6, 6]
+    assert migrated["locked_test_assignment_hash"] == parent["locked_test_assignment_hash"]
+    assert all(migrated["assignments"][episode_id] == "test" for episode_id in test_ids)

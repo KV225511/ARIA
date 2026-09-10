@@ -5,19 +5,34 @@ from __future__ import annotations
 import argparse
 import json
 
-from modules.module_07_rl.replay_dataset import prepare_calibrate_replay
+from modules.module_07_rl.replay_dataset import (
+    freeze_development_splits,
+    prepare_development_calibration,
+)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("raw_file")
     parser.add_argument("output_dir")
+    parser.add_argument("--raw-file")
+    parser.add_argument("--base-split-manifest")
+    parser.add_argument("--development-train")
+    parser.add_argument("--development-validation")
+    parser.add_argument("--split-manifest")
     parser.add_argument("--split-seed", type=int, default=42)
     parser.add_argument("--bootstrap-samples", type=int, default=100)
     args = parser.parse_args()
-    print(json.dumps(prepare_calibrate_replay(
-        args.raw_file,
-        args.output_dir,
-        split_seed=args.split_seed,
-        bootstrap_samples=args.bootstrap_samples,
-    ), indent=2))
+    if args.development_train or args.development_validation or args.split_manifest:
+        if not (args.development_train and args.development_validation and args.split_manifest):
+            parser.error("development calibration requires --development-train, --development-validation, and --split-manifest")
+        result = prepare_development_calibration(
+            args.development_train, args.development_validation, args.split_manifest,
+            args.output_dir, bootstrap_samples=args.bootstrap_samples,
+        )
+    else:
+        if not args.raw_file or not args.base_split_manifest:
+            parser.error("split freeze requires --raw-file and --base-split-manifest")
+        result = freeze_development_splits(
+            args.raw_file, args.base_split_manifest, args.output_dir, seed=args.split_seed,
+        )
+    print(json.dumps(result, indent=2))

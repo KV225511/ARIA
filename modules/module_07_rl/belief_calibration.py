@@ -180,6 +180,8 @@ def _expected_calibration_error(confidences, correct, bins=10):
 
 
 def evaluate_config(transitions: list[dict], config: BeliefModelConfig):
+    """Evaluate a config through the shared abstention-aware metric contract."""
+    from modules.module_07_rl.metrics import compute_classification_metrics
     true_labels = []
     predicted_labels = []
     confidences = []
@@ -207,42 +209,20 @@ def evaluate_config(transitions: list[dict], config: BeliefModelConfig):
             "macro_f1": None,
             "skipped_episodes": skipped,
         }
-    correct = [pred == true for pred, true in zip(predicted_labels, true_labels)]
-    micro = float(np.mean(correct))
-    per_class_f1 = []
-    per_class_recall = {}
-    for label in (0, 1, 2):
-        tp = sum(pred == label and true == label for pred, true in zip(predicted_labels, true_labels))
-        fp = sum(pred == label and true != label for pred, true in zip(predicted_labels, true_labels))
-        fn = sum(pred != label and true == label for pred, true in zip(predicted_labels, true_labels))
-        denominator = 2 * tp + fp + fn
-        per_class_f1.append(0.0 if denominator == 0 else 2 * tp / denominator)
-        per_class_recall[label] = 0.0 if tp + fn == 0 else tp / (tp + fn)
-    ordinal_errors = [
-        2 if pred is None else abs(int(pred) - true)
-        for pred, true in zip(predicted_labels, true_labels)
-    ]
-    one_hot = np.eye(3)[np.asarray(true_labels, dtype=int)]
-    brier = float(np.mean(np.sum((np.asarray(beliefs) - one_hot) ** 2, axis=1)))
-    classified_predictions = [pred for pred in predicted_labels if pred is not None]
-    prediction_counts = Counter(classified_predictions)
-    max_share = max(prediction_counts.values(), default=0) / len(true_labels)
-    return {
+    metrics = compute_classification_metrics(true_labels, predicted_labels, beliefs)
+    metrics.update({
         "num_episodes": len(true_labels),
-        "micro_f1": micro,
-        "macro_f1": float(np.mean(per_class_f1)),
-        "ordinal_mae": float(np.mean(ordinal_errors)),
-        "expected_calibration_error": _expected_calibration_error(confidences, correct),
-        "brier_score": brier,
         "mean_confidence": float(np.mean(confidences)),
-        "abstention_rate": abstained / len(true_labels),
         "skipped_episodes": skipped,
-        "true_label_counts": dict(Counter(true_labels)),
-        "prediction_counts": dict(prediction_counts),
-        "per_class_recall": per_class_recall,
-        "max_prediction_share": max_share,
-        "passes_collapse_gate": max_share <= 0.60 and len(prediction_counts) == 3,
-    }
+        "prediction_counts": metrics["decision_prediction_counts"],
+        "per_class_recall": {label: item["recall"] for label, item in metrics["per_class"].items()},
+        "max_prediction_share": metrics["maximum_classified_prediction_share"],
+        "passes_collapse_gate": (
+            metrics["maximum_classified_prediction_share"] <= 0.60
+            and len(metrics["decision_prediction_counts"]) == 3
+        ),
+    })
+    return metrics
 
 
 def tune_validation_config(
@@ -340,13 +320,24 @@ def calibrate_belief_model(
     raw_dataset_hash="",
     split_manifest_hash="",
     bootstrap_samples=100,
+    select_on_validation=False,
 ):
     fitted = fit_emission_config(
         training_transitions,
         raw_dataset_hash=raw_dataset_hash,
         split_manifest_hash=split_manifest_hash,
     )
-    selected, candidates = tune_validation_config(fitted, validation_transitions)
+    if select_on_validation:
+        # Legacy-only compatibility path. Production preparation must select
+        # through training-only grouped CV before this function is called.
+        selected, candidates = tune_validation_config(fitted, validation_transitions)
+    else:
+        selected, candidates = fitted, [{
+            "config": fitted,
+            "config_hash": fitted.config_hash,
+            "metrics": None,
+            "selection": "training_fit_only",
+        }]
     stability = bootstrap_emission_stability(
         training_transitions, samples=bootstrap_samples
     )
@@ -360,6 +351,7 @@ def calibrate_belief_model(
         "validation_metrics": evaluate_config(validation_transitions, selected),
         "bootstrap_stability": stability,
         "num_candidates": len(candidates),
+        "validation_used_for_selection": bool(select_on_validation),
     }
 
 

@@ -1,4 +1,26 @@
-from modules.module_07_rl.metrics import build_belief_report
+from modules.module_07_rl.metrics import build_belief_report, compute_classification_metrics
+
+
+def test_canonical_metrics_use_classified_denominator_and_abstention_column():
+    truths = [0] * 15 + [1] * 35 + [2] * 23 + [0] * 12 + [2] * 2
+    predictions = [0] * 3 + [1] * 12 + [1] * 35 + [1] * 4 + [2] * 19 + [None] * 14
+    metrics = compute_classification_metrics(truths, predictions)
+    assert metrics["num_examples"] == 87
+    assert metrics["num_classified"] == 73
+    assert metrics["num_abstained"] == 14
+    assert metrics["maximum_classified_prediction_share"] == 51 / 73
+    assert metrics["micro_f1"] == metrics["overall_accuracy"]
+    assert [sum(row) for row in metrics["confusion_matrix"]] == [27, 35, 25]
+    assert metrics["confusion_matrix"][0][3] == 12
+    assert metrics["confusion_matrix"][2][3] == 2
+
+
+def test_ece_is_independent_of_decision_abstention():
+    metrics = compute_classification_metrics(
+        [0, 1], [None, 1], [[0.9, 0.05, 0.05], [0.1, 0.8, 0.1]]
+    )
+    assert metrics["expected_calibration_error"] < 0.2
+    assert metrics["abstention_rate"] == 0.5
 
 
 def test_belief_report_is_not_labeled_as_policy_evaluation():
