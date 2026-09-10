@@ -114,15 +114,22 @@ def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
     validation_file.write_text(json.dumps(validation), encoding="utf-8")
     checkpoint_file = tmp_path / "checkpoint.pth"
 
-    result = train_iql_policy(
-        train_file=train_file,
-        validation_file=validation_file,
-        belief_config_file=config_file,
-        output_file=checkpoint_file,
-        total_epochs=1,
-        batch_size=64,
-        seed=7,
-    )
+    with patch(
+        "modules.module_07_rl.train.audit_raw_evidence",
+        return_value={"passes_quality_gates": True},
+    ), patch(
+        "modules.module_07_rl.train.audit_calibration_validation",
+        return_value={"passes_quality_gates": True},
+    ):
+        result = train_iql_policy(
+            train_file=train_file,
+            validation_file=validation_file,
+            belief_config_file=config_file,
+            output_file=checkpoint_file,
+            total_epochs=1,
+            batch_size=64,
+            seed=7,
+        )
     checkpoint = torch.load(checkpoint_file, map_location="cpu", weights_only=False)
     assert checkpoint["checkpoint_schema_version"] == CHECKPOINT_SCHEMA_VERSION
     assert checkpoint["state_schema_version"] == STATE_SCHEMA_VERSION
@@ -150,6 +157,12 @@ def test_training_stops_after_validation_patience(tmp_path):
     with patch(
         "modules.module_07_rl.train._validation_objective",
         return_value=3.0,
+    ), patch(
+        "modules.module_07_rl.train.audit_raw_evidence",
+        return_value={"passes_quality_gates": True},
+    ), patch(
+        "modules.module_07_rl.train.audit_calibration_validation",
+        return_value={"passes_quality_gates": True},
     ):
         result = train_iql_policy(
             train_file=train_file,

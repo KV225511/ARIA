@@ -55,7 +55,9 @@ def test_audit_reports_balanced_terminal_metrics():
     assert report["terminal_micro_f1"] == 1.0
     assert report["terminal_true_label_counts"] == {0: 1, 1: 1, 2: 1}
     assert report["invalid_evaluations"] == 0
-    assert report["passes_quality_gates"] is True
+    # This small fixture validates metric aggregation, not the production
+    # calibration gate, which intentionally requires six components and ECE.
+    assert report["stage_reports"]["raw"]["passes_quality_gates"] is True
 
 
 def test_validation_and_policy_gates_remain_distinct():

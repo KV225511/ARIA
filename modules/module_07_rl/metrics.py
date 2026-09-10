@@ -159,6 +159,8 @@ def compute_response_metrics(
         except (TypeError, ValueError):
             probabilities = None
     result = compute_classification_metrics(true_labels, aria_labels, probabilities)
+    # Backward-compatible name used by existing reports and callers.
+    result["abstention_count"] = result["num_abstained"]
     result["aria_label_counts"] = dict(Counter(aria_labels))
     result["rouge_L"] = 0.0
     return result
