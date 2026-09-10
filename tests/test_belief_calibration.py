@@ -14,6 +14,7 @@ from modules.module_07_rl.belief_calibration import (
     build_grouped_cv_folds,
     paired_component_bootstrap,
     select_training_only_calibration,
+    select_training_only_calibration_v5,
 )
 
 
@@ -187,6 +188,44 @@ def test_sequential_search_only_runs_needed_stages(monkeypatch, passing_stage, e
     assert report["candidate_count"] <= 45
     assert [item["stage"] for item in report["stages"]] == expected_stages
     assert report["validation_used_for_selection"] is False
+
+
+@pytest.mark.parametrize(
+    ("passing_call", "expected_count", "expected_status"),
+    [(1, 1, "ELIGIBLE"), (3, 4, "ELIGIBLE"), (None, 4, "FAILED")],
+)
+def test_v5_search_is_additive_narrow_and_deterministic(
+    monkeypatch, passing_call, expected_count, expected_status,
+):
+    calls = []
+
+    def fake(_training, parameters, _folds):
+        calls.append(dict(parameters))
+        return _fake_candidate(parameters, len(calls) == passing_call)
+
+    monkeypatch.setattr(
+        "modules.module_07_rl.belief_calibration.evaluate_candidate_cross_validated",
+        fake,
+    )
+    report = select_training_only_calibration_v5(
+        _grouped_training(), "raw", "split", "protocol",
+    )
+    assert report["candidate_count"] == expected_count
+    assert report["candidate_count"] <= 4
+    assert report["selection_status"] == expected_status
+    assert calls[0] == {
+        "scale_shrinkage": 1.0,
+        "aggregation_temperature": 2.0,
+        "minimum_assessment_confidence": 0.45,
+        "repeat_discount_power": 0.25,
+        "max_skill_effective_sample_size": 3,
+    }
+    if expected_count == 4:
+        assert [item["repeat_discount_power"] for item in calls[1:]] == [0.0, 0.1, 0.2]
+        assert all(item["rejection_reasons"] for item in report["attempted_candidates"] if not item["eligible"])
+    assert report["validation_used_for_selection"] is False
+    parameters = set(inspect.signature(select_training_only_calibration_v5).parameters)
+    assert not {"validation_transitions", "test_transitions"} & parameters
 
 
 def test_paired_component_bootstrap_is_deterministic_and_paired():

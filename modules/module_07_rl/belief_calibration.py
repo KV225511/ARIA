@@ -673,6 +673,110 @@ def select_training_only_calibration(
     return report
 
 
+def select_training_only_calibration_v5(
+    training_transitions: list[dict],
+    raw_dataset_hash: str,
+    split_manifest_hash: str,
+    protocol_hash: str,
+):
+    """Run the narrow v5 search without repeating or changing protocol v4."""
+    from modules.module_07_rl.calibration_protocol_v5 import (
+        CALIBRATION_ALGORITHM_VERSION as V5_ALGORITHM_VERSION,
+        CALIBRATION_CV_REPORT_VERSION as V5_REPORT_VERSION,
+        MAX_CALIBRATION_CANDIDATES as V5_CANDIDATE_LIMIT,
+    )
+
+    fold_report = build_grouped_cv_folds(training_transitions, folds=3, seed=42)
+    attempted: list[dict] = []
+    stages = []
+
+    def run_stage(name: str, parameter_sets: list[dict]):
+        results = []
+        for parameters in parameter_sets:
+            if len(attempted) >= V5_CANDIDATE_LIMIT:
+                raise AssertionError("calibration v5 candidate limit exceeded")
+            result = evaluate_candidate_cross_validated(
+                training_transitions, parameters, fold_report,
+            )
+            result["candidate_index"] = len(attempted) + 1
+            result["stage"] = name
+            attempted.append(result)
+            results.append(result)
+        eligible = [item for item in results if item["eligible"]]
+        stages.append({
+            "stage": name,
+            "candidate_count": len(results),
+            "eligible_count": len(eligible),
+        })
+        return min(eligible, key=_rank_key) if eligible else None
+
+    anchor = {
+        "scale_shrinkage": 1.00,
+        "aggregation_temperature": 2.00,
+        "minimum_assessment_confidence": 0.45,
+        "repeat_discount_power": 0.25,
+        "max_skill_effective_sample_size": 3,
+    }
+    selected = run_stage("A_V4_ANCHOR", [anchor])
+    if selected is None:
+        selected = run_stage("B_LOWER_REPEAT_DISCOUNT", [
+            {**anchor, "repeat_discount_power": power}
+            for power in (0.00, 0.10, 0.20)
+        ])
+    assert len(attempted) <= V5_CANDIDATE_LIMIT
+    best_failing = None if selected else _best_failing(attempted)
+    report = {
+        "schema_version": V5_REPORT_VERSION,
+        "producer_version": V5_ALGORITHM_VERSION,
+        "supported_consumer_versions": [V5_REPORT_VERSION],
+        "protocol_hash": protocol_hash,
+        "raw_dataset_hash": raw_dataset_hash,
+        "split_manifest_hash": split_manifest_hash,
+        "cross_validation": fold_report,
+        "stages": stages,
+        "attempted_candidates": attempted,
+        "candidate_count": len(attempted),
+        "candidate_limit": V5_CANDIDATE_LIMIT,
+        "selection_status": "ELIGIBLE" if selected else "FAILED",
+        "selected_candidate": selected,
+        "best_failing_candidate": best_failing,
+        "validation_used_for_selection": False,
+        "v5_change_scope": "lower-repeat-discount-only",
+    }
+    report["selection_decision_hash"] = _canonical_hash(report)
+    if selected:
+        parameters = selected["parameters"]
+        base = BeliefModelConfig(
+            repeat_discount_power=parameters["repeat_discount_power"],
+            max_skill_effective_sample_size=parameters["max_skill_effective_sample_size"],
+            aggregation_temperature=parameters["aggregation_temperature"],
+            minimum_assessment_confidence=parameters["minimum_assessment_confidence"],
+        )
+        config = fit_emission_config(
+            training_transitions,
+            base_config=base,
+            raw_dataset_hash=raw_dataset_hash,
+            split_manifest_hash=split_manifest_hash,
+        )
+        config = apply_scale_shrinkage(config, parameters["scale_shrinkage"])
+        metadata = dict(config.fit_metadata)
+        metadata.update({
+            "calibration_algorithm_version": V5_ALGORITHM_VERSION,
+            "protocol_hash_at_selection": protocol_hash,
+            "selection_decision_hash": report["selection_decision_hash"],
+            "selected_parameters": parameters,
+            "v5_change_scope": "lower-repeat-discount-only",
+        })
+        config = config.with_updates(fit_metadata=metadata)
+        report["config"] = config
+        report["belief_config_hash"] = config.config_hash
+    hashable = dict(report)
+    if isinstance(hashable.get("config"), BeliefModelConfig):
+        hashable["config"] = hashable["config"].to_dict()
+    report["report_hash"] = _canonical_hash(hashable)
+    return report
+
+
 def _metrics_from_vectors(truth, predictions, probabilities):
     from modules.module_07_rl.metrics import compute_classification_metrics
     return compute_classification_metrics(truth, predictions, probabilities)

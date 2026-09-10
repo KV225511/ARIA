@@ -230,3 +230,90 @@ def test_fixture_end_to_end_development_never_replays_locked_test(tmp_path):
             output,
             bootstrap_samples=10,
         )
+
+
+def test_v5_fixture_end_to_end_is_additive_and_test_locked(tmp_path):
+    from modules.module_07_rl.prepare_belief_pipeline_v5 import (
+        freeze_development_splits_v5,
+        prepare_development_calibration_v5,
+    )
+    from modules.module_07_rl.replay_dataset import canonical_json_hash
+
+    transitions = []
+    assignments = {}
+    for index in range(33):
+        rows = _raw_episode(index, index % 3, (0.1, 0.5, 0.9)[index % 3])
+        terminal = dict(rows[-1])
+        rows[-1]["done"] = False
+        terminal.update({
+            "done": True,
+            "question": "Question 2",
+            "question_prompt_hash": f"prompt-hash-{index}-2",
+            "question_generation_seed": index * 100 + 2,
+        })
+        rows.append(terminal)
+        for turn, row in enumerate(rows):
+            row.update({
+                "target_skill": f"Skill-{turn}",
+                "target_skill_id": f"skill-{turn}",
+                "resume_content_hash": f"resume-content-{index}",
+                "jd_content_hash": f"jd-content-{index}",
+            })
+        transitions.extend(rows)
+        assignments[f"episode-{index}"] = (
+            "train" if index < 22 else "validation" if index < 27 else "test"
+        )
+    parent = {
+        "schema_version": "aria-split-manifest-v3",
+        "raw_dataset_hash": canonical_json_hash(transitions),
+        "assignments": assignments,
+        "locked_test_assignment_hash": canonical_json_hash({
+            "episode_ids": [f"episode-{index}" for index in range(27, 33)],
+            "resume_content_hashes": [f"resume-content-{index}" for index in range(27, 33)],
+            "jd_content_hashes": [f"jd-content-{index}" for index in range(27, 33)],
+        }),
+    }
+    parent["manifest_hash"] = canonical_json_hash(parent)
+    raw_file = tmp_path / "qwen_rl_dataset.json"
+    parent_file = tmp_path / "split_manifest_v3.json"
+    lock_file = tmp_path / "requirements.lock"
+    raw_file.write_text(json.dumps(transitions, indent=2), encoding="utf-8")
+    parent_file.write_text(json.dumps(parent), encoding="utf-8")
+    lock_file.write_text("numpy==fixture\n", encoding="utf-8")
+    before = raw_file.read_bytes()
+    output = tmp_path / "derived-calibration-v5"
+    frozen = freeze_development_splits_v5(
+        raw_file,
+        parent_file,
+        output,
+        dependency_lock_path=lock_file,
+        expected_counts=(33, 99, 33),
+    )
+    report = prepare_development_calibration_v5(
+        output / "raw-splits" / "train.json",
+        output / "raw-splits" / "validation.json",
+        output / "manifests" / "split_manifest_v4.json",
+        output / "protocol" / "calibration_protocol_v5.json",
+        output,
+        bootstrap_samples=10,
+    )
+    protocol = json.loads(
+        (output / "protocol" / "calibration_protocol_v5.json").read_text()
+    )
+    assert report["validation_used_for_selection"] is False
+    assert report["calibration"]["candidate_count"] <= 4
+    assert protocol["validation_executions"] == 1
+    assert protocol["protocol_status"] == "PROVISIONAL_SYNTHETIC"
+    assert frozen["locked_test_assignment_hash"] == parent["locked_test_assignment_hash"]
+    assert raw_file.read_bytes() == before
+    assert not (output / "replayed" / "test.json").exists()
+    assert not (output / "release" / "locked_test_evaluation_v1.json").exists()
+    with pytest.raises(ValueError, match="not frozen for a first"):
+        prepare_development_calibration_v5(
+            output / "raw-splits" / "train.json",
+            output / "raw-splits" / "validation.json",
+            output / "manifests" / "split_manifest_v4.json",
+            output / "protocol" / "calibration_protocol_v5.json",
+            output,
+            bootstrap_samples=10,
+        )

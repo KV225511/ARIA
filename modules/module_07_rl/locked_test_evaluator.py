@@ -1,4 +1,4 @@
-"""One-attempt locked-test release evaluator for calibration protocol v4.
+"""One-attempt locked-test release evaluator for calibration protocols v4/v5.
 
 The attempt file is an application-level guard. A user who can delete or edit
 local artifacts can bypass it; it is not cryptographic enforcement.
@@ -19,11 +19,18 @@ from modules.module_07_rl.belief_calibration import (
     _metrics_from_vectors,
 )
 from modules.module_07_rl.calibration_protocol import (
+    CALIBRATION_PROTOCOL_VERSION,
     atomic_json_write,
     canonical_json_hash,
     file_sha256,
     update_protocol_status,
     validate_calibration_protocol,
+)
+from modules.module_07_rl.calibration_protocol_v5 import (
+    CALIBRATION_ALGORITHM_VERSION as CALIBRATION_ALGORITHM_VERSION_V5,
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V5,
+    update_protocol_status_v5,
+    validate_calibration_protocol_v5,
 )
 from modules.module_07_rl.dataset_split import (
     connected_identity_components,
@@ -77,7 +84,18 @@ def evaluate_locked_test_once(
             f"release attempt already exists and cannot be repeated: {attempt_path}"
         )
     protocol_path = Path(protocol)
-    checked_protocol = validate_calibration_protocol(protocol_path)
+    protocol_preview = _load_json(protocol_path)
+    protocol_version = protocol_preview.get("protocol_schema_version")
+    if protocol_version == CALIBRATION_PROTOCOL_VERSION:
+        checked_protocol = validate_calibration_protocol(protocol_preview)
+        protocol_updater = update_protocol_status
+        producer_version = "aria-belief-calibration-v4"
+    elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V5:
+        checked_protocol = validate_calibration_protocol_v5(protocol_preview)
+        protocol_updater = update_protocol_status_v5
+        producer_version = CALIBRATION_ALGORITHM_VERSION_V5
+    else:
+        raise ValueError("unsupported calibration protocol version")
     if checked_protocol["protocol_status"] != "PROVISIONAL_SYNTHETIC":
         raise ValueError("locked test requires PROVISIONAL_SYNTHETIC protocol status")
     config = BeliefModelConfig.load(belief_config)
@@ -96,7 +114,7 @@ def evaluate_locked_test_once(
 
     attempt = {
         "schema_version": RELEASE_ATTEMPT_VERSION,
-        "producer_version": "aria-belief-calibration-v4",
+        "producer_version": producer_version,
         "supported_consumer_versions": [RELEASE_ATTEMPT_VERSION],
         "state": "STARTED",
         "protocol_hash": checked_protocol["protocol_hash"],
@@ -155,7 +173,7 @@ def evaluate_locked_test_once(
         passed, reasons = _gate_candidate(metrics, minimum_components=6)
         report = {
             "schema_version": LOCKED_TEST_EVALUATION_VERSION,
-            "producer_version": "aria-belief-calibration-v4",
+            "producer_version": producer_version,
             "supported_consumer_versions": [LOCKED_TEST_EVALUATION_VERSION],
             "protocol_hash": checked_protocol["protocol_hash"],
             "raw_file_sha256": checked_protocol["raw_file_sha256"],
@@ -180,7 +198,7 @@ def evaluate_locked_test_once(
         attempt["evaluation_report_hash"] = report["report_hash"]
         attempt["final_status"] = report["final_status"]
         atomic_json_write(attempt_path, attempt)
-        update_protocol_status(protocol_path, report["final_status"])
+        protocol_updater(protocol_path, report["final_status"])
         return report
     except BaseException as exc:
         attempt["state"] = "FAILED"

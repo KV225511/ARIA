@@ -40,10 +40,17 @@ from modules.module_07_rl.transition_schema import (
     has_valid_question_generation_provenance,
 )
 from modules.module_07_rl.calibration_protocol import (
-    DEVELOPMENT_BUNDLE_VERSION,
+    CALIBRATION_PROTOCOL_VERSION,
+    DEVELOPMENT_BUNDLE_VERSION as DEVELOPMENT_BUNDLE_VERSION_V4,
     file_sha256,
     validate_calibration_protocol,
     validate_development_bundle,
+)
+from modules.module_07_rl.calibration_protocol_v5 import (
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V5,
+    DEVELOPMENT_BUNDLE_VERSION as DEVELOPMENT_BUNDLE_VERSION_V5,
+    validate_calibration_protocol_v5,
+    validate_development_bundle_v5,
 )
 
 
@@ -272,7 +279,18 @@ def train_iql_policy(
         )
     train_path = Path(train_file)
     validation_path = Path(validation_file)
-    protocol = validate_calibration_protocol(calibration_protocol_file)
+    protocol_preview = json.loads(Path(calibration_protocol_file).read_text(encoding="utf-8"))
+    protocol_version = protocol_preview.get("protocol_schema_version")
+    if protocol_version == CALIBRATION_PROTOCOL_VERSION:
+        protocol = validate_calibration_protocol(protocol_preview)
+        expected_bundle_version = DEVELOPMENT_BUNDLE_VERSION_V4
+        bundle_validator = validate_development_bundle
+    elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V5:
+        protocol = validate_calibration_protocol_v5(protocol_preview)
+        expected_bundle_version = DEVELOPMENT_BUNDLE_VERSION_V5
+        bundle_validator = validate_development_bundle_v5
+    else:
+        raise ValueError("unsupported calibration protocol version")
     if protocol["protocol_status"] not in {
         "PROVISIONAL_SYNTHETIC", "VALIDATED_SYNTHETIC",
     }:
@@ -283,7 +301,7 @@ def train_iql_policy(
     if config.config_hash != protocol.get("belief_config_hash"):
         raise ValueError("belief configuration hash mismatch")
     bundle_preview = json.loads(Path(development_bundle_file).read_text(encoding="utf-8"))
-    if bundle_preview.get("schema_version") != DEVELOPMENT_BUNDLE_VERSION:
+    if bundle_preview.get("schema_version") != expected_bundle_version:
         raise ValueError("unsupported development bundle schema version")
     split_record = bundle_preview.get("artifacts", {}).get("split_manifest", {})
     split_manifest_path = split_record.get("path")
@@ -291,7 +309,7 @@ def train_iql_policy(
         raise ValueError("development bundle does not reference its split manifest")
     if split_record.get("sha256") != file_sha256(split_manifest_path):
         raise ValueError("development bundle split manifest file hash mismatch")
-    bundle = validate_development_bundle(
+    bundle = bundle_validator(
         bundle_preview,
         protocol=protocol,
         belief_config_hash=config.config_hash,

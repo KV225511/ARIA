@@ -14,6 +14,13 @@ from modules.module_07_rl.calibration_protocol import (
 from modules.module_07_rl.dataset_audit import CALIBRATION_GATE_THRESHOLDS, VALIDATION_GATE_VERSION
 from modules.module_07_rl.locked_test_evaluator import evaluate_locked_test_once
 from modules.module_07_rl.metrics import METRICS_SCHEMA_VERSION
+from modules.module_07_rl.calibration_protocol_v5 import (
+    CALIBRATION_ALGORITHM_VERSION as CALIBRATION_ALGORITHM_VERSION_V5,
+    CALIBRATION_CANDIDATE_VALUES as CALIBRATION_CANDIDATE_VALUES_V5,
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V5,
+    CALIBRATION_STAGE_SEQUENCE as CALIBRATION_STAGE_SEQUENCE_V5,
+    MAX_CALIBRATION_CANDIDATES as MAX_CALIBRATION_CANDIDATES_V5,
+)
 
 
 def _locked_fixture(tmp_path):
@@ -100,3 +107,29 @@ def test_locked_evaluator_rejects_hash_mismatch_before_consuming_attempt(tmp_pat
     with pytest.raises(ValueError, match="hash mismatch"):
         evaluate_locked_test_once(test_file, config_file, protocol_file, manifest_file, output)
     assert not (output / "release" / "release_attempt_v1.json").exists()
+
+
+def test_locked_evaluator_accepts_v5_and_still_refuses_repeat(tmp_path):
+    test_file, config_file, protocol_file, manifest_file = _locked_fixture(tmp_path)
+    protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
+    protocol.update({
+        "protocol_schema_version": CALIBRATION_PROTOCOL_VERSION_V5,
+        "calibration_algorithm_version": CALIBRATION_ALGORITHM_VERSION_V5,
+        "calibration_stage_sequence": CALIBRATION_STAGE_SEQUENCE_V5,
+        "candidate_values": CALIBRATION_CANDIDATE_VALUES_V5,
+        "maximum_calibration_candidates": MAX_CALIBRATION_CANDIDATES_V5,
+        "parent_v4_report_hash": "fixture-v4-report",
+        "v5_change_scope": "lower-repeat-discount-only",
+    })
+    protocol.pop("protocol_hash")
+    protocol["protocol_hash"] = canonical_json_hash(protocol)
+    protocol_file.write_text(json.dumps(protocol), encoding="utf-8")
+    output = tmp_path / "derived-v5"
+    report = evaluate_locked_test_once(
+        test_file, config_file, protocol_file, manifest_file, output,
+    )
+    assert report["producer_version"] == CALIBRATION_ALGORITHM_VERSION_V5
+    with pytest.raises(FileExistsError):
+        evaluate_locked_test_once(
+            test_file, config_file, protocol_file, manifest_file, output,
+        )

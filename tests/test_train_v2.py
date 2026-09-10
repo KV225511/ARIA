@@ -27,6 +27,14 @@ from modules.module_07_rl.calibration_protocol import (
 )
 from modules.module_07_rl.dataset_audit import CALIBRATION_GATE_THRESHOLDS, VALIDATION_GATE_VERSION
 from modules.module_07_rl.metrics import METRICS_SCHEMA_VERSION
+from modules.module_07_rl.calibration_protocol_v5 import (
+    CALIBRATION_ALGORITHM_VERSION as CALIBRATION_ALGORITHM_VERSION_V5,
+    CALIBRATION_CANDIDATE_VALUES as CALIBRATION_CANDIDATE_VALUES_V5,
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V5,
+    CALIBRATION_STAGE_SEQUENCE as CALIBRATION_STAGE_SEQUENCE_V5,
+    DEVELOPMENT_BUNDLE_VERSION as DEVELOPMENT_BUNDLE_VERSION_V5,
+    MAX_CALIBRATION_CANDIDATES as MAX_CALIBRATION_CANDIDATES_V5,
+)
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
 from modules.module_07_rl.transition_schema import (
@@ -239,6 +247,65 @@ def test_training_saves_versioned_best_checkpoint_without_test_input(tmp_path):
     assert result["evaluates_learned_policy"] is False
     assert result["epochs_completed"] == 1
     assert result["stopped_early"] is False
+
+
+def test_training_accepts_v5_bundle_and_protocol(tmp_path):
+    contract = _write_training_contract(
+        tmp_path,
+        [_transition(index, "train") for index in range(160)],
+        [_transition(index, "validation") for index in range(24)],
+    )
+    config, config_file, train_file, validation_file, bundle_file, protocol_file = contract
+    protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
+    protocol.update({
+        "protocol_schema_version": CALIBRATION_PROTOCOL_VERSION_V5,
+        "calibration_algorithm_version": CALIBRATION_ALGORITHM_VERSION_V5,
+        "calibration_stage_sequence": CALIBRATION_STAGE_SEQUENCE_V5,
+        "candidate_values": CALIBRATION_CANDIDATE_VALUES_V5,
+        "maximum_calibration_candidates": MAX_CALIBRATION_CANDIDATES_V5,
+        "parent_v4_report_hash": "fixture-v4-report",
+        "v5_change_scope": "lower-repeat-discount-only",
+    })
+    protocol.pop("protocol_hash")
+    protocol["protocol_hash"] = canonical_json_hash(protocol)
+    protocol_file.write_text(json.dumps(protocol), encoding="utf-8")
+    for path in (train_file, validation_file):
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        for row in rows:
+            row["protocol_hash"] = protocol["protocol_hash"]
+        path.write_text(json.dumps(rows), encoding="utf-8")
+    bundle = json.loads(bundle_file.read_text(encoding="utf-8"))
+    bundle.update({
+        "schema_version": DEVELOPMENT_BUNDLE_VERSION_V5,
+        "producer_version": CALIBRATION_ALGORITHM_VERSION_V5,
+        "supported_consumer_versions": [DEVELOPMENT_BUNDLE_VERSION_V5],
+        "protocol_hash": protocol["protocol_hash"],
+    })
+    bundle["artifacts"]["replayed_train"]["sha256"] = file_sha256(train_file)
+    bundle["artifacts"]["replayed_validation"]["sha256"] = file_sha256(validation_file)
+    bundle.pop("bundle_hash")
+    bundle["bundle_hash"] = canonical_json_hash(bundle)
+    bundle_file.write_text(json.dumps(bundle), encoding="utf-8")
+
+    with patch(
+        "modules.module_07_rl.train.audit_raw_evidence",
+        return_value={"passes_quality_gates": True},
+    ), patch(
+        "modules.module_07_rl.train.audit_calibration_validation",
+        return_value={"passes_quality_gates": True},
+    ):
+        result = train_iql_policy(
+            train_file=train_file,
+            validation_file=validation_file,
+            belief_config_file=config_file,
+            development_bundle_file=bundle_file,
+            calibration_protocol_file=protocol_file,
+            output_file=tmp_path / "checkpoint-v5.pth",
+            total_epochs=1,
+            batch_size=64,
+        )
+    assert result["epochs_completed"] == 1
+    assert config.config_hash == BeliefModelConfig.load(config_file).config_hash
 
 
 def test_training_stops_after_validation_patience(tmp_path):
