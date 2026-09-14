@@ -1,4 +1,4 @@
-"""One-attempt locked-test release evaluator for calibration protocols v4/v5/v6.
+"""One-attempt locked-test release evaluator for calibration protocols v4-v7.
 
 The attempt file is an application-level guard. A user who can delete or edit
 local artifacts can bypass it; it is not cryptographic enforcement.
@@ -17,6 +17,7 @@ from modules.module_07_rl.belief_calibration import (
     _gate_candidate,
     _prediction_rows,
     _metrics_from_vectors,
+    paired_component_bootstrap,
 )
 from modules.module_07_rl.calibration_protocol import (
     CALIBRATION_PROTOCOL_VERSION,
@@ -39,6 +40,14 @@ from modules.module_07_rl.calibration_protocol_v6 import (
     validate_calibration_protocol_v6,
     validate_protocol_state,
 )
+from modules.module_07_rl.calibration_protocol_v7 import (
+    CALIBRATION_ALGORITHM_VERSION as CALIBRATION_ALGORITHM_VERSION_V7,
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V7,
+    V7_GATE_THRESHOLDS,
+    update_protocol_state_v7,
+    validate_calibration_protocol_v7,
+    validate_protocol_state_v7,
+)
 from modules.module_07_rl.dataset_split import (
     connected_identity_components,
     group_transitions_into_episodes,
@@ -47,6 +56,19 @@ from modules.module_07_rl.dataset_split import (
 
 LOCKED_TEST_EVALUATION_VERSION = "aria-locked-test-evaluation-v1"
 RELEASE_ATTEMPT_VERSION = "aria-release-attempt-v1"
+
+
+def _gate_v7(metrics: dict) -> tuple[bool, list[str]]:
+    base_passed, reasons = _gate_candidate(metrics, minimum_components=6)
+    per_class = metrics.get("per_class", {})
+    checks = {
+        "beginner_recall_below_v7_minimum": per_class.get(0, {}).get("recall", 0.0) >= V7_GATE_THRESHOLDS["minimum_beginner_recall"],
+        "beginner_precision_below_v7_minimum": per_class.get(0, {}).get("precision", 0.0) >= V7_GATE_THRESHOLDS["minimum_beginner_precision"],
+        "mid_recall_below_v7_minimum": per_class.get(1, {}).get("recall", 0.0) >= V7_GATE_THRESHOLDS["minimum_mid_recall"],
+        "expert_recall_below_v7_minimum": per_class.get(2, {}).get("recall", 0.0) >= V7_GATE_THRESHOLDS["minimum_expert_recall"],
+    }
+    reasons.extend(name for name, passed in checks.items() if not passed)
+    return base_passed and all(checks.values()), reasons
 
 
 def _load_json(path: str | Path) -> Any:
@@ -127,6 +149,28 @@ def evaluate_locked_test_once(
             or inventory.get("protocol_hash") != checked_protocol["protocol_hash"]
         ):
             raise ValueError("invalid v6 raw split inventory")
+    elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V7:
+        checked_protocol = validate_calibration_protocol_v7(protocol_preview)
+        state_path = Path(protocol_state) if protocol_state else protocol_path.with_name(
+            "calibration_protocol_state_v2.json"
+        )
+        checked_state = validate_protocol_state_v7(state_path, protocol=checked_protocol)
+        producer_version = CALIBRATION_ALGORITHM_VERSION_V7
+        current_status = checked_state["current_status"]
+        expected_config_hash = checked_state.get("belief_config_hash")
+        if Path(output_dir).resolve() != Path(checked_protocol["artifact_root"]).resolve():
+            raise ValueError("output directory differs from the frozen artifact root")
+        if raw_split_inventory is None:
+            raise ValueError("locked test v7 requires the parent v6 raw split inventory")
+        inventory = _load_json(raw_split_inventory)
+        unsigned_inventory = dict(inventory)
+        stored_inventory_hash = unsigned_inventory.pop("inventory_hash", None)
+        if (
+            inventory.get("schema_version") != "aria-raw-split-inventory-v3"
+            or stored_inventory_hash != canonical_json_hash(unsigned_inventory)
+            or stored_inventory_hash != checked_protocol["parent_v6_inventory_hash"]
+        ):
+            raise ValueError("invalid v7 parent raw split inventory")
     else:
         raise ValueError("unsupported calibration protocol version")
     release_dir = Path(output_dir).resolve() / "release"
@@ -135,10 +179,16 @@ def evaluate_locked_test_once(
         raise FileExistsError(
             f"release attempt already exists and cannot be repeated: {attempt_path}"
         )
-    if current_status != "PROVISIONAL_SYNTHETIC":
-        raise ValueError("locked test requires PROVISIONAL_SYNTHETIC protocol status")
+    required_status = (
+        "PROVISIONAL_TRAINING_CV"
+        if protocol_version == CALIBRATION_PROTOCOL_VERSION_V7
+        else "PROVISIONAL_SYNTHETIC"
+    )
+    if current_status != required_status:
+        raise ValueError(f"locked test requires {required_status} protocol status")
     config = BeliefModelConfig.load(belief_config)
-    if config.schema_version != "belief-v2":
+    expected_schema = "belief-v3" if protocol_version == CALIBRATION_PROTOCOL_VERSION_V7 else "belief-v2"
+    if config.schema_version != expected_schema:
         raise ValueError("unsupported belief configuration schema")
     if config.config_hash != expected_config_hash:
         raise ValueError("belief configuration hash mismatch")
@@ -151,6 +201,12 @@ def evaluate_locked_test_once(
         )
         if inventory.get("split_manifest_hash") != manifest_hash:
             raise ValueError("v6 raw split inventory manifest hash mismatch")
+    elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V7:
+        checked_protocol = validate_calibration_protocol_v7(
+            checked_protocol, split_manifest=manifest,
+        )
+        if inventory.get("split_manifest_hash") != manifest_hash:
+            raise ValueError("v7 parent raw split inventory manifest hash mismatch")
     if config.split_manifest_hash != manifest_hash:
         raise ValueError("belief configuration split manifest hash mismatch")
     if manifest.get("raw_dataset_hash") != checked_protocol["raw_dataset_hash"]:
@@ -181,7 +237,7 @@ def evaluate_locked_test_once(
 
     try:
         # No test bytes or labels are read before the durable attempt exists.
-        if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+        if protocol_version in {CALIBRATION_PROTOCOL_VERSION_V6, CALIBRATION_PROTOCOL_VERSION_V7}:
             locked_record = inventory.get("artifacts", {}).get("locked_test", {})
             expected_locked_hash = (
                 locked_record.get("sha256") if isinstance(locked_record, dict)
@@ -224,7 +280,47 @@ def evaluate_locked_test_once(
             [row["probabilities"] for row in rows],
         )
         metrics["identity_component_count"] = len(connected_identity_components(transitions))
-        passed, reasons = _gate_candidate(metrics, minimum_components=6)
+        passed, reasons = (
+            _gate_v7(metrics) if protocol_version == CALIBRATION_PROTOCOL_VERSION_V7
+            else _gate_candidate(metrics, minimum_components=6)
+        )
+        comparison = None
+        if protocol_version == CALIBRATION_PROTOCOL_VERSION_V7:
+            baseline_config = BeliefModelConfig.from_dict(
+                checked_protocol["parent_v6_belief_config"]
+            )
+            baseline_rows = _prediction_rows(transitions, baseline_config)
+            if [row["episode_id"] for row in baseline_rows] != [row["episode_id"] for row in rows]:
+                raise ValueError("v6 and v7 locked-test episode sets differ")
+            baseline_metrics = _metrics_from_vectors(
+                [row["true_label"] for row in baseline_rows],
+                [row["prediction"] for row in baseline_rows],
+                [row["probabilities"] for row in baseline_rows],
+            )
+            non_regression = {
+                "overall_accuracy": metrics["overall_accuracy"] >= baseline_metrics["overall_accuracy"] - 0.02,
+                "macro_f1": metrics["macro_f1"] >= baseline_metrics["macro_f1"] - 0.02,
+            }
+            if not all(non_regression.values()):
+                reasons.extend(
+                    f"locked_test_{name}_non_regression_failed"
+                    for name, ok in non_regression.items() if not ok
+                )
+                passed = False
+            comparison = {
+                "baseline_protocol_hash": checked_protocol["parent_v6_protocol_hash"],
+                "baseline_belief_config_hash": baseline_config.config_hash,
+                "baseline_metrics": baseline_metrics,
+                "non_regression": non_regression,
+                "paired_component_bootstrap": paired_component_bootstrap(
+                    transitions,
+                    [row["prediction"] for row in baseline_rows],
+                    [row["probabilities"] for row in baseline_rows],
+                    [row["prediction"] for row in rows],
+                    [row["probabilities"] for row in rows],
+                    samples=1000, seed=42,
+                ),
+            }
         report = {
             "schema_version": LOCKED_TEST_EVALUATION_VERSION,
             "producer_version": producer_version,
@@ -246,6 +342,8 @@ def evaluate_locked_test_once(
             "final_status": "VALIDATED_SYNTHETIC" if passed else "FAILED",
             "evaluates_learned_policy": False,
         }
+        if comparison is not None:
+            report["v6_v7_paired_comparison"] = comparison
         report["report_hash"] = canonical_json_hash(report)
         atomic_json_write(release_dir / "locked_test_evaluation_v1.json", report)
         attempt["state"] = "COMPLETED"
@@ -257,6 +355,13 @@ def evaluate_locked_test_once(
                 state_path,
                 report["final_status"],
                 protocol=checked_protocol,
+                belief_config_hash=config.config_hash,
+                last_attempt_hash=canonical_json_hash(attempt),
+                locked_test_report_hash=report["report_hash"],
+            )
+        elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V7:
+            update_protocol_state_v7(
+                state_path, report["final_status"], protocol=checked_protocol,
                 belief_config_hash=config.config_hash,
                 last_attempt_hash=canonical_json_hash(attempt),
                 locked_test_report_hash=report["report_hash"],
@@ -275,6 +380,14 @@ def evaluate_locked_test_once(
                     state_path,
                     "FAILED",
                     protocol=checked_protocol,
+                    belief_config_hash=config.config_hash,
+                    last_attempt_hash=canonical_json_hash(attempt),
+                )
+        elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V7:
+            latest_state = validate_protocol_state_v7(state_path, protocol=checked_protocol)
+            if latest_state["current_status"] == "PROVISIONAL_TRAINING_CV":
+                update_protocol_state_v7(
+                    state_path, "FAILED", protocol=checked_protocol,
                     belief_config_hash=config.config_hash,
                     last_attempt_hash=canonical_json_hash(attempt),
                 )

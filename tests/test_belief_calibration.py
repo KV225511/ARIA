@@ -18,7 +18,9 @@ from modules.module_07_rl.belief_calibration import (
     select_training_only_calibration,
     select_training_only_calibration_v5,
     select_training_only_calibration_v6,
+    select_training_only_calibration_v7,
 )
+from modules.module_07_rl.metrics import compute_classification_metrics
 
 
 def _episode(episode_id, label, score):
@@ -324,3 +326,58 @@ def test_belief_v3_bias_is_explicit_while_v2_serialization_is_stable():
     assert v2.config_hash != v3.config_hash
     with pytest.raises(ValueError, match="belief-v2"):
         v2.with_updates(low_class_logit_bias=0.1)
+
+
+def test_v7_selection_is_training_only_deterministic_and_bounded():
+    training = _grouped_training()
+    rows = []
+    for index in range(9):
+        label = index % 3
+        probabilities = (
+            [0.49, 0.50, 0.01] if label == 0
+            else [0.01, 0.98, 0.01] if label == 1
+            else [0.01, 0.01, 0.98]
+        )
+        rows.append({
+            "episode_id": f"train-{index}", "true_label": label,
+            "prediction": int(max(range(3), key=lambda item: probabilities[item])),
+            "probabilities": probabilities, "effective_evidence": 2.0,
+            "visited_skill_count": 3, "held_out_fold": index % 3,
+        })
+    anchor_metrics = compute_classification_metrics(
+        [row["true_label"] for row in rows],
+        [row["prediction"] for row in rows],
+        [row["probabilities"] for row in rows],
+    )
+    parent_report = {
+        "report_hash": "parent-report", "metrics": anchor_metrics,
+        "selected_candidate": {
+            "metrics": anchor_metrics, "out_of_fold_predictions": rows,
+        },
+    }
+    parent_config = BeliefModelConfig(
+        repeat_discount_power=0.25, max_skill_effective_sample_size=3,
+        aggregation_temperature=2.0, minimum_assessment_confidence=0.45,
+        minimum_skill_coverage=3, minimum_effective_evidence=1.5,
+    )
+    first = select_training_only_calibration_v7(
+        training, parent_report, parent_config, "raw", "split", "protocol",
+    )
+    second = select_training_only_calibration_v7(
+        training, parent_report, parent_config, "raw", "split", "protocol",
+    )
+    assert first["candidate_count"] == first["candidate_limit"] == 6
+    assert first["selection_status"] == "ELIGIBLE"
+    assert first["report_hash"] == second["report_hash"]
+    assert first["config"].schema_version == "belief-v3"
+    assert all(item["rejection_reasons"] for item in first["attempted_candidates"] if not item["eligible"])
+    parameters = set(inspect.signature(select_training_only_calibration_v7).parameters)
+    assert not {"validation_transitions", "test_transitions"} & parameters
+
+
+def test_v7_selection_rejects_non_training_input():
+    with pytest.raises(ValueError, match="training transitions only"):
+        select_training_only_calibration_v7(
+            [{"dataset_split": "validation"}], {},
+            BeliefModelConfig(minimum_effective_evidence=1.5), "raw", "split", "protocol",
+        )

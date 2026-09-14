@@ -1075,7 +1075,7 @@ def select_training_only_calibration_v6(
 V7_LOW_CLASS_LOGIT_BIASES = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 
 
-def apply_low_class_logit_bias(probabilities, bias: float):
+def apply_low_class_logit_bias(probabilities, bias: float, posterior_floor: float = 1e-4):
     """Return a normalized v7 Low-class logit-bias transformation."""
     values = np.asarray(probabilities, dtype=float)
     if values.shape != (3,) or not np.all(np.isfinite(values)) or np.any(values < 0):
@@ -1088,15 +1088,21 @@ def apply_low_class_logit_bias(probabilities, bias: float):
     logits[0] += float(bias)
     shifted = logits - np.max(logits)
     output = np.exp(shifted)
+    output /= output.sum()
+    output = np.maximum(output, float(posterior_floor))
     return (output / output.sum()).tolist()
 
 
-def evaluate_low_bias_candidate(anchor_oof_predictions: list[dict], bias: float):
+def evaluate_low_bias_candidate(
+    anchor_oof_predictions: list[dict], bias: float, *, posterior_floor: float = 1e-4,
+):
     """Score one v7 decision-only candidate from v6 OOF predictions."""
     from modules.module_07_rl.metrics import compute_classification_metrics
     rows = []
     for row in anchor_oof_predictions:
-        transformed = apply_low_class_logit_bias(row["probabilities"], bias)
+        transformed = apply_low_class_logit_bias(
+            row["probabilities"], bias, posterior_floor=posterior_floor,
+        )
         confidence = max(transformed)
         evidence_ok = float(row.get("effective_evidence", 0.0)) >= 1.5
         coverage_ok = int(row.get("visited_skill_count", 0)) >= 3
@@ -1116,19 +1122,28 @@ def evaluate_low_bias_candidate(anchor_oof_predictions: list[dict], bias: float)
         [row["probabilities"] for row in rows],
     )
     per_class = metrics["per_class"]
-    reasons = []
+    from modules.module_07_rl.calibration_protocol_v7 import V7_GATE_THRESHOLDS
+    thresholds = V7_GATE_THRESHOLDS
     checks = {
-        "overall_accuracy": metrics["overall_accuracy"] >= 0.60,
-        "macro_f1": metrics["macro_f1"] >= 0.60,
-        "beginner_recall": per_class[0]["recall"] >= 0.65,
-        "beginner_precision": per_class[0]["precision"] >= 0.70,
-        "mid_recall": per_class[1]["recall"] >= 0.90,
-        "expert_recall": per_class[2]["recall"] >= 0.90,
-        "prediction_collapse": metrics["maximum_classified_prediction_share"] <= 0.60,
-        "abstention_rate": metrics["abstention_rate"] <= 0.15,
-        "expected_calibration_error": metrics["expected_calibration_error"] <= 0.15,
+        "overall_accuracy": metrics["overall_accuracy"] >= thresholds["minimum_overall_accuracy"],
+        "macro_f1": metrics["macro_f1"] >= thresholds["minimum_macro_f1"],
+        "beginner_recall": per_class[0]["recall"] >= thresholds["minimum_beginner_recall"],
+        "beginner_precision": per_class[0]["precision"] >= thresholds["minimum_beginner_precision"],
+        "mid_recall": per_class[1]["recall"] >= thresholds["minimum_mid_recall"],
+        "expert_recall": per_class[2]["recall"] >= thresholds["minimum_expert_recall"],
+        "prediction_collapse": metrics["maximum_classified_prediction_share"] <= thresholds["maximum_classified_prediction_share"],
+        "abstention_rate": metrics["abstention_rate"] <= thresholds["maximum_abstention_rate"],
+        "expected_calibration_error": metrics["expected_calibration_error"] <= thresholds["maximum_expected_calibration_error"],
+        "all_true_classes_present": set(map(int, metrics["true_label_counts"])) == {0, 1, 2},
         "all_classes_predicted": set(metrics["decision_prediction_counts"]) == {0, 1, 2},
     }
+    numeric_gate_values = (
+        metrics["overall_accuracy"], metrics["macro_f1"],
+        metrics["minimum_class_recall"], metrics["maximum_classified_prediction_share"],
+        metrics["abstention_rate"], metrics["expected_calibration_error"],
+        *(per_class[label][name] for label in (0, 1, 2) for name in ("precision", "recall", "f1")),
+    )
+    checks["finite_metrics"] = all(math.isfinite(float(value)) for value in numeric_gate_values)
     reasons = [f"{name}_failed" for name, passed in checks.items() if not passed]
     return {
         "parameters": {"low_class_logit_bias": float(bias)},
@@ -1151,14 +1166,44 @@ def select_training_only_calibration_v7(
     """Frozen v7 six-candidate Low decision-bias search; training only."""
     if any(row.get("dataset_split") in {"validation", "test"} for row in training_transitions):
         raise ValueError("v7 candidate selection accepts training transitions only")
+    if not training_transitions:
+        raise ValueError("v7 candidate selection requires training transitions")
     anchor = parent_v6_report.get("selected_candidate")
     if not isinstance(anchor, dict) or not anchor.get("out_of_fold_predictions"):
         raise ValueError("v7 requires the v6 selected OOF candidate")
-    if parent_v6_config.minimum_effective_evidence != 1.5:
-        raise ValueError("v7 requires the frozen v6 minimum evidence threshold")
+    frozen_parent_values = {
+        "repeat_discount_power": 0.25,
+        "max_skill_effective_sample_size": 3.0,
+        "aggregation_temperature": 2.0,
+        "minimum_assessment_confidence": 0.45,
+        "minimum_skill_coverage": 3,
+        "minimum_effective_evidence": 1.5,
+    }
+    for field, expected in frozen_parent_values.items():
+        if not math.isclose(float(getattr(parent_v6_config, field)), float(expected), abs_tol=1e-12):
+            raise ValueError(f"v7 parent configuration changed frozen field {field}")
+    training_episode_ids = {
+        str(episode[0].get("episode_id"))
+        for episode in group_transitions_into_episodes(training_transitions) if episode
+    }
+    anchor_episode_ids = {str(row.get("episode_id")) for row in anchor["out_of_fold_predictions"]}
+    if training_episode_ids != anchor_episode_ids:
+        raise ValueError("v6 OOF predictions do not exactly cover v7 training episodes")
+    if len(anchor_episode_ids) != len(anchor["out_of_fold_predictions"]):
+        raise ValueError("v6 OOF predictions contain duplicate episodes")
     attempted = []
     for index, bias in enumerate(V7_LOW_CLASS_LOGIT_BIASES, start=1):
-        candidate = evaluate_low_bias_candidate(anchor["out_of_fold_predictions"], bias)
+        candidate = evaluate_low_bias_candidate(
+            anchor["out_of_fold_predictions"], bias,
+            posterior_floor=parent_v6_config.posterior_floor,
+        )
+        anchor_metrics = anchor.get("metrics", {})
+        for metric_name in ("overall_accuracy", "macro_f1"):
+            baseline = anchor_metrics.get(metric_name)
+            candidate_value = candidate["metrics"].get(metric_name)
+            if baseline is None or candidate_value is None or candidate_value < float(baseline) - 0.02:
+                candidate["eligible"] = False
+                candidate["rejection_reasons"].append(f"training_oof_{metric_name}_non_regression_failed")
         candidate["candidate_index"] = index
         candidate["stage"] = "LOW_CLASS_LOGIT_BIAS"
         attempted.append(candidate)
@@ -1184,16 +1229,34 @@ def select_training_only_calibration_v7(
         "validation_used_for_selection": False,
         "attempted_candidates": attempted,
         "selected_candidate": selected,
+        "best_failing_candidate": None if selected else _best_failing(attempted),
         "selection_status": "ELIGIBLE" if selected else "FAILED",
+        "parent_v6_report_hash": parent_v6_report.get("report_hash"),
+        "parent_v6_belief_config_hash": parent_v6_config.config_hash,
+        "v7_change_scope": "low-class-logit-bias-only",
     }
-    report["report_hash"] = _canonical_hash(report)
     if selected:
-        report["config"] = parent_v6_config.with_updates(
+        config = parent_v6_config.with_updates(
             schema_version="belief-v3",
             low_class_logit_bias=selected["parameters"]["low_class_logit_bias"],
             raw_dataset_hash=raw_dataset_hash,
             split_manifest_hash=split_manifest_hash,
         )
+        metadata = dict(config.fit_metadata)
+        metadata.update({
+            "calibration_algorithm_version": "aria-belief-calibration-v7",
+            "protocol_hash_at_selection": protocol_hash,
+            "selected_parameters": selected["parameters"],
+            "v7_change_scope": "low-class-logit-bias-only",
+            "parent_v6_belief_config_hash": parent_v6_config.config_hash,
+        })
+        config = config.with_updates(fit_metadata=metadata)
+        report["config"] = config
+        report["belief_config_hash"] = config.config_hash
+    hashable = dict(report)
+    if isinstance(hashable.get("config"), BeliefModelConfig):
+        hashable["config"] = hashable["config"].to_dict()
+    report["report_hash"] = _canonical_hash(hashable)
     return report
 
 

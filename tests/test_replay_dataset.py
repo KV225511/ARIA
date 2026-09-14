@@ -348,6 +348,7 @@ def test_v6_fixture_end_to_end_uses_failed_v5_lineage_and_stable_state(tmp_path)
                 "target_skill": f"Skill-{turn}", "target_skill_id": f"skill-{turn}",
                 "resume_content_hash": f"resume-content-{index}",
                 "jd_content_hash": f"jd-content-{index}",
+                "evaluator_confidence": 0.55,
             })
         transitions.extend(rows)
         assignments[f"episode-{index}"] = "train" if index < 22 else "validation" if index < 27 else "test"
@@ -426,6 +427,42 @@ def test_v6_fixture_end_to_end_uses_failed_v5_lineage_and_stable_state(tmp_path)
     )["assignments"]
     assert raw_file.read_bytes() == before
     assert not (v6 / "replayed" / "test.json").exists()
+
+    from modules.module_07_rl.calibration_protocol_v7 import freeze_calibration_protocol_v7
+    from modules.module_07_rl.prepare_belief_pipeline_v7 import prepare_development_calibration_v7
+
+    v7 = tmp_path / "derived-calibration-v7"
+    protocol_v7 = freeze_calibration_protocol_v7(
+        protocol_v6_path,
+        v6 / "protocol" / "calibration_protocol_state_v1.json",
+        v6 / "calibration" / "training_cv_report_v3.json",
+        v6 / "calibration" / "belief_model_v2.json",
+        v6 / "manifests" / "split_manifest_v4.json",
+        v6 / "manifests" / "raw_split_inventory_v3.json",
+        v7, lock_file,
+    )
+    v7_result = prepare_development_calibration_v7(
+        v6 / "raw-splits" / "train.json",
+        v6 / "raw-splits" / "validation.json",
+        v6 / "manifests" / "split_manifest_v4.json",
+        v6 / "manifests" / "raw_split_inventory_v3.json",
+        v6 / "calibration" / "training_cv_report_v3.json",
+        v6 / "calibration" / "belief_model_v2.json",
+        v7 / "protocol" / "calibration_protocol_v7.json",
+        v7 / "protocol" / "calibration_protocol_state_v2.json",
+        v7,
+    )
+    v7_state = json.loads(
+        (v7 / "protocol" / "calibration_protocol_state_v2.json").read_text()
+    )
+    assert protocol_v7["maximum_validation_executions"] == 0
+    assert v7_result["validation_evaluated"] is False
+    assert v7_state["current_status"] == "PROVISIONAL_TRAINING_CV"
+    assert (v7 / "replayed" / "train.json").exists()
+    assert (v7 / "replayed" / "validation.json").exists()
+    assert not (v7 / "replayed" / "test.json").exists()
+    assert not (v7 / "release" / "locked_test_evaluation_v1.json").exists()
+    assert raw_file.read_bytes() == before
     with pytest.raises((FileExistsError, ValueError)):
         prepare_development_calibration_v6(
             v6 / "raw-splits" / "train.json",

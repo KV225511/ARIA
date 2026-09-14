@@ -59,6 +59,13 @@ from modules.module_07_rl.calibration_protocol_v6 import (
     validate_development_bundle_v6,
     validate_protocol_state,
 )
+from modules.module_07_rl.calibration_protocol_v7 import (
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V7,
+    DEVELOPMENT_BUNDLE_VERSION as DEVELOPMENT_BUNDLE_VERSION_V7,
+    validate_calibration_protocol_v7,
+    validate_development_bundle_v7,
+    validate_protocol_state_v7,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -313,15 +320,32 @@ def train_iql_policy(
         bundle_validator = validate_development_bundle_v6
         protocol_status = protocol_state["current_status"]
         expected_config_hash = protocol_state.get("belief_config_hash")
+        expected_config_schema = "belief-v2"
+    elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V7:
+        protocol = validate_calibration_protocol_v7(protocol_preview)
+        state_path = Path(calibration_protocol_state_file) if calibration_protocol_state_file else (
+            Path(calibration_protocol_file).with_name("calibration_protocol_state_v2.json")
+        )
+        protocol_state = validate_protocol_state_v7(state_path, protocol=protocol)
+        expected_bundle_version = DEVELOPMENT_BUNDLE_VERSION_V7
+        bundle_validator = validate_development_bundle_v7
+        protocol_status = protocol_state["current_status"]
+        expected_config_hash = protocol_state.get("belief_config_hash")
+        expected_config_schema = "belief-v3"
     else:
         raise ValueError("unsupported calibration protocol version")
-    if protocol_status not in {
-        "PROVISIONAL_SYNTHETIC", "VALIDATED_SYNTHETIC",
-    }:
+    permitted_statuses = (
+        {"PROVISIONAL_TRAINING_CV", "VALIDATED_SYNTHETIC"}
+        if protocol_version == CALIBRATION_PROTOCOL_VERSION_V7
+        else {"PROVISIONAL_SYNTHETIC", "VALIDATED_SYNTHETIC"}
+    )
+    if protocol_status not in permitted_statuses:
         raise ValueError("calibration protocol status does not permit training")
     config = BeliefModelConfig.load(belief_config_file)
-    if config.schema_version != "belief-v2":
-        raise ValueError("training requires belief-v2 configuration")
+    if protocol_version != CALIBRATION_PROTOCOL_VERSION_V7:
+        expected_config_schema = "belief-v2"
+    if config.schema_version != expected_config_schema:
+        raise ValueError(f"training requires {expected_config_schema} configuration")
     if config.config_hash != expected_config_hash:
         raise ValueError("belief configuration hash mismatch")
     bundle_preview = json.loads(Path(development_bundle_file).read_text(encoding="utf-8"))
@@ -340,7 +364,7 @@ def train_iql_policy(
         "train_file": train_path,
         "validation_file": validation_path,
     }
-    if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+    if protocol_version in {CALIBRATION_PROTOCOL_VERSION_V6, CALIBRATION_PROTOCOL_VERSION_V7}:
         bundle_kwargs["state"] = protocol_state
     bundle = bundle_validator(bundle_preview, **bundle_kwargs)
     config_artifact = bundle["artifacts"].get("belief_config", {})
@@ -357,7 +381,7 @@ def train_iql_policy(
         "split_manifest_hash": bundle["split_manifest_hash"],
         "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
     }
-    if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+    if protocol_version in {CALIBRATION_PROTOCOL_VERSION_V6, CALIBRATION_PROTOCOL_VERSION_V7}:
         provenance_expected["split_assignment_hash"] = protocol["split_assignment_hash"]
     for split_name, rows in (("train", training_source), ("validation", validation_source)):
         for index, transition in enumerate(rows):
