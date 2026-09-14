@@ -1,4 +1,4 @@
-"""One-attempt locked-test release evaluator for calibration protocols v4/v5.
+"""One-attempt locked-test release evaluator for calibration protocols v4/v5/v6.
 
 The attempt file is an application-level guard. A user who can delete or edit
 local artifacts can bypass it; it is not cryptographic enforcement.
@@ -31,6 +31,13 @@ from modules.module_07_rl.calibration_protocol_v5 import (
     CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V5,
     update_protocol_status_v5,
     validate_calibration_protocol_v5,
+)
+from modules.module_07_rl.calibration_protocol_v6 import (
+    CALIBRATION_ALGORITHM_VERSION as CALIBRATION_ALGORITHM_VERSION_V6,
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V6,
+    update_protocol_state,
+    validate_calibration_protocol_v6,
+    validate_protocol_state,
 )
 from modules.module_07_rl.dataset_split import (
     connected_identity_components,
@@ -75,14 +82,10 @@ def evaluate_locked_test_once(
     protocol: str | Path,
     split_manifest: str | Path,
     output_dir: str | Path,
+    protocol_state: str | Path | None = None,
+    raw_split_inventory: str | Path | None = None,
 ) -> dict:
     """Validate frozen inputs, consume the one attempt, then read the test split."""
-    release_dir = Path(output_dir) / "release"
-    attempt_path = release_dir / "release_attempt_v1.json"
-    if attempt_path.exists():
-        raise FileExistsError(
-            f"release attempt already exists and cannot be repeated: {attempt_path}"
-        )
     protocol_path = Path(protocol)
     protocol_preview = _load_json(protocol_path)
     protocol_version = protocol_preview.get("protocol_schema_version")
@@ -90,21 +93,64 @@ def evaluate_locked_test_once(
         checked_protocol = validate_calibration_protocol(protocol_preview)
         protocol_updater = update_protocol_status
         producer_version = "aria-belief-calibration-v4"
+        current_status = checked_protocol["protocol_status"]
+        expected_config_hash = checked_protocol.get("belief_config_hash")
     elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V5:
         checked_protocol = validate_calibration_protocol_v5(protocol_preview)
         protocol_updater = update_protocol_status_v5
         producer_version = CALIBRATION_ALGORITHM_VERSION_V5
+        current_status = checked_protocol["protocol_status"]
+        expected_config_hash = checked_protocol.get("belief_config_hash")
+    elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+        checked_protocol = validate_calibration_protocol_v6(protocol_preview)
+        state_path = Path(protocol_state) if protocol_state else protocol_path.with_name(
+            "calibration_protocol_state_v1.json"
+        )
+        checked_state = validate_protocol_state(state_path, protocol=checked_protocol)
+        protocol_updater = lambda _path, status: update_protocol_state(
+            state_path, status, protocol=checked_protocol,
+        )
+        producer_version = CALIBRATION_ALGORITHM_VERSION_V6
+        current_status = checked_state["current_status"]
+        expected_config_hash = checked_state.get("belief_config_hash")
+        if Path(output_dir).resolve() != Path(checked_protocol["artifact_root"]).resolve():
+            raise ValueError("output directory differs from the frozen artifact root")
+        if raw_split_inventory is None:
+            raise ValueError("locked test v6 requires the raw split inventory")
+        inventory = _load_json(raw_split_inventory)
+        unsigned_inventory = dict(inventory)
+        stored_inventory_hash = unsigned_inventory.pop("inventory_hash", None)
+        if (
+            inventory.get("schema_version") != "aria-raw-split-inventory-v3"
+            or not stored_inventory_hash
+            or stored_inventory_hash != canonical_json_hash(unsigned_inventory)
+            or inventory.get("protocol_hash") != checked_protocol["protocol_hash"]
+        ):
+            raise ValueError("invalid v6 raw split inventory")
     else:
         raise ValueError("unsupported calibration protocol version")
-    if checked_protocol["protocol_status"] != "PROVISIONAL_SYNTHETIC":
+    release_dir = Path(output_dir).resolve() / "release"
+    attempt_path = release_dir / "release_attempt_v1.json"
+    if attempt_path.exists():
+        raise FileExistsError(
+            f"release attempt already exists and cannot be repeated: {attempt_path}"
+        )
+    if current_status != "PROVISIONAL_SYNTHETIC":
         raise ValueError("locked test requires PROVISIONAL_SYNTHETIC protocol status")
     config = BeliefModelConfig.load(belief_config)
     if config.schema_version != "belief-v2":
         raise ValueError("unsupported belief configuration schema")
-    if config.config_hash != checked_protocol.get("belief_config_hash"):
+    if config.config_hash != expected_config_hash:
         raise ValueError("belief configuration hash mismatch")
     manifest = _load_json(split_manifest)
     manifest_hash = _validate_manifest(manifest)
+    if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+        checked_protocol = validate_calibration_protocol_v6(
+            checked_protocol,
+            split_manifest=manifest,
+        )
+        if inventory.get("split_manifest_hash") != manifest_hash:
+            raise ValueError("v6 raw split inventory manifest hash mismatch")
     if config.split_manifest_hash != manifest_hash:
         raise ValueError("belief configuration split manifest hash mismatch")
     if manifest.get("raw_dataset_hash") != checked_protocol["raw_dataset_hash"]:
@@ -135,6 +181,14 @@ def evaluate_locked_test_once(
 
     try:
         # No test bytes or labels are read before the durable attempt exists.
+        if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+            locked_record = inventory.get("artifacts", {}).get("locked_test", {})
+            expected_locked_hash = (
+                locked_record.get("sha256") if isinstance(locked_record, dict)
+                else locked_record
+            )
+            if expected_locked_hash != file_sha256(locked_test):
+                raise ValueError("locked test file hash mismatch")
         transitions = _load_json(locked_test)
         if not transitions:
             raise ValueError("locked test split is empty")
@@ -198,12 +252,32 @@ def evaluate_locked_test_once(
         attempt["evaluation_report_hash"] = report["report_hash"]
         attempt["final_status"] = report["final_status"]
         atomic_json_write(attempt_path, attempt)
-        protocol_updater(protocol_path, report["final_status"])
+        if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+            update_protocol_state(
+                state_path,
+                report["final_status"],
+                protocol=checked_protocol,
+                belief_config_hash=config.config_hash,
+                last_attempt_hash=canonical_json_hash(attempt),
+                locked_test_report_hash=report["report_hash"],
+            )
+        else:
+            protocol_updater(protocol_path, report["final_status"])
         return report
     except BaseException as exc:
         attempt["state"] = "FAILED"
         attempt["failure_type"] = type(exc).__name__
         atomic_json_write(attempt_path, attempt)
+        if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+            latest_state = validate_protocol_state(state_path, protocol=checked_protocol)
+            if latest_state["current_status"] == "PROVISIONAL_SYNTHETIC":
+                update_protocol_state(
+                    state_path,
+                    "FAILED",
+                    protocol=checked_protocol,
+                    belief_config_hash=config.config_hash,
+                    last_attempt_hash=canonical_json_hash(attempt),
+                )
         raise
 
 
@@ -216,11 +290,15 @@ if __name__ == "__main__":
     parser.add_argument("--protocol", required=True)
     parser.add_argument("--split-manifest", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--protocol-state")
+    parser.add_argument("--raw-split-inventory")
     args = parser.parse_args()
     try:
         result = evaluate_locked_test_once(
             args.locked_test, args.belief_config, args.protocol,
             args.split_manifest, args.output_dir,
+            protocol_state=args.protocol_state,
+            raw_split_inventory=args.raw_split_inventory,
         )
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"[ERROR] {error}\n")

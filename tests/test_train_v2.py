@@ -35,6 +35,16 @@ from modules.module_07_rl.calibration_protocol_v5 import (
     DEVELOPMENT_BUNDLE_VERSION as DEVELOPMENT_BUNDLE_VERSION_V5,
     MAX_CALIBRATION_CANDIDATES as MAX_CALIBRATION_CANDIDATES_V5,
 )
+from modules.module_07_rl.calibration_protocol_v6 import (
+    CALIBRATION_ALGORITHM_VERSION as CALIBRATION_ALGORITHM_VERSION_V6,
+    CALIBRATION_CANDIDATE_VALUES as CALIBRATION_CANDIDATE_VALUES_V6,
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V6,
+    CALIBRATION_STAGE_SEQUENCE as CALIBRATION_STAGE_SEQUENCE_V6,
+    DEVELOPMENT_BUNDLE_VERSION as DEVELOPMENT_BUNDLE_VERSION_V6,
+    MAX_CALIBRATION_CANDIDATES as MAX_CALIBRATION_CANDIDATES_V6,
+    PROTOCOL_STATE_VERSION,
+    split_assignment_hash,
+)
 from modules.module_07_rl.rl_spec import ACTION_SCHEMA_VERSION
 from modules.module_07_rl.reward_model import REWARD_SCHEMA_VERSION
 from modules.module_07_rl.transition_schema import (
@@ -306,6 +316,101 @@ def test_training_accepts_v5_bundle_and_protocol(tmp_path):
         )
     assert result["epochs_completed"] == 1
     assert config.config_hash == BeliefModelConfig.load(config_file).config_hash
+
+
+def test_training_accepts_v6_state_and_enforces_assignment_provenance(tmp_path):
+    contract = _write_training_contract(
+        tmp_path,
+        [_transition(index, "train") for index in range(160)],
+        [_transition(index, "validation") for index in range(24)],
+    )
+    config, config_file, train_file, validation_file, bundle_file, protocol_file = contract
+    manifest_file = tmp_path / "split_manifest_v4.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
+    protocol.update({
+        "protocol_schema_version": CALIBRATION_PROTOCOL_VERSION_V6,
+        "initial_protocol_status": "FROZEN_FOR_DEVELOPMENT",
+        "artifact_root": str(tmp_path.resolve()),
+        "split_assignment_hash": split_assignment_hash(manifest),
+        "calibration_algorithm_version": CALIBRATION_ALGORITHM_VERSION_V6,
+        "calibration_stage_sequence": CALIBRATION_STAGE_SEQUENCE_V6,
+        "candidate_values": CALIBRATION_CANDIDATE_VALUES_V6,
+        "maximum_calibration_candidates": MAX_CALIBRATION_CANDIDATES_V6,
+        "all_random_seeds": {"cross_validation": 42, "bootstrap": 42},
+        "fixed_behavior_configuration": {
+            "duplicate_question_multiplier": 0.25,
+            "posterior_floor": 1e-4,
+            "minimum_skill_coverage": 3,
+            "minimum_effective_evidence": 2.0,
+        },
+        "emission_fit_algorithm": "episode_balanced_weighted_median_mad",
+        "v6_change_scope": "lower-minimum-effective-evidence-only",
+        "parent_v5_protocol_final_hash": "parent-final",
+        "parent_v5_protocol_frozen_hash": "parent-frozen",
+        "parent_v5_report_hash": "parent-report",
+        "parent_v5_split_manifest_hash": "parent-manifest",
+        "parent_v5_inventory_hash": "parent-inventory",
+    })
+    for obsolete in (
+        "protocol_status", "validation_executions", "belief_config_hash",
+        "parent_split_manifest_hash", "split_migration_algorithm",
+    ):
+        protocol.pop(obsolete, None)
+    protocol.pop("protocol_hash", None)
+    protocol["protocol_hash"] = canonical_json_hash(protocol)
+    protocol_file.write_text(json.dumps(protocol), encoding="utf-8")
+    state = {
+        "schema_version": PROTOCOL_STATE_VERSION,
+        "protocol_hash": protocol["protocol_hash"],
+        "current_status": "PROVISIONAL_SYNTHETIC",
+        "validation_executions": 1,
+        "revision": 2,
+        "last_attempt_hash": "validation-attempt",
+        "belief_config_hash": config.config_hash,
+    }
+    state["state_hash"] = canonical_json_hash(state)
+    state_file = tmp_path / "calibration_protocol_state_v1.json"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    for path in (train_file, validation_file):
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        for row in rows:
+            row["protocol_hash"] = protocol["protocol_hash"]
+            row["split_assignment_hash"] = protocol["split_assignment_hash"]
+        path.write_text(json.dumps(rows), encoding="utf-8")
+    bundle = json.loads(bundle_file.read_text(encoding="utf-8"))
+    bundle.update({
+        "schema_version": DEVELOPMENT_BUNDLE_VERSION_V6,
+        "producer_version": CALIBRATION_ALGORITHM_VERSION_V6,
+        "supported_consumer_versions": [DEVELOPMENT_BUNDLE_VERSION_V6],
+        "protocol_hash": protocol["protocol_hash"],
+        "split_assignment_hash": protocol["split_assignment_hash"],
+    })
+    bundle["artifacts"]["replayed_train"]["sha256"] = file_sha256(train_file)
+    bundle["artifacts"]["replayed_validation"]["sha256"] = file_sha256(validation_file)
+    bundle.pop("bundle_hash")
+    bundle["bundle_hash"] = canonical_json_hash(bundle)
+    bundle_file.write_text(json.dumps(bundle), encoding="utf-8")
+
+    with patch(
+        "modules.module_07_rl.train.audit_raw_evidence",
+        return_value={"passes_quality_gates": True},
+    ), patch(
+        "modules.module_07_rl.train.audit_calibration_validation",
+        return_value={"passes_quality_gates": True},
+    ):
+        result = train_iql_policy(
+            train_file=train_file,
+            validation_file=validation_file,
+            belief_config_file=config_file,
+            development_bundle_file=bundle_file,
+            calibration_protocol_file=protocol_file,
+            calibration_protocol_state_file=state_file,
+            output_file=tmp_path / "checkpoint-v6.pth",
+            total_epochs=1,
+            batch_size=64,
+        )
+    assert result["epochs_completed"] == 1
 
 
 def test_training_stops_after_validation_patience(tmp_path):

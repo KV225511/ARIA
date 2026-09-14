@@ -10,6 +10,7 @@ from modules.module_07_rl.calibration_protocol import (
     CALIBRATION_STAGE_SEQUENCE,
     NUMERICAL_TOLERANCES,
     canonical_json_hash,
+    file_sha256,
 )
 from modules.module_07_rl.dataset_audit import CALIBRATION_GATE_THRESHOLDS, VALIDATION_GATE_VERSION
 from modules.module_07_rl.locked_test_evaluator import evaluate_locked_test_once
@@ -20,6 +21,16 @@ from modules.module_07_rl.calibration_protocol_v5 import (
     CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V5,
     CALIBRATION_STAGE_SEQUENCE as CALIBRATION_STAGE_SEQUENCE_V5,
     MAX_CALIBRATION_CANDIDATES as MAX_CALIBRATION_CANDIDATES_V5,
+)
+from modules.module_07_rl.calibration_protocol_v6 import (
+    CALIBRATION_ALGORITHM_VERSION as CALIBRATION_ALGORITHM_VERSION_V6,
+    CALIBRATION_CANDIDATE_VALUES as CALIBRATION_CANDIDATE_VALUES_V6,
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V6,
+    CALIBRATION_STAGE_SEQUENCE as CALIBRATION_STAGE_SEQUENCE_V6,
+    MAX_CALIBRATION_CANDIDATES as MAX_CALIBRATION_CANDIDATES_V6,
+    PROTOCOL_STATE_VERSION,
+    RAW_SPLIT_INVENTORY_VERSION,
+    split_assignment_hash,
 )
 
 
@@ -132,4 +143,81 @@ def test_locked_evaluator_accepts_v5_and_still_refuses_repeat(tmp_path):
     with pytest.raises(FileExistsError):
         evaluate_locked_test_once(
             test_file, config_file, protocol_file, manifest_file, output,
+        )
+
+
+def test_v6_locked_evaluator_claims_attempt_before_test_hash_and_fails_state(tmp_path):
+    test_file, config_file, protocol_file, manifest_file = _locked_fixture(tmp_path)
+    output = (tmp_path / "derived-v6").resolve()
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
+    protocol.update({
+        "protocol_schema_version": CALIBRATION_PROTOCOL_VERSION_V6,
+        "initial_protocol_status": "FROZEN_FOR_DEVELOPMENT",
+        "artifact_root": str(output),
+        "split_assignment_hash": split_assignment_hash(manifest),
+        "calibration_algorithm_version": CALIBRATION_ALGORITHM_VERSION_V6,
+        "calibration_stage_sequence": CALIBRATION_STAGE_SEQUENCE_V6,
+        "candidate_values": CALIBRATION_CANDIDATE_VALUES_V6,
+        "maximum_calibration_candidates": MAX_CALIBRATION_CANDIDATES_V6,
+        "all_random_seeds": {"cross_validation": 42, "bootstrap": 42},
+        "fixed_behavior_configuration": {
+            "duplicate_question_multiplier": 0.25,
+            "posterior_floor": 1e-4,
+            "minimum_skill_coverage": 3,
+            "minimum_effective_evidence": 2.0,
+        },
+        "emission_fit_algorithm": "episode_balanced_weighted_median_mad",
+        "v6_change_scope": "lower-minimum-effective-evidence-only",
+        "parent_v5_protocol_final_hash": "parent-final",
+        "parent_v5_protocol_frozen_hash": "parent-frozen",
+        "parent_v5_report_hash": "parent-report",
+        "parent_v5_split_manifest_hash": "parent-manifest",
+        "parent_v5_inventory_hash": "parent-inventory",
+    })
+    for obsolete in (
+        "protocol_status", "validation_executions", "belief_config_hash",
+        "parent_split_manifest_hash", "split_migration_algorithm",
+    ):
+        protocol.pop(obsolete, None)
+    protocol.pop("protocol_hash", None)
+    protocol["protocol_hash"] = canonical_json_hash(protocol)
+    protocol_file.write_text(json.dumps(protocol), encoding="utf-8")
+    config = BeliefModelConfig.load(config_file)
+    state = {
+        "schema_version": PROTOCOL_STATE_VERSION,
+        "protocol_hash": protocol["protocol_hash"],
+        "current_status": "PROVISIONAL_SYNTHETIC",
+        "validation_executions": 1,
+        "revision": 2,
+        "last_attempt_hash": "validation-attempt",
+        "belief_config_hash": config.config_hash,
+    }
+    state["state_hash"] = canonical_json_hash(state)
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+    inventory = {
+        "schema_version": RAW_SPLIT_INVENTORY_VERSION,
+        "protocol_hash": protocol["protocol_hash"],
+        "split_manifest_hash": manifest["manifest_hash"],
+        "artifacts": {"locked_test": {"sha256": file_sha256(test_file)}},
+    }
+    inventory["inventory_hash"] = canonical_json_hash(inventory)
+    inventory_file = tmp_path / "inventory.json"
+    inventory_file.write_text(json.dumps(inventory), encoding="utf-8")
+    test_file.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="locked test file hash mismatch"):
+        evaluate_locked_test_once(
+            test_file, config_file, protocol_file, manifest_file, output,
+            protocol_state=state_file, raw_split_inventory=inventory_file,
+        )
+    attempt = json.loads((output / "release" / "release_attempt_v1.json").read_text())
+    failed_state = json.loads(state_file.read_text())
+    assert attempt["state"] == "FAILED"
+    assert failed_state["current_status"] == "FAILED"
+    with pytest.raises(FileExistsError):
+        evaluate_locked_test_once(
+            test_file, config_file, protocol_file, manifest_file, output,
+            protocol_state=state_file, raw_split_inventory=inventory_file,
         )

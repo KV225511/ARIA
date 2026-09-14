@@ -777,6 +777,301 @@ def select_training_only_calibration_v5(
     return report
 
 
+V6_PARAMETER_ORDER = (
+    "repeat_discount_power", "max_skill_effective_sample_size",
+    "aggregation_temperature", "minimum_assessment_confidence",
+    "scale_shrinkage", "minimum_skill_coverage",
+    "minimum_effective_evidence",
+)
+
+
+def _v6_parameters(parameters: dict) -> dict:
+    expected = {
+        "scale_shrinkage": 1.0,
+        "aggregation_temperature": 2.0,
+        "minimum_assessment_confidence": 0.45,
+        "repeat_discount_power": 0.25,
+        "max_skill_effective_sample_size": 3.0,
+        "minimum_skill_coverage": 3,
+        "minimum_effective_evidence": 2.0,
+    }
+    unknown = set(parameters) - set(expected)
+    if unknown:
+        raise ValueError(f"unknown v6 calibration parameters: {sorted(unknown)}")
+    expected.update(parameters)
+    expected["minimum_skill_coverage"] = int(expected["minimum_skill_coverage"])
+    for key in set(expected) - {"minimum_skill_coverage"}:
+        expected[key] = float(expected[key])
+    return expected
+
+
+def _prediction_rows_v6(transitions: list[dict], config: BeliefModelConfig) -> list[dict]:
+    rows = []
+    for episode in sorted(
+        group_transitions_into_episodes(transitions),
+        key=lambda item: _episode_identity(item)[0] if item else "",
+    ):
+        if not episode or episode[-1].get("true_label") not in (0, 1, 2):
+            continue
+        assessment = replay_episode(episode, config)
+        if assessment is None:
+            continue
+        reasons = []
+        if assessment["confidence"] < config.minimum_assessment_confidence:
+            reasons.append("confidence_below_minimum")
+        if assessment["effective_evidence"] < config.minimum_effective_evidence:
+            reasons.append("effective_evidence_below_minimum")
+        if len(assessment["visited_skills"]) < config.minimum_skill_coverage:
+            reasons.append("skill_coverage_below_minimum")
+        episode_id, resume, jd = _episode_identity(episode)
+        rows.append({
+            "episode_id": episode_id,
+            "resume_identity": resume,
+            "jd_identity": jd,
+            "true_label": int(episode[-1]["true_label"]),
+            "prediction": assessment["label"],
+            "raw_label": assessment["raw_label"],
+            "status": assessment["status"],
+            "probabilities": [float(value) for value in assessment["belief"]],
+            "confidence": float(assessment["confidence"]),
+            "effective_evidence": float(assessment["effective_evidence"]),
+            "visited_skill_count": len(assessment["visited_skills"]),
+            "abstention_reasons": reasons,
+        })
+    return rows
+
+
+def evaluate_candidate_cross_validated_v6(
+    training_transitions: list[dict],
+    candidate_parameters: dict,
+    folds,
+):
+    """Evaluate a v6 evidence-threshold candidate on training OOF rows only."""
+    if any(item.get("dataset_split") in {"validation", "test"} for item in training_transitions):
+        raise ValueError("candidate evaluation accepts training transitions only")
+    fold_report = build_grouped_cv_folds(training_transitions) if folds == 3 else folds
+    if not isinstance(fold_report, dict) or fold_report.get("fold_count") != 3:
+        raise ValueError("folds must be a three-fold grouped CV report")
+    parameters = _v6_parameters(candidate_parameters)
+    episodes = group_transitions_into_episodes(training_transitions)
+    rows, fit_hashes = [], []
+    error = None
+    try:
+        for held_out in range(3):
+            fit_rows, held_out_rows = [], []
+            for episode in episodes:
+                episode_id = _episode_identity(episode)[0]
+                destination = fold_report["assignments"].get(episode_id)
+                if destination is None:
+                    raise ValueError(f"episode {episode_id} is absent from CV folds")
+                (held_out_rows if destination == held_out else fit_rows).extend(episode)
+            base = BeliefModelConfig(
+                repeat_discount_power=parameters["repeat_discount_power"],
+                max_skill_effective_sample_size=parameters["max_skill_effective_sample_size"],
+                aggregation_temperature=parameters["aggregation_temperature"],
+                minimum_assessment_confidence=parameters["minimum_assessment_confidence"],
+                minimum_skill_coverage=parameters["minimum_skill_coverage"],
+                minimum_effective_evidence=parameters["minimum_effective_evidence"],
+            )
+            fitted = fit_emission_config(fit_rows, base_config=base)
+            fitted = apply_scale_shrinkage(fitted, parameters["scale_shrinkage"])
+            fit_hashes.append(fitted.config_hash)
+            fold_rows = _prediction_rows_v6(held_out_rows, fitted)
+            for row in fold_rows:
+                row["held_out_fold"] = held_out
+            rows.extend(fold_rows)
+        from modules.module_07_rl.metrics import compute_classification_metrics
+        metrics = compute_classification_metrics(
+            [row["true_label"] for row in rows],
+            [row["prediction"] for row in rows],
+            [row["probabilities"] for row in rows],
+        )
+    except (TypeError, ValueError) as exc:
+        error = str(exc)
+        metrics = {}
+    eligible, reasons = _gate_candidate(metrics)
+    if error:
+        reasons.insert(0, f"evaluation_error:{error}")
+        eligible = False
+    return {
+        "parameters": parameters,
+        "parameter_tuple": [parameters[name] for name in V6_PARAMETER_ORDER],
+        "eligible": eligible,
+        "rejection_reasons": reasons,
+        "metrics": metrics,
+        "out_of_fold_predictions": rows,
+        "fold_config_hashes": fit_hashes,
+        "fold_report_hash": fold_report["report_hash"],
+    }
+
+
+def _verify_v6_anchor(parent_candidate: dict, current_candidate: dict, tolerance=1e-12):
+    if parent_candidate.get("parameters") is None:
+        return ["parent_anchor_missing_parameters"]
+    expected = _v6_parameters({
+        **parent_candidate["parameters"],
+        "minimum_skill_coverage": 3,
+        "minimum_effective_evidence": 2.0,
+    })
+    reasons = []
+    if current_candidate["parameters"] != expected:
+        reasons.append("anchor_parameters_changed")
+    if current_candidate.get("fold_report_hash") != parent_candidate.get("fold_report_hash"):
+        reasons.append("anchor_fold_report_changed")
+    parent_rows = {row["episode_id"]: row for row in parent_candidate.get("out_of_fold_predictions", [])}
+    current_rows = {row["episode_id"]: row for row in current_candidate.get("out_of_fold_predictions", [])}
+    if set(parent_rows) != set(current_rows):
+        reasons.append("anchor_episode_set_changed")
+        return reasons
+    for episode_id in sorted(parent_rows):
+        old, new = parent_rows[episode_id], current_rows[episode_id]
+        for field in ("true_label", "prediction", "held_out_fold"):
+            if old.get(field) != new.get(field):
+                reasons.append(f"anchor_{field}_changed:{episode_id}")
+                break
+        old_prob, new_prob = old.get("probabilities", []), new.get("probabilities", [])
+        if len(old_prob) != len(new_prob) or any(
+            abs(float(left) - float(right)) > tolerance
+            for left, right in zip(old_prob, new_prob)
+        ):
+            reasons.append(f"anchor_probabilities_changed:{episode_id}")
+    return reasons
+
+
+def _verify_v6_threshold_only(anchor: dict, candidate: dict, tolerance=1e-12):
+    reasons = []
+    anchor_rows = {row["episode_id"]: row for row in anchor["out_of_fold_predictions"]}
+    candidate_rows = {row["episode_id"]: row for row in candidate["out_of_fold_predictions"]}
+    if set(anchor_rows) != set(candidate_rows):
+        return ["candidate_episode_set_changed"]
+    for episode_id in sorted(anchor_rows):
+        old, new = anchor_rows[episode_id], candidate_rows[episode_id]
+        if any(abs(float(a) - float(b)) > tolerance for a, b in zip(
+            old["probabilities"], new["probabilities"],
+        )):
+            reasons.append(f"candidate_probabilities_changed:{episode_id}")
+        if old["prediction"] is not None and old["prediction"] != new["prediction"]:
+            reasons.append(f"previous_decision_changed:{episode_id}")
+    old_ece = anchor["metrics"].get("expected_calibration_error")
+    new_ece = candidate["metrics"].get("expected_calibration_error")
+    if old_ece is None or new_ece is None or abs(float(old_ece) - float(new_ece)) > tolerance:
+        reasons.append("candidate_ece_changed")
+    return reasons
+
+
+def select_training_only_calibration_v6(
+    training_transitions: list[dict],
+    raw_dataset_hash: str,
+    split_manifest_hash: str,
+    protocol_hash: str,
+    *,
+    parent_v5_report: dict | None = None,
+):
+    """Run the frozen three-candidate v6 search using training only."""
+    from modules.module_07_rl.calibration_protocol_v6 import (
+        CALIBRATION_ALGORITHM_VERSION as V6_ALGORITHM_VERSION,
+        CALIBRATION_CV_REPORT_VERSION as V6_REPORT_VERSION,
+        MAX_CALIBRATION_CANDIDATES as V6_LIMIT,
+    )
+    folds = build_grouped_cv_folds(training_transitions, folds=3, seed=42)
+    anchor_parameters = _v6_parameters({})
+    anchor = evaluate_candidate_cross_validated_v6(
+        training_transitions, anchor_parameters, folds,
+    )
+    anchor["candidate_index"] = 1
+    anchor["stage"] = "A_V5_ANCHOR"
+    attempted = [anchor]
+    stages = [{"stage": "A_V5_ANCHOR", "candidate_count": 1,
+               "eligible_count": int(anchor["eligible"])}]
+    reproduction_reasons = []
+    if parent_v5_report is not None:
+        parent_anchor = parent_v5_report.get("best_failing_candidate") or {}
+        reproduction_reasons = _verify_v6_anchor(parent_anchor, anchor)
+    selected = anchor if anchor["eligible"] and not reproduction_reasons else None
+    if reproduction_reasons:
+        anchor["eligible"] = False
+        anchor["rejection_reasons"].extend(reproduction_reasons)
+    elif selected is None:
+        stage_b = []
+        for threshold in (1.75, 1.5):
+            result = evaluate_candidate_cross_validated_v6(
+                training_transitions,
+                {**anchor_parameters, "minimum_effective_evidence": threshold},
+                folds,
+            )
+            result["candidate_index"] = len(attempted) + 1
+            result["stage"] = "B_LOWER_MINIMUM_EFFECTIVE_EVIDENCE"
+            invariant_reasons = _verify_v6_threshold_only(anchor, result)
+            if invariant_reasons:
+                result["eligible"] = False
+                result["rejection_reasons"].extend(invariant_reasons)
+            attempted.append(result)
+            stage_b.append(result)
+        eligible = [item for item in stage_b if item["eligible"]]
+        selected = min(eligible, key=_rank_key) if eligible else None
+        stages.append({
+            "stage": "B_LOWER_MINIMUM_EFFECTIVE_EVIDENCE",
+            "candidate_count": len(stage_b),
+            "eligible_count": len(eligible),
+        })
+    assert len(attempted) <= V6_LIMIT
+    report = {
+        "schema_version": V6_REPORT_VERSION,
+        "producer_version": V6_ALGORITHM_VERSION,
+        "supported_consumer_versions": [V6_REPORT_VERSION],
+        "protocol_hash": protocol_hash,
+        "raw_dataset_hash": raw_dataset_hash,
+        "split_manifest_hash": split_manifest_hash,
+        "cross_validation": folds,
+        "stages": stages,
+        "attempted_candidates": attempted,
+        "candidate_count": len(attempted),
+        "candidate_limit": V6_LIMIT,
+        "selection_status": (
+            "REPRODUCIBILITY_FAILURE" if reproduction_reasons
+            else "ELIGIBLE" if selected else "FAILED"
+        ),
+        "selected_candidate": selected,
+        "best_failing_candidate": None if selected else _best_failing(attempted),
+        "validation_used_for_selection": False,
+        "anchor_reproduction_reasons": reproduction_reasons,
+        "v6_change_scope": "lower-minimum-effective-evidence-only",
+    }
+    report["selection_decision_hash"] = _canonical_hash(report)
+    if selected:
+        parameters = selected["parameters"]
+        base = BeliefModelConfig(
+            repeat_discount_power=parameters["repeat_discount_power"],
+            max_skill_effective_sample_size=parameters["max_skill_effective_sample_size"],
+            aggregation_temperature=parameters["aggregation_temperature"],
+            minimum_assessment_confidence=parameters["minimum_assessment_confidence"],
+            minimum_skill_coverage=parameters["minimum_skill_coverage"],
+            minimum_effective_evidence=parameters["minimum_effective_evidence"],
+        )
+        config = fit_emission_config(
+            training_transitions, base_config=base,
+            raw_dataset_hash=raw_dataset_hash,
+            split_manifest_hash=split_manifest_hash,
+        )
+        config = apply_scale_shrinkage(config, parameters["scale_shrinkage"])
+        metadata = dict(config.fit_metadata)
+        metadata.update({
+            "calibration_algorithm_version": V6_ALGORITHM_VERSION,
+            "protocol_hash_at_selection": protocol_hash,
+            "selection_decision_hash": report["selection_decision_hash"],
+            "selected_parameters": parameters,
+            "v6_change_scope": "lower-minimum-effective-evidence-only",
+        })
+        config = config.with_updates(fit_metadata=metadata)
+        report["config"] = config
+        report["belief_config_hash"] = config.config_hash
+    hashable = dict(report)
+    if isinstance(hashable.get("config"), BeliefModelConfig):
+        hashable["config"] = hashable["config"].to_dict()
+    report["report_hash"] = _canonical_hash(hashable)
+    return report
+
+
 def _metrics_from_vectors(truth, predictions, probabilities):
     from modules.module_07_rl.metrics import compute_classification_metrics
     return compute_classification_metrics(truth, predictions, probabilities)

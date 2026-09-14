@@ -52,6 +52,13 @@ from modules.module_07_rl.calibration_protocol_v5 import (
     validate_calibration_protocol_v5,
     validate_development_bundle_v5,
 )
+from modules.module_07_rl.calibration_protocol_v6 import (
+    CALIBRATION_PROTOCOL_VERSION as CALIBRATION_PROTOCOL_VERSION_V6,
+    DEVELOPMENT_BUNDLE_VERSION as DEVELOPMENT_BUNDLE_VERSION_V6,
+    validate_calibration_protocol_v6,
+    validate_development_bundle_v6,
+    validate_protocol_state,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -260,6 +267,7 @@ def train_iql_policy(
     belief_config_file=DEFAULT_CONFIG_FILE,
     development_bundle_file=None,
     calibration_protocol_file=None,
+    calibration_protocol_state_file=None,
     output_file=DEFAULT_CHECKPOINT,
     total_epochs=100,
     batch_size=256,
@@ -285,20 +293,36 @@ def train_iql_policy(
         protocol = validate_calibration_protocol(protocol_preview)
         expected_bundle_version = DEVELOPMENT_BUNDLE_VERSION_V4
         bundle_validator = validate_development_bundle
+        protocol_status = protocol["protocol_status"]
+        expected_config_hash = protocol.get("belief_config_hash")
+        protocol_state = None
     elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V5:
         protocol = validate_calibration_protocol_v5(protocol_preview)
         expected_bundle_version = DEVELOPMENT_BUNDLE_VERSION_V5
         bundle_validator = validate_development_bundle_v5
+        protocol_status = protocol["protocol_status"]
+        expected_config_hash = protocol.get("belief_config_hash")
+        protocol_state = None
+    elif protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+        protocol = validate_calibration_protocol_v6(protocol_preview)
+        state_path = Path(calibration_protocol_state_file) if calibration_protocol_state_file else (
+            Path(calibration_protocol_file).with_name("calibration_protocol_state_v1.json")
+        )
+        protocol_state = validate_protocol_state(state_path, protocol=protocol)
+        expected_bundle_version = DEVELOPMENT_BUNDLE_VERSION_V6
+        bundle_validator = validate_development_bundle_v6
+        protocol_status = protocol_state["current_status"]
+        expected_config_hash = protocol_state.get("belief_config_hash")
     else:
         raise ValueError("unsupported calibration protocol version")
-    if protocol["protocol_status"] not in {
+    if protocol_status not in {
         "PROVISIONAL_SYNTHETIC", "VALIDATED_SYNTHETIC",
     }:
         raise ValueError("calibration protocol status does not permit training")
     config = BeliefModelConfig.load(belief_config_file)
     if config.schema_version != "belief-v2":
         raise ValueError("training requires belief-v2 configuration")
-    if config.config_hash != protocol.get("belief_config_hash"):
+    if config.config_hash != expected_config_hash:
         raise ValueError("belief configuration hash mismatch")
     bundle_preview = json.loads(Path(development_bundle_file).read_text(encoding="utf-8"))
     if bundle_preview.get("schema_version") != expected_bundle_version:
@@ -309,14 +333,16 @@ def train_iql_policy(
         raise ValueError("development bundle does not reference its split manifest")
     if split_record.get("sha256") != file_sha256(split_manifest_path):
         raise ValueError("development bundle split manifest file hash mismatch")
-    bundle = bundle_validator(
-        bundle_preview,
-        protocol=protocol,
-        belief_config_hash=config.config_hash,
-        split_manifest=split_manifest_path,
-        train_file=train_path,
-        validation_file=validation_path,
-    )
+    bundle_kwargs = {
+        "protocol": protocol,
+        "belief_config_hash": config.config_hash,
+        "split_manifest": split_manifest_path,
+        "train_file": train_path,
+        "validation_file": validation_path,
+    }
+    if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+        bundle_kwargs["state"] = protocol_state
+    bundle = bundle_validator(bundle_preview, **bundle_kwargs)
     config_artifact = bundle["artifacts"].get("belief_config", {})
     if config_artifact.get("sha256") != file_sha256(belief_config_file):
         raise ValueError("development bundle belief configuration file hash mismatch")
@@ -331,6 +357,8 @@ def train_iql_policy(
         "split_manifest_hash": bundle["split_manifest_hash"],
         "environment_fingerprint_hash": protocol["environment_fingerprint_hash"],
     }
+    if protocol_version == CALIBRATION_PROTOCOL_VERSION_V6:
+        provenance_expected["split_assignment_hash"] = protocol["split_assignment_hash"]
     for split_name, rows in (("train", training_source), ("validation", validation_source)):
         for index, transition in enumerate(rows):
             if transition.get("schema_version") != "aria-replay-v4":
@@ -553,6 +581,7 @@ if __name__ == "__main__":
     parser.add_argument("--belief-config", default=str(DEFAULT_CONFIG_FILE))
     parser.add_argument("--development-bundle", required=True)
     parser.add_argument("--calibration-protocol", required=True)
+    parser.add_argument("--calibration-protocol-state")
     parser.add_argument("--output", default=str(DEFAULT_CHECKPOINT))
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -567,6 +596,7 @@ if __name__ == "__main__":
             belief_config_file=args.belief_config,
             development_bundle_file=args.development_bundle,
             calibration_protocol_file=args.calibration_protocol,
+            calibration_protocol_state_file=args.calibration_protocol_state,
             output_file=args.output,
             total_epochs=args.epochs,
             batch_size=args.batch_size,

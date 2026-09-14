@@ -15,6 +15,7 @@ from modules.module_07_rl.belief_calibration import (
     paired_component_bootstrap,
     select_training_only_calibration,
     select_training_only_calibration_v5,
+    select_training_only_calibration_v6,
 )
 
 
@@ -225,6 +226,60 @@ def test_v5_search_is_additive_narrow_and_deterministic(
         assert all(item["rejection_reasons"] for item in report["attempted_candidates"] if not item["eligible"])
     assert report["validation_used_for_selection"] is False
     parameters = set(inspect.signature(select_training_only_calibration_v5).parameters)
+    assert not {"validation_transitions", "test_transitions"} & parameters
+
+
+def test_v6_search_changes_only_effective_evidence_and_stops_at_three(monkeypatch):
+    calls = []
+
+    def fake(_training, parameters, _folds):
+        parameters = dict(parameters)
+        calls.append(parameters)
+        threshold = parameters["minimum_effective_evidence"]
+        eligible = threshold == 1.5
+        metrics = _fake_candidate(parameters, eligible)["metrics"]
+        metrics["expected_calibration_error"] = 0.05
+        return {
+            "parameters": parameters,
+            "parameter_tuple": [
+                parameters[name] for name in (
+                    "repeat_discount_power", "max_skill_effective_sample_size",
+                    "aggregation_temperature", "minimum_assessment_confidence",
+                    "scale_shrinkage", "minimum_skill_coverage",
+                    "minimum_effective_evidence",
+                )
+            ],
+            "eligible": eligible,
+            "rejection_reasons": [] if eligible else ["minimum_class_recall_below_minimum"],
+            "metrics": metrics,
+            "out_of_fold_predictions": [{
+                "episode_id": "episode",
+                "true_label": 0,
+                "prediction": 0 if eligible else None,
+                "probabilities": [0.7, 0.2, 0.1],
+                "held_out_fold": 0,
+            }],
+            "fold_config_hashes": ["a", "b", "c"],
+            "fold_report_hash": _folds["report_hash"],
+        }
+
+    monkeypatch.setattr(
+        "modules.module_07_rl.belief_calibration.evaluate_candidate_cross_validated_v6",
+        fake,
+    )
+    report = select_training_only_calibration_v6(
+        _grouped_training(), "raw", "split", "protocol",
+    )
+    assert [item["minimum_effective_evidence"] for item in calls] == [2.0, 1.75, 1.5]
+    assert report["candidate_count"] == 3
+    assert report["selection_status"] == "ELIGIBLE"
+    assert report["config"].minimum_effective_evidence == 1.5
+    fixed = {key: value for key, value in calls[0].items() if key != "minimum_effective_evidence"}
+    assert all(
+        {key: value for key, value in item.items() if key != "minimum_effective_evidence"} == fixed
+        for item in calls
+    )
+    parameters = set(inspect.signature(select_training_only_calibration_v6).parameters)
     assert not {"validation_transitions", "test_transitions"} & parameters
 
 

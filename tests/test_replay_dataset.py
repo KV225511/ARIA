@@ -317,3 +317,122 @@ def test_v5_fixture_end_to_end_is_additive_and_test_locked(tmp_path):
             output,
             bootstrap_samples=10,
         )
+
+
+def test_v6_fixture_end_to_end_uses_failed_v5_lineage_and_stable_state(tmp_path):
+    from modules.module_07_rl.belief_calibration import (
+        build_grouped_cv_folds,
+        evaluate_candidate_cross_validated,
+    )
+    from modules.module_07_rl.calibration_protocol import canonical_json_hash
+    from modules.module_07_rl.calibration_protocol_v5 import update_protocol_status_v5
+    from modules.module_07_rl.prepare_belief_pipeline_v5 import freeze_development_splits_v5
+    from modules.module_07_rl.prepare_belief_pipeline_v6 import (
+        freeze_development_splits_v6,
+        prepare_development_calibration_v6,
+    )
+
+    transitions, assignments = [], {}
+    for index in range(33):
+        rows = _raw_episode(index, index % 3, (0.1, 0.5, 0.9)[index % 3])
+        terminal = dict(rows[-1])
+        rows[-1]["done"] = False
+        terminal.update({
+            "done": True, "question": "Question 2",
+            "question_prompt_hash": f"prompt-hash-{index}-2",
+            "question_generation_seed": index * 100 + 2,
+        })
+        rows.append(terminal)
+        for turn, row in enumerate(rows):
+            row.update({
+                "target_skill": f"Skill-{turn}", "target_skill_id": f"skill-{turn}",
+                "resume_content_hash": f"resume-content-{index}",
+                "jd_content_hash": f"jd-content-{index}",
+            })
+        transitions.extend(rows)
+        assignments[f"episode-{index}"] = "train" if index < 22 else "validation" if index < 27 else "test"
+    parent = {
+        "schema_version": "aria-split-manifest-v3",
+        "raw_dataset_hash": canonical_json_hash(transitions),
+        "assignments": assignments,
+        "locked_test_assignment_hash": canonical_json_hash({
+            "episode_ids": [f"episode-{index}" for index in range(27, 33)],
+            "resume_content_hashes": [f"resume-content-{index}" for index in range(27, 33)],
+            "jd_content_hashes": [f"jd-content-{index}" for index in range(27, 33)],
+        }),
+    }
+    parent["manifest_hash"] = canonical_json_hash(parent)
+    raw_file, parent_file, lock_file = (
+        tmp_path / "qwen_rl_dataset.json",
+        tmp_path / "split_manifest_v3.json",
+        tmp_path / "requirements.lock",
+    )
+    raw_file.write_text(json.dumps(transitions, indent=2), encoding="utf-8")
+    parent_file.write_text(json.dumps(parent), encoding="utf-8")
+    lock_file.write_text("numpy==fixture\n", encoding="utf-8")
+    before = raw_file.read_bytes()
+
+    v5 = tmp_path / "derived-calibration-v5"
+    freeze_development_splits_v5(
+        raw_file, parent_file, v5,
+        dependency_lock_path=lock_file, expected_counts=(33, 99, 33),
+    )
+    train_v5 = json.loads((v5 / "raw-splits" / "train.json").read_text())
+    folds = build_grouped_cv_folds(train_v5)
+    anchor = evaluate_candidate_cross_validated(train_v5, {
+        "scale_shrinkage": 1.0, "aggregation_temperature": 2.0,
+        "minimum_assessment_confidence": 0.45,
+        "repeat_discount_power": 0.25, "max_skill_effective_sample_size": 3,
+    }, folds)
+    protocol_v5_path = v5 / "protocol" / "calibration_protocol_v5.json"
+    frozen_v5 = json.loads(protocol_v5_path.read_text())
+    report_v5 = {
+        "schema_version": "aria-calibration-cv-report-v2",
+        "protocol_hash": frozen_v5["protocol_hash"],
+        "selection_status": "FAILED", "candidate_count": 4, "candidate_limit": 4,
+        "validation_used_for_selection": False,
+        "attempted_candidates": [anchor], "best_failing_candidate": anchor,
+    }
+    report_v5["report_hash"] = canonical_json_hash(report_v5)
+    report_v5_path = v5 / "calibration" / "training_cv_report_v2.json"
+    report_v5_path.write_text(json.dumps(report_v5), encoding="utf-8")
+    update_protocol_status_v5(protocol_v5_path, "FAILED")
+
+    v6 = tmp_path / "derived-calibration-v6"
+    frozen_v6 = freeze_development_splits_v6(
+        raw_file, parent_file, protocol_v5_path, report_v5_path,
+        v5 / "manifests" / "split_manifest_v4.json",
+        v5 / "manifests" / "raw_split_inventory_v2.json",
+        v6, dependency_lock_path=lock_file, expected_counts=(33, 99, 33),
+    )
+    protocol_v6_path = v6 / "protocol" / "calibration_protocol_v6.json"
+    stable_hash = json.loads(protocol_v6_path.read_text())["protocol_hash"]
+    result = prepare_development_calibration_v6(
+        v6 / "raw-splits" / "train.json",
+        v6 / "raw-splits" / "validation.json",
+        v6 / "manifests" / "split_manifest_v4.json",
+        v6 / "manifests" / "raw_split_inventory_v3.json",
+        protocol_v6_path,
+        v6 / "protocol" / "calibration_protocol_state_v1.json",
+        report_v5_path, v6, bootstrap_samples=10,
+    )
+    state = json.loads((v6 / "protocol" / "calibration_protocol_state_v1.json").read_text())
+    assert result["validation_used_for_selection"] is False
+    assert state["current_status"] == "PROVISIONAL_SYNTHETIC"
+    assert state["validation_executions"] == 1
+    assert json.loads(protocol_v6_path.read_text())["protocol_hash"] == stable_hash
+    assert frozen_v6["assignments"] == json.loads(
+        (v5 / "manifests" / "split_manifest_v4.json").read_text()
+    )["assignments"]
+    assert raw_file.read_bytes() == before
+    assert not (v6 / "replayed" / "test.json").exists()
+    with pytest.raises((FileExistsError, ValueError)):
+        prepare_development_calibration_v6(
+            v6 / "raw-splits" / "train.json",
+            v6 / "raw-splits" / "validation.json",
+            v6 / "manifests" / "split_manifest_v4.json",
+            v6 / "manifests" / "raw_split_inventory_v3.json",
+            protocol_v6_path,
+            v6 / "protocol" / "calibration_protocol_state_v1.json",
+            report_v5_path, v6, bootstrap_samples=10,
+        )
