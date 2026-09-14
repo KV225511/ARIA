@@ -687,14 +687,37 @@ def audit_learned_policy_evaluation(report: dict):
             "passes_quality_gates": False,
         }
     warnings = []
+    from modules.module_07_rl.calibration_protocol import canonical_json_hash
+    from modules.module_07_rl.learned_policy_rollout import ROLLOUT_REPORT_VERSION
+    if report.get("schema_version") != ROLLOUT_REPORT_VERSION:
+        warnings.append("Unsupported learned-policy rollout report schema.")
+    if ROLLOUT_REPORT_VERSION not in report.get("supported_consumer_versions", []):
+        warnings.append("Rollout report does not support this consumer version.")
+    supplied_hash = report.get("report_hash")
+    unhashed = dict(report)
+    unhashed.pop("report_hash", None)
+    if not supplied_hash or supplied_hash != canonical_json_hash(unhashed):
+        warnings.append("Learned-policy rollout report hash is invalid.")
     if report.get("evaluation_type") != "learned_policy_rollout":
         warnings.append("Evaluation is not labeled as a learned-policy rollout.")
     if report.get("fresh_rollouts") is not True:
         warnings.append("Learned-policy evaluation requires fresh rollouts.")
     if not report.get("checkpoint_hash"):
         warnings.append("Learned-policy evaluation is missing a checkpoint hash.")
+    if not report.get("protocol_hash") or not report.get("belief_config_hash"):
+        warnings.append("Learned-policy evaluation is missing calibration provenance.")
     if int(report.get("num_episodes", 0) or 0) <= 0:
         warnings.append("Learned-policy evaluation contains no rollout episodes.")
+    if report.get("evaluates_learned_policy") is not True:
+        warnings.append("Evaluation does not attest that actions came from the learned policy.")
+    if report.get("uses_locked_test") is not False:
+        warnings.append("Learned-policy rollout evaluation must not use the locked test.")
+    if int(report.get("illegal_action_count", 0) or 0) != 0:
+        warnings.append("Learned-policy evaluation contains illegal actions.")
+    if int(report.get("invalid_probability_row_count", 0) or 0) != 0:
+        warnings.append("Learned-policy evaluation contains invalid action probabilities.")
+    if float(report.get("completion_rate", 0.0) or 0.0) != 1.0:
+        warnings.append("Learned-policy evaluation contains incomplete episodes.")
     return {
         "gate": "learned_policy",
         "warnings": warnings,

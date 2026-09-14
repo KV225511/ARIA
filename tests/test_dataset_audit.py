@@ -77,11 +77,22 @@ def test_validation_and_policy_gates_remain_distinct():
         "passes_quality_gates"
     ]
     rollout_report = {
+        "schema_version": "aria-iql-rollout-report-v1",
+        "supported_consumer_versions": ["aria-iql-rollout-report-v1"],
         "evaluation_type": "learned_policy_rollout",
         "fresh_rollouts": True,
         "checkpoint_hash": "abc123",
         "num_episodes": 3,
+        "evaluates_learned_policy": True,
+        "uses_locked_test": False,
+        "illegal_action_count": 0,
+        "invalid_probability_row_count": 0,
+        "completion_rate": 1.0,
+        "protocol_hash": "protocol-hash",
+        "belief_config_hash": "config-hash",
     }
+    from modules.module_07_rl.calibration_protocol import canonical_json_hash
+    rollout_report["report_hash"] = canonical_json_hash(rollout_report)
     assert audit_learned_policy_evaluation(rollout_report)["passes_quality_gates"]
 
 
