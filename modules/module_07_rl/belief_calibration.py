@@ -1072,6 +1072,131 @@ def select_training_only_calibration_v6(
     return report
 
 
+V7_LOW_CLASS_LOGIT_BIASES = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+
+
+def apply_low_class_logit_bias(probabilities, bias: float):
+    """Return a normalized v7 Low-class logit-bias transformation."""
+    values = np.asarray(probabilities, dtype=float)
+    if values.shape != (3,) or not np.all(np.isfinite(values)) or np.any(values < 0):
+        raise ValueError("probabilities must be a finite non-negative length-three vector")
+    if not np.isclose(values.sum(), 1.0, atol=1e-6):
+        raise ValueError("probabilities must sum to one")
+    if not 0.0 <= float(bias) <= 1.0:
+        raise ValueError("low_class_logit_bias must be in [0, 1]")
+    logits = np.log(np.maximum(values, 1e-12))
+    logits[0] += float(bias)
+    shifted = logits - np.max(logits)
+    output = np.exp(shifted)
+    return (output / output.sum()).tolist()
+
+
+def evaluate_low_bias_candidate(anchor_oof_predictions: list[dict], bias: float):
+    """Score one v7 decision-only candidate from v6 OOF predictions."""
+    from modules.module_07_rl.metrics import compute_classification_metrics
+    rows = []
+    for row in anchor_oof_predictions:
+        transformed = apply_low_class_logit_bias(row["probabilities"], bias)
+        confidence = max(transformed)
+        evidence_ok = float(row.get("effective_evidence", 0.0)) >= 1.5
+        coverage_ok = int(row.get("visited_skill_count", 0)) >= 3
+        prediction = int(np.argmax(transformed)) if (
+            confidence >= 0.45 and evidence_ok and coverage_ok
+        ) else None
+        rows.append({
+            **row,
+            "pre_decision_bias_probabilities": list(row["probabilities"]),
+            "probabilities": transformed,
+            "prediction": prediction,
+            "confidence": confidence,
+        })
+    metrics = compute_classification_metrics(
+        [int(row["true_label"]) for row in rows],
+        [row["prediction"] for row in rows],
+        [row["probabilities"] for row in rows],
+    )
+    per_class = metrics["per_class"]
+    reasons = []
+    checks = {
+        "overall_accuracy": metrics["overall_accuracy"] >= 0.60,
+        "macro_f1": metrics["macro_f1"] >= 0.60,
+        "beginner_recall": per_class[0]["recall"] >= 0.65,
+        "beginner_precision": per_class[0]["precision"] >= 0.70,
+        "mid_recall": per_class[1]["recall"] >= 0.90,
+        "expert_recall": per_class[2]["recall"] >= 0.90,
+        "prediction_collapse": metrics["maximum_classified_prediction_share"] <= 0.60,
+        "abstention_rate": metrics["abstention_rate"] <= 0.15,
+        "expected_calibration_error": metrics["expected_calibration_error"] <= 0.15,
+        "all_classes_predicted": set(metrics["decision_prediction_counts"]) == {0, 1, 2},
+    }
+    reasons = [f"{name}_failed" for name, passed in checks.items() if not passed]
+    return {
+        "parameters": {"low_class_logit_bias": float(bias)},
+        "parameter_tuple": [float(bias)],
+        "metrics": metrics,
+        "out_of_fold_predictions": rows,
+        "eligible": not reasons,
+        "rejection_reasons": reasons,
+    }
+
+
+def select_training_only_calibration_v7(
+    training_transitions: list[dict],
+    parent_v6_report: dict,
+    parent_v6_config: BeliefModelConfig,
+    raw_dataset_hash: str,
+    split_manifest_hash: str,
+    protocol_hash: str,
+):
+    """Frozen v7 six-candidate Low decision-bias search; training only."""
+    if any(row.get("dataset_split") in {"validation", "test"} for row in training_transitions):
+        raise ValueError("v7 candidate selection accepts training transitions only")
+    anchor = parent_v6_report.get("selected_candidate")
+    if not isinstance(anchor, dict) or not anchor.get("out_of_fold_predictions"):
+        raise ValueError("v7 requires the v6 selected OOF candidate")
+    if parent_v6_config.minimum_effective_evidence != 1.5:
+        raise ValueError("v7 requires the frozen v6 minimum evidence threshold")
+    attempted = []
+    for index, bias in enumerate(V7_LOW_CLASS_LOGIT_BIASES, start=1):
+        candidate = evaluate_low_bias_candidate(anchor["out_of_fold_predictions"], bias)
+        candidate["candidate_index"] = index
+        candidate["stage"] = "LOW_CLASS_LOGIT_BIAS"
+        attempted.append(candidate)
+    assert len(attempted) <= len(V7_LOW_CLASS_LOGIT_BIASES)
+    eligible = [candidate for candidate in attempted if candidate["eligible"]]
+    selected = min(eligible, key=lambda item: (
+        -item["metrics"]["macro_f1"],
+        -item["metrics"]["minimum_class_recall"],
+        -item["metrics"]["per_class"][0]["recall"],
+        item["metrics"]["ordinal_mae"],
+        item["metrics"]["expected_calibration_error"],
+        item["parameters"]["low_class_logit_bias"],
+    )) if eligible else None
+    report = {
+        "schema_version": "aria-calibration-cv-report-v4",
+        "producer_version": "aria-belief-calibration-v7",
+        "supported_consumer_versions": ["aria-calibration-cv-report-v4"],
+        "protocol_hash": protocol_hash,
+        "raw_dataset_hash": raw_dataset_hash,
+        "split_manifest_hash": split_manifest_hash,
+        "candidate_count": len(attempted),
+        "candidate_limit": len(V7_LOW_CLASS_LOGIT_BIASES),
+        "validation_used_for_selection": False,
+        "attempted_candidates": attempted,
+        "selected_candidate": selected,
+        "selection_status": "ELIGIBLE" if selected else "FAILED",
+    }
+    report["report_hash"] = _canonical_hash(report)
+    if selected:
+        report["config"] = parent_v6_config.with_updates(
+            schema_version="belief-v3",
+            low_class_logit_bias=selected["parameters"]["low_class_logit_bias"],
+            raw_dataset_hash=raw_dataset_hash,
+            split_manifest_hash=split_manifest_hash,
+        )
+    return report
+
+
 def _metrics_from_vectors(truth, predictions, probabilities):
     from modules.module_07_rl.metrics import compute_classification_metrics
     return compute_classification_metrics(truth, predictions, probabilities)

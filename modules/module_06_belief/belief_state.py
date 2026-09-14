@@ -135,9 +135,19 @@ class BeliefStateUpdater:
         return self._apply_floor(self._softmax(logits))
 
     def get_aggregate_assessment(self, skill_weights=None):
-        belief = self.get_aggregate_belief(skill_weights=skill_weights)
-        raw_label = int(np.argmax(belief))
-        confidence = float(belief[raw_label])
+        pre_decision_bias_belief = self.get_aggregate_belief(skill_weights=skill_weights)
+        belief = pre_decision_bias_belief.copy()
+        bias = self.config.low_class_logit_bias
+        if bias is not None:
+            # A v3, explicitly versioned cost-sensitive decision calibration.
+            # Applying it in log-probability space keeps a valid distribution
+            # and makes confidence/ECE describe the actual decision belief.
+            logits = np.log(np.maximum(belief, 1e-12))
+            logits[0] += float(bias)
+            belief = self._apply_floor(self._softmax(logits))
+        raw_label = int(np.argmax(pre_decision_bias_belief))
+        decision_label = int(np.argmax(belief))
+        confidence = float(belief[decision_label])
         visited = self.get_visited_skills()
         effective_evidence = float(sum(
             min(value, self.config.max_skill_effective_sample_size)
@@ -150,7 +160,8 @@ class BeliefStateUpdater:
         )
         return {
             "belief": belief,
-            "label": raw_label if sufficient else None,
+            "pre_decision_bias_belief": pre_decision_bias_belief,
+            "label": decision_label if sufficient else None,
             "raw_label": raw_label,
             "status": "classified" if sufficient else "insufficient_evidence",
             "confidence": confidence,

@@ -25,6 +25,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 METRICS_SCHEMA_VERSION = "aria-classification-metrics-v2"
+BELIEF_REPORT_SCHEMA_VERSION = "aria-belief-report-v2"
 CLASS_LABELS = (0, 1, 2)
 
 
@@ -151,18 +152,25 @@ def compute_response_metrics(
     if not aria_labels or not true_labels:
         return {}
     probabilities = beliefs
+    probability_reason = None
     if probabilities is not None:
         try:
             array = np.asarray(probabilities, dtype=float)
             if array.shape != (len(true_labels), 3) or not np.all(np.isfinite(array)):
                 probabilities = None
+                probability_reason = "missing_or_invalid_probability_vectors"
         except (TypeError, ValueError):
             probabilities = None
+            probability_reason = "missing_or_invalid_probability_vectors"
     result = compute_classification_metrics(true_labels, aria_labels, probabilities)
     # Backward-compatible name used by existing reports and callers.
     result["abstention_count"] = result["num_abstained"]
     result["aria_label_counts"] = dict(Counter(aria_labels))
     result["rouge_L"] = 0.0
+    result["rouge_applicable"] = False
+    result["calibration_metrics_available"] = probabilities is not None
+    if probability_reason:
+        result["calibration_metrics_unavailable_reason"] = probability_reason
     return result
         
     # Assuming labels are categorical (0: beginner, 1: mid, 2: expert)
@@ -265,6 +273,7 @@ def build_belief_report(dataset: list[dict], emit_debug: bool = False):
     # All transitions labels
     all_aria_labels = []
     all_true_labels = []
+    all_beliefs = []
     
     questions = []
     jd_texts = []
@@ -274,6 +283,7 @@ def build_belief_report(dataset: list[dict], emit_debug: bool = False):
         if "true_label" in t and "aria_label" in t:
             all_true_labels.append(t["true_label"])
             all_aria_labels.append(t["aria_label"])
+            all_beliefs.append(t.get("aggregate_belief"))
             
         if "question" in t and "jd_text" in t:
             questions.append(t["question"])
@@ -301,16 +311,27 @@ def build_belief_report(dataset: list[dict], emit_debug: bool = False):
         jd_text_combined,
         beliefs=terminal_beliefs,
     )
+    terminal_response_metrics.update({
+        "metric_scope": "terminal_episode_decisions",
+        "is_release_gate_scope": True,
+    })
     
     # Also record overall transitions response metrics
     overall_response_metrics = compute_response_metrics(
-        all_aria_labels, all_true_labels
+        all_aria_labels, all_true_labels, beliefs=all_beliefs
     )
+    overall_response_metrics.update({
+        "metric_scope": "intermediate_and_terminal_transitions",
+        "is_release_gate_scope": False,
+        "expected_intermediate_abstention": True,
+        "null_label_semantics": "decision_abstention",
+    })
     
     if emit_debug:
         debug_eval("TERMINAL INTERVIEW OUTCOME", terminal_true_labels, terminal_aria_labels)
     
     return {
+        "belief_report_schema_version": BELIEF_REPORT_SCHEMA_VERSION,
         "evaluation_type": "stored_belief_verdict",
         "evaluates_learned_policy": False,
         "num_episodes": len(episodes),

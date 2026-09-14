@@ -11,6 +11,7 @@ from typing import Any
 
 
 BELIEF_SCHEMA_VERSION = "belief-v2"
+BELIEF_SCHEMA_V3 = "belief-v3"
 
 
 @dataclass(frozen=True)
@@ -27,11 +28,16 @@ class BeliefModelConfig:
     minimum_assessment_confidence: float = 0.50
     minimum_effective_evidence: float = 2.0
     minimum_skill_coverage: int = 3
+    # v3-only decision calibration.  ``None`` is deliberately omitted from
+    # v2 serialization so historical configuration hashes remain stable.
+    low_class_logit_bias: float | None = None
     raw_dataset_hash: str = ""
     split_manifest_hash: str = ""
     fit_metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
+        if self.schema_version not in {BELIEF_SCHEMA_VERSION, BELIEF_SCHEMA_V3, "belief-v1-legacy-adapter"}:
+            raise ValueError("unsupported belief configuration schema")
         vectors = {
             "class_centers": self.class_centers,
             "class_scales": self.class_scales,
@@ -66,9 +72,20 @@ class BeliefModelConfig:
             raise ValueError("minimum_effective_evidence must be non-negative")
         if self.minimum_skill_coverage < 0:
             raise ValueError("minimum_skill_coverage must be non-negative")
+        if self.schema_version in {BELIEF_SCHEMA_VERSION, "belief-v1-legacy-adapter"}:
+            if self.low_class_logit_bias is not None:
+                raise ValueError("belief-v2 cannot contain low_class_logit_bias")
+        else:
+            if self.low_class_logit_bias is None:
+                raise ValueError("belief-v3 requires low_class_logit_bias")
+            if not 0.0 <= float(self.low_class_logit_bias) <= 1.0:
+                raise ValueError("low_class_logit_bias must be in [0, 1]")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        if self.schema_version in {BELIEF_SCHEMA_VERSION, "belief-v1-legacy-adapter"}:
+            value.pop("low_class_logit_bias", None)
+        return value
 
     def canonical_json(self) -> str:
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)

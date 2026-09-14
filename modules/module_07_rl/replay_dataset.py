@@ -316,6 +316,9 @@ def replay_one_episode(
             "aria_raw_label": assessment["raw_label"],
             "assessment_status": assessment["status"],
             "aggregate_belief": assessment["belief"].tolist(),
+            "pre_decision_bias_belief": assessment.get(
+                "pre_decision_bias_belief", assessment["belief"],
+            ).tolist(),
             "aggregate_confidence": assessment["confidence"],
             "effective_evidence": assessment["effective_evidence"],
             "skills_covered": len(assessment["visited_skills"]),

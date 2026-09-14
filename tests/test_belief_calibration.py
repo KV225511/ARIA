@@ -4,8 +4,10 @@ import pytest
 from unittest.mock import patch
 
 from modules.module_06_belief.belief_config import BeliefModelConfig
+from modules.module_06_belief.belief_config import BELIEF_SCHEMA_V3
 
 from modules.module_07_rl.belief_calibration import (
+    apply_low_class_logit_bias,
     calibrate_belief_model,
     fit_emission_config,
     calibrate_likelihood_sigma,
@@ -302,3 +304,23 @@ def test_paired_component_bootstrap_is_deterministic_and_paired():
     assert all(item["point_difference"] == 0.0 for item in first["intervals"].values())
     assert first["diagnostic_only"] is True
     assert len(first["leave_one_component_out"]) == 6
+
+
+def test_v7_low_logit_bias_is_normalized_and_bias_zero_is_identity():
+    probabilities = [0.30, 0.60, 0.10]
+    assert apply_low_class_logit_bias(probabilities, 0.0) == pytest.approx(probabilities)
+    shifted = apply_low_class_logit_bias(probabilities, 1.0)
+    assert sum(shifted) == pytest.approx(1.0)
+    assert shifted[0] > probabilities[0]
+    assert shifted[1] < probabilities[1]
+    assert shifted[2] < probabilities[2]
+
+
+def test_belief_v3_bias_is_explicit_while_v2_serialization_is_stable():
+    v2 = BeliefModelConfig()
+    assert "low_class_logit_bias" not in v2.to_dict()
+    v3 = v2.with_updates(schema_version=BELIEF_SCHEMA_V3, low_class_logit_bias=0.4)
+    assert v3.to_dict()["low_class_logit_bias"] == 0.4
+    assert v2.config_hash != v3.config_hash
+    with pytest.raises(ValueError, match="belief-v2"):
+        v2.with_updates(low_class_logit_bias=0.1)
