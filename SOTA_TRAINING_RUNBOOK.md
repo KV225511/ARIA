@@ -29,6 +29,23 @@ partition once. It writes the split manifest, predictions, and a hashed JSON rep
 
 ## 3. Compare interview policies
 
+Train the same-data comparator checkpoints without changing ARIA's dataset or
+frozen IQL checkpoint:
+
+```powershell
+python tools/run_sota_training.py train-policy-comparators `
+  --output-dir output/sota/direct_comparators `
+  --epochs 20 `
+  --seed 42
+```
+
+This trains a behavior-cloning baseline, discrete Conservative Q-Learning, and a
+Decision Transformer adaptation. CQL and Decision Transformer are published
+architectures; the repository implementations are compact ARIA-specific
+adaptations rather than the authors' original code. The registry in
+`config/sota_comparator_registry.json` records the verified paper sources and
+comparison scope.
+
 Run the scripted baselines alone:
 
 ```powershell
@@ -42,6 +59,7 @@ Include the repository's validated v7 IQL checkpoint:
 ```powershell
 python tools/run_sota_training.py policy `
   --include-iql `
+  --comparator-dir output/sota/direct_comparators `
   --output output/sota/policy_comparison.json `
   --episodes-per-class 10
 ```
@@ -50,6 +68,22 @@ The IQL command validates the checkpoint against the frozen protocol, protocol
 state, development bundle, split manifest, and belief configuration before the
 first rollout. Every policy receives the same scenario seeds and response model.
 These rollouts are controlled simulations and must be reported as such.
+
+Run prespecified robustness conditions with `--condition overlap`,
+`--condition low_confidence`, and `--condition positive_shift`. Keep the same
+seed and number of episodes for every condition. The runner adds bootstrap
+confidence intervals, paired differences relative to IQL, and an accuracy-ceiling
+audit. A saturated accuracy result is diagnostic evidence and must not be used to
+rank policies.
+
+Create a compact manuscript-ready record from the full reports:
+
+```powershell
+python tools/summarize_policy_comparisons.py `
+  --training-report output/sota/direct_comparators/training_report.json `
+  --reports output/sota/direct_policy_base.json output/sota/direct_policy_overlap.json output/sota/direct_policy_low_confidence.json output/sota/direct_policy_positive_shift.json `
+  --output-dir paper/generated_sota
+```
 
 ## 4. Render a local comparison table
 

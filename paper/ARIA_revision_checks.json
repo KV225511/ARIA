@@ -1,0 +1,15 @@
+{
+  "status": "PASS_WITH_DOCUMENTED_LIMITS",
+  "pdf_pages": 16,
+  "citations": 11,
+  "figures": 5,
+  "tables": 9,
+  "equations": 6,
+  "source_sha256": "135bc8b044a5a7e4f760d17c4bd61c600b99cb3b9a3464351c3e405d6f09f405",
+  "pdf_sha256": "42de1b7da61b7318183a2c460c52c4625b4c2c380e50fa9df3c6209c7152dfe1",
+  "limits": [
+    "Native TeX compilation unavailable",
+    "ScienceDirect reference format and length not verified",
+    "Historical baselines trace to summaries, not recovered prediction artifacts"
+  ]
+}

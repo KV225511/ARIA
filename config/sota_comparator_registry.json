@@ -1,0 +1,56 @@
+{
+  "schema_version": "aria-sota-comparator-registry-v1",
+  "scope": "Verified policy architectures that can be retrained on ARIA's frozen transition schema",
+  "comparators": [
+    {
+      "id": "behavior_cloning",
+      "display_name": "Behavior cloning",
+      "role": "supervised baseline",
+      "published_architecture": false,
+      "direct_same_data_comparison": true,
+      "implementation_note": "ARIA reference MLP trained to predict logged actions with legal-action masking at inference."
+    },
+    {
+      "id": "discrete_cql",
+      "display_name": "Discrete Conservative Q-Learning",
+      "role": "published offline-RL comparator",
+      "published_architecture": true,
+      "paper": {
+        "title": "Conservative Q-Learning for Offline Reinforcement Learning",
+        "authors": "Aviral Kumar, Aurick Zhou, George Tucker, Sergey Levine",
+        "venue": "NeurIPS 2020",
+        "url": "https://proceedings.neurips.cc/paper/2020/hash/0d2b2061826a5df3221116a5085a6052-Abstract.html"
+      },
+      "direct_same_data_comparison": true,
+      "implementation_note": "Compact discrete CQL reference implementation adapted to ARIA's eight masked actions; it is not the authors' original code."
+    },
+    {
+      "id": "decision_transformer",
+      "display_name": "Decision Transformer",
+      "role": "published sequence-modeling comparator",
+      "published_architecture": true,
+      "paper": {
+        "title": "Decision Transformer: Reinforcement Learning via Sequence Modeling",
+        "authors": "Lili Chen et al.",
+        "venue": "NeurIPS 2021",
+        "url": "https://proceedings.neurips.cc/paper_files/paper/2021/hash/7f489f642a0ddb10272b5c31057f0663-Abstract.html"
+      },
+      "direct_same_data_comparison": true,
+      "implementation_note": "Compact causal return-conditioned Transformer adapted to ARIA state/action/reward sequences; it is not the authors' original code."
+    },
+    {
+      "id": "aria_iql_v7",
+      "display_name": "ARIA IQL v7",
+      "role": "proposed model",
+      "published_architecture": true,
+      "paper": {
+        "title": "Offline Reinforcement Learning with Implicit Q-Learning",
+        "authors": "Ilya Kostrikov, Ashvin Nair, Sergey Levine",
+        "venue": "ICLR 2022",
+        "url": "https://openreview.net/forum?id=68n2s9ZJWF8"
+      },
+      "direct_same_data_comparison": true,
+      "implementation_note": "Existing frozen and protocol-validated ARIA checkpoint; this evaluation work does not retrain or modify it."
+    }
+  ]
+}
