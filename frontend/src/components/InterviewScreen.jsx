@@ -38,6 +38,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
   const [debugPrompt, setDebugPrompt] = useState('');
   const [streamedQuestion, setStreamedQuestion] = useState('');
   const [audioError, setAudioError] = useState('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [stream, setStream] = useState(null);
   const [mediaState, setMediaState] = useState('requesting');
   const [recordingMode, setRecordingMode] = useState('idle');
@@ -124,9 +125,11 @@ function InterviewScreen({ sessionId, onEndSession }) {
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
       } else if (data.type === 'transcription_result') {
+        setIsTranscribing(false);
         setAudioError('');
         setMessages((previous) => [...previous, { sender: 'Candidate', text: data.text }]);
       } else if (data.type === 'audio_error') {
+        setIsTranscribing(false);
         setAudioError(data.message);
         setIsPreparing(false);
       } else if (data.type === 'prompt_debug') {
@@ -156,7 +159,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
       top: transcriptRef.current.scrollHeight,
       behavior: 'smooth',
     });
-  }, [messages]);
+  }, [messages, streamedQuestion]);
 
   const sendCandidateText = (text) => {
     const socket = wsRef.current;
@@ -189,6 +192,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
           const socket = wsRef.current;
           if (socket?.readyState === WebSocket.OPEN) {
             setAudioError('');
+            setIsTranscribing(true);
             setIsPreparing(true);
             socket.send(JSON.stringify({ type: 'candidate_audio', audio_base64: reader.result }));
           }
@@ -296,7 +300,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
         <section className="interview-main">
           <div className="question-stage">
             <div className="question-meta">
-              <span>{connectionState === 'error' || connectionState === 'disconnected' ? 'Connection unavailable' : isSpeaking ? 'ARIA is speaking' : streamedQuestion ? 'Drafting question' : isPreparing ? 'Reviewing evidence' : 'Your turn'}</span>
+              <span>{connectionState === 'error' || connectionState === 'disconnected' ? 'Connection unavailable' : isSpeaking ? 'ARIA is speaking' : isTranscribing ? 'Transcribing answer' : streamedQuestion ? 'Drafting question' : isPreparing ? 'Reviewing evidence' : 'Your turn'}</span>
               {isSpeaking && <SpeakingBars />}
             </div>
             {streamedQuestion ? <h1>{streamedQuestion}</h1> : !isPreparing && currentQuestion ? <h1>{currentQuestion.text}</h1> : (
@@ -310,17 +314,27 @@ function InterviewScreen({ sessionId, onEndSession }) {
               <span>{messages.length} entries</span>
             </div>
             <div className="transcript" ref={transcriptRef} aria-live="polite">
-              {messages.length === 0 ? (
+              {messages.length === 0 && !streamedQuestion ? (
                 <div className="empty-transcript"><span className="empty-line" /><p>The transcript will build here as the interview begins.</p></div>
-              ) : messages.map((message, index) => (
-                <article className={`message ${message.sender === 'Candidate' ? 'candidate-message' : 'aria-message'}`} key={`${message.sender}-${index}`}>
-                  <div className="message-author">
-                    <span>{message.sender === 'Candidate' ? 'You' : 'ARIA'}</span>
-                    {message.action && <small>{message.action.replaceAll('_', ' ')}</small>}
-                  </div>
-                  <p>{message.text}</p>
-                </article>
-              ))}
+              ) : (
+                <>
+                  {messages.map((message, index) => (
+                    <article className={`message ${message.sender === 'Candidate' ? 'candidate-message' : 'aria-message'}`} key={`${message.sender}-${index}`}>
+                      <div className="message-author">
+                        <span>{message.sender === 'Candidate' ? 'You' : 'ARIA'}</span>
+                        {message.action && <small>{message.action.replaceAll('_', ' ')}</small>}
+                      </div>
+                      <p>{message.text}</p>
+                    </article>
+                  ))}
+                  {streamedQuestion && (
+                    <article className="message aria-message" aria-live="off">
+                      <div className="message-author"><span>ARIA</span><small>Drafting</small></div>
+                      <p>{streamedQuestion}</p>
+                    </article>
+                  )}
+                </>
+              )}
             </div>
             {audioError && <p role="alert" className="audio-error">{audioError}</p>}
 
