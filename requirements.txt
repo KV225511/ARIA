@@ -7,6 +7,7 @@ torchaudio
 
 # STT (Step 2)
 faster-whisper
+av==18.1.0  # faster-whisper 1.2.1 uses PyAV's metadata_errors argument
 
 # Vision (Step 3)
 mediapipe

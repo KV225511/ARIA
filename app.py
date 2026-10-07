@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any
 import fitz  # PyMuPDF
 import base64
+import binascii
 import tempfile
 import os
 import asyncio
@@ -24,7 +25,7 @@ from modules.module_05_ontology.grounding import (
     validate_grounded_question,
 )
 from modules.module_09_tts.engine import TTSAvatarBaseline
-from modules.module_01_stt.transcriber import transcribe_file
+from modules.module_01_stt.transcriber import transcribe
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -123,7 +124,7 @@ async def start_session(
     }
 
 
-async def generate_grounded_session_question(session: dict, action: str) -> str:
+async def generate_grounded_session_question(session: dict, action: str, send_event=None) -> str:
     profile = session["role_profile"]
     skills = list(profile.skills)
     if not skills:
@@ -160,7 +161,7 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
             )
             if rejected else None
         )
-        raw_question = await llm_gen.generate_question(
+        generation_args = dict(
             action=action,
             belief_state=belief,
             resume=session["resume"],
@@ -172,6 +173,16 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
             correction=correction,
             temperature=0.3 + 0.15 * (attempt - 1),
         )
+        if send_event and hasattr(llm_gen, "generate_question_stream"):
+            await send_event({"type": "aria_stream_start", "action": action})
+            chunks = []
+            async for chunk in llm_gen.generate_question_stream(**generation_args):
+                if isinstance(chunk, str) and chunk:
+                    chunks.append(chunk)
+                    await send_event({"type": "aria_chunk", "text": chunk})
+            raw_question = "".join(chunks)
+        else:
+            raw_question = await llm_gen.generate_question(**generation_args)
         question = normalize_generated_question(raw_question)
         result = validate_grounded_question(question, context, session["history"])
         if result["valid"]:
@@ -179,7 +190,32 @@ async def generate_grounded_session_question(session: dict, action: str) -> str:
             return question
         rejected.append(result["reasons"])
         rejected_outputs.append(question)
+        if send_event:
+            await send_event({"type": "aria_stream_reset"})
     raise RuntimeError(f"Question grounding failed: {rejected[-1]}")
+
+
+async def transcribe_candidate_audio(audio_base64: str) -> str:
+    """Decode one browser recording without persisting candidate audio."""
+    encoded = audio_base64.split("base64,", 1)[-1]
+    try:
+        audio_bytes = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("The recording could not be decoded. Please record again.") from exc
+    if not audio_bytes:
+        raise ValueError("The recording was empty. Please record again.")
+
+    # PyAV, bundled with faster-whisper, decodes WebM directly. The model then
+    # receives the same 16 kHz waveform as the offline transcription path.
+    from faster_whisper.audio import decode_audio
+
+    with tempfile.TemporaryDirectory(prefix="aria_audio_") as temp_dir:
+        webm_path = os.path.join(temp_dir, "answer.webm")
+        with open(webm_path, "wb") as audio_file:
+            audio_file.write(audio_bytes)
+        audio = await asyncio.to_thread(decode_audio, webm_path, 16000)
+        result = await transcribe(audio)
+    return result.get("transcript", "").strip()
 
 @app.websocket("/ws/interview/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
@@ -200,10 +236,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         return
 
     session = sessions[session_id]
+    async def send_event(event):
+        await websocket.send_json(event)
     
     try:
         first_action = "switch_topic"
-        question_text = await generate_grounded_session_question(session, first_action)
+        question_text = await generate_grounded_session_question(session, first_action, send_event)
             
         await websocket.send_json({
             "type": "aria_question",
@@ -223,40 +261,23 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 candidate_text = payload.get("text", "")
                 
             elif payload.get("type") == "candidate_audio":
-                audio_b64 = payload.get("audio_base64", "")
-                if "base64," in audio_b64:
-                    audio_b64 = audio_b64.split("base64,")[1]
-                    
-                audio_bytes = base64.b64decode(audio_b64)
-                
-                # Use a dedicated temp directory for audio files
-                temp_dir = tempfile.gettempdir()
-                webm_path = os.path.join(temp_dir, f"temp_{session_id}.webm")
-                wav_path = os.path.join(temp_dir, f"temp_{session_id}.wav")
-                
-                with open(webm_path, "wb") as f:
-                    f.write(audio_bytes)
-                
-                # Convert webm to wav using ffmpeg asynchronously
-                process = await asyncio.create_subprocess_exec(
-                    "ffmpeg", "-i", webm_path, "-ar", "16000", "-ac", "1", wav_path, "-y",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL
-                )
-                await process.communicate()
-                
-                # Transcribe
                 try:
-                    stt_result = await transcribe_file(wav_path)
-                    candidate_text = stt_result.get("transcript", "")
+                    candidate_text = await transcribe_candidate_audio(
+                        payload.get("audio_base64", "")
+                    )
                 except Exception as e:
-                    logger.error(f"Whisper transcription failed: {e}")
-                    candidate_text = ""
-                    
-                # Cleanup
-                if os.path.exists(webm_path): os.remove(webm_path)
-                if os.path.exists(wav_path): os.remove(wav_path)
-                
+                    logger.exception("Audio transcription failed for session %s", session_id)
+                    await websocket.send_json({
+                        "type": "audio_error",
+                        "message": "Audio could not be transcribed. Please try again or type your answer.",
+                    })
+                    continue
+                if not candidate_text:
+                    await websocket.send_json({
+                        "type": "audio_error",
+                        "message": "No speech was detected. Please try again or type your answer.",
+                    })
+                    continue
                 await websocket.send_json({
                     "type": "transcription_result",
                     "text": candidate_text
@@ -286,7 +307,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 
                 new_belief = {k: v.tolist() for k, v in session["belief"].beliefs.items()}
                 question_text = await generate_grounded_session_question(
-                    session, next_action
+                    session, next_action, send_event
                 )
                 
                 await websocket.send_json({

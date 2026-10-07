@@ -36,6 +36,8 @@ function InterviewScreen({ sessionId, onEndSession }) {
   const [isPreparing, setIsPreparing] = useState(true);
   const [candidateInput, setCandidateInput] = useState('');
   const [debugPrompt, setDebugPrompt] = useState('');
+  const [streamedQuestion, setStreamedQuestion] = useState('');
+  const [audioError, setAudioError] = useState('');
   const [stream, setStream] = useState(null);
   const [mediaState, setMediaState] = useState('requesting');
   const [recordingMode, setRecordingMode] = useState('idle');
@@ -100,9 +102,16 @@ function InterviewScreen({ sessionId, onEndSession }) {
     socket.onopen = () => setConnectionState('live');
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === 'aria_chunk') {
+      if (data.type === 'aria_stream_start') {
+        setStreamedQuestion('');
         setIsPreparing(true);
+      } else if (data.type === 'aria_chunk') {
+        setStreamedQuestion((previous) => previous + data.text);
+        setIsPreparing(true);
+      } else if (data.type === 'aria_stream_reset') {
+        setStreamedQuestion('');
       } else if (data.type === 'aria_question') {
+        setStreamedQuestion('');
         setIsPreparing(false);
         setIsSpeaking(true);
         setMessages((previous) => [...previous, { sender: 'ARIA', text: data.text, action: data.action }]);
@@ -115,7 +124,11 @@ function InterviewScreen({ sessionId, onEndSession }) {
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
       } else if (data.type === 'transcription_result') {
+        setAudioError('');
         setMessages((previous) => [...previous, { sender: 'Candidate', text: data.text }]);
+      } else if (data.type === 'audio_error') {
+        setAudioError(data.message);
+        setIsPreparing(false);
       } else if (data.type === 'prompt_debug') {
         setDebugPrompt(data.prompt);
       } else if (data.type === 'error') {
@@ -149,6 +162,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
     const socket = wsRef.current;
     if (!text.trim() || socket?.readyState !== WebSocket.OPEN) return;
     setMessages((previous) => [...previous, { sender: 'Candidate', text: text.trim() }]);
+    setAudioError('');
     setIsPreparing(true);
     socket.send(JSON.stringify({ type: 'candidate_answer', text: text.trim() }));
   };
@@ -174,6 +188,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
         reader.onloadend = () => {
           const socket = wsRef.current;
           if (socket?.readyState === WebSocket.OPEN) {
+            setAudioError('');
             setIsPreparing(true);
             socket.send(JSON.stringify({ type: 'candidate_audio', audio_base64: reader.result }));
           }
@@ -281,10 +296,10 @@ function InterviewScreen({ sessionId, onEndSession }) {
         <section className="interview-main">
           <div className="question-stage">
             <div className="question-meta">
-              <span>{connectionState === 'error' || connectionState === 'disconnected' ? 'Connection unavailable' : isSpeaking ? 'ARIA is speaking' : isPreparing ? 'Reviewing evidence' : 'Your turn'}</span>
+              <span>{connectionState === 'error' || connectionState === 'disconnected' ? 'Connection unavailable' : isSpeaking ? 'ARIA is speaking' : streamedQuestion ? 'Drafting question' : isPreparing ? 'Reviewing evidence' : 'Your turn'}</span>
               {isSpeaking && <SpeakingBars />}
             </div>
-            {currentQuestion ? <h1>{currentQuestion.text}</h1> : (
+            {streamedQuestion ? <h1>{streamedQuestion}</h1> : !isPreparing && currentQuestion ? <h1>{currentQuestion.text}</h1> : (
               <div className="question-loading" aria-label="Preparing the first question"><span /><span /><span /></div>
             )}
           </div>
@@ -307,6 +322,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
                 </article>
               ))}
             </div>
+            {audioError && <p role="alert" className="audio-error">{audioError}</p>}
 
             <div className={`answer-composer ${isRecording ? 'is-recording' : ''}`}>
               <button

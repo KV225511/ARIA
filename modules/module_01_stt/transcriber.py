@@ -8,6 +8,7 @@ Offline mode: transcribe a complete audio buffer or .wav file.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from config.settings import (
 # Lazy-loaded singleton — models must NOT reload per call
 _transcriber_instance: "Transcriber | None" = None
 _transcriber_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 class Transcriber:
     """Whisper large-v3 transcriber with GPU int8 quantization."""
@@ -35,11 +37,22 @@ class Transcriber:
 
     def _get_model(self):
         if self._model is None:
+            import ctranslate2
             from faster_whisper import WhisperModel
+
+            device = DEVICE
+            compute_type = WHISPER_COMPUTE_TYPE
+            if device == "cuda":
+                try:
+                    ctranslate2.get_supported_compute_types("cuda")
+                except RuntimeError as exc:
+                    logger.warning("CUDA speech recognition unavailable; using CPU: %s", exc)
+                    device = "cpu"
+                    compute_type = "int8"
             self._model = WhisperModel(
                 MODEL_WHISPER,
-                device=DEVICE,
-                compute_type=WHISPER_COMPUTE_TYPE,
+                device=device,
+                compute_type=compute_type,
             )
         return self._model
 

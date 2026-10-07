@@ -6,7 +6,7 @@
 
 ARIA helps students and job seekers practice role-specific technical interviews and receive evidence-based feedback on strengths and gaps. The immediate deliverable is a reliable application: upload a résumé and job description, answer by text or audio, follow session progress, receive adaptive questions, recover from failures, and finish with a meaningful report. Educators and coaches are secondary users. Complete and integrate existing modules before starting new benchmark campaigns. ARIA is not an automated hiring system.
 
-Today, the FastAPI/React path creates role-grounded sessions, accepts typed and recorded answers, transcribes audio, and generates questions through Ollama. The live loop still uses placeholder evidence scores and a fixed three-action cycle; it does not load the saved calibrated belief configuration or trained policy checkpoint. Several modules and final reporting remain disconnected. Document this behavior honestly until integration is verified.
+Today, the FastAPI/React path creates role-grounded sessions, accepts typed and recorded answers, transcribes WebM audio through PyAV and faster-whisper, and streams draft question chunks through the interview WebSocket before confirming the grounded final question. Audio failures report an error without closing the session; speech recognition falls back to CPU when CUDA is unavailable. The live loop still uses placeholder evidence scores and a fixed three-action cycle; it does not load the saved calibrated belief configuration or trained policy checkpoint. Several modules and final reporting remain disconnected. Document this behavior honestly until integration is verified.
 
 ## Architecture and Boundaries
 

@@ -263,16 +263,14 @@ class LLMQuestionGenerator:
                 return f"Fallback Question: I see the action is {action}. Can you tell me more about your experience?"
             return ""
 
-    async def generate_question_stream(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None, grounding_context: dict | None = None, correction: str | None = None):
+    async def generate_question_stream(self, action: str, belief_state: dict, resume: str, history: list, role: str = "Developer", experience: str = "Mid-Level", target_skill: str | None = None, grounding_context: dict | None = None, correction: str | None = None, temperature: float | None = None):
         """
-        Generates a natural language question and yields it word-by-word (streaming).
+        Yield Ollama's generated text chunks as they arrive.
         """
         prompt = self._build_prompt(
             action, belief_state, resume, history, role, experience, target_skill,
             grounding_context, correction,
         )
-        
-        yield {"type": "prompt_debug", "prompt": prompt}
         
         payload = {
             "model": self.model,
@@ -280,7 +278,7 @@ class LLMQuestionGenerator:
             "stream": True,
             "keep_alive": self.keep_alive,
             "options": {
-                "temperature": 0.3,
+                "temperature": 0.3 if temperature is None else float(temperature),
                 "num_ctx": self.num_ctx,
             }
         }
