@@ -19,7 +19,7 @@ Each cell is accuracy / mean designed reward / mean information gain over 45 mat
 | Policy | Base | Overlap | Low confidence | Positive shift |
 |---|---:|---:|---:|---:|
 | aria iql v7 | 1.0000 / 32.16 / 17.88 | 0.4667 / 31.09 / 17.26 | 0.9111 / 11.50 / 3.96 | 1.0000 / 31.14 / 17.27 |
-| behavior cloning | 1.0000 / 25.90 / 14.02 | 0.5333 / 24.28 / 13.01 | 0.9333 / 8.33 / 2.85 | 1.0000 / 25.08 / 13.47 |
+| behavior cloning | 1.0000 / 25.90 / 14.02 | 0.5333 / 24.28 / 13.01 | 0.9333 / 8.30 / 2.84 | 1.0000 / 25.08 / 13.47 |
 | discrete cql | 1.0000 / 27.54 / 16.72 | 0.5111 / 25.38 / 15.79 | 0.8889 / 5.01 / 3.35 | 1.0000 / 27.31 / 16.55 |
 | decision transformer | 1.0000 / 7.22 / 5.13 | 0.4889 / 7.12 / 5.06 | 0.8889 / 2.97 / 1.82 | 1.0000 / 7.04 / 5.01 |
 
@@ -27,9 +27,9 @@ Base accuracy is saturated: multiple learned and non-learned policies reach 1.0 
 
 ## Provenance
 
-Comparator training report hash: `5795042b3ae01be877ebab55ebb00d63622a8205b33dc7f122b16834149ddb95`.
+Comparator training report hash: `1c988a6935e5833aca60805f9a6fdf5277685e46e88786efcf84ad213b4c03c0`.
 
-- `base`: report hash `ec3b0af141742e2a16b5277789c9293d3f308b2e860a5be18de96a27fe16a045`; source SHA-256 `6d48e8ab7944aa548d87ad8366a85bac321802e6c196633c465156b0d4442abe`
-- `overlap`: report hash `1c9933bdd49329ec6a2d2fa1f55db751ba31ed6fa075fcb8ff12615f38eef4b1`; source SHA-256 `14edd5825e47ba59b2bd0787ffb833cb59f22673ddb745f2a458a3562b0132f5`
-- `low_confidence`: report hash `4a9b069c326eaf7a13552531571186858b966e655222f0370cfd6cab35a91c92`; source SHA-256 `3c85fe77ac4eabd46f80963b4c81cbfc867099f227072070de89db2590a5cc30`
-- `positive_shift`: report hash `8443473247c1ac41988aae85cddf5dba1e389da013e32650869b41dbc61d4cff`; source SHA-256 `f77afd75da519d5af19c5118790a39847c3f12b7973f569f00e3906875c58b87`
+- `base`: report hash `e6d1a126a02cf151ff3958afef6e8c1184766ec64d7885ef2edd5513a0532594`; source SHA-256 `81a9602afd1903bc7c9663737423f85de2d62439ea00864a36c0e5ef8cc39f53`
+- `overlap`: report hash `09ccb855120ac35a0f9bcad42234f678c1a864f63e494571c59a58398bbe68ed`; source SHA-256 `4770b6d733ed5ab7c959178f814dd3597b9f597900d6c53c4d41fe401e355a3a`
+- `low_confidence`: report hash `e712784aaed2437fa67a00abdf1d994e84af84936e5df2293e539c2cb2fe9626`; source SHA-256 `c9eb0d8a2c9ce9b87847a9a16daf9e6e7c5de519f7a75cb2945e6341ad350708`
+- `positive_shift`: report hash `510b815517ee07483880481c4cf299c9a05e134a59792e964d5a888569e069aa`; source SHA-256 `b4a80a780f228edfcf7c4f1652b957ff240c033a932704e10f71001f3d328dbc`

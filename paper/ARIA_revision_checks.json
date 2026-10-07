@@ -5,8 +5,8 @@
   "figures": 5,
   "tables": 9,
   "equations": 6,
-  "source_sha256": "135bc8b044a5a7e4f760d17c4bd61c600b99cb3b9a3464351c3e405d6f09f405",
-  "pdf_sha256": "42de1b7da61b7318183a2c460c52c4625b4c2c380e50fa9df3c6209c7152dfe1",
+  "source_sha256": "68ee9b740561a92bab52e84075bb0da95f6d7564911b1603aec6e0afc34981d3",
+  "pdf_sha256": "c27bbd9b4b0abbc67303dcbb7c5a99ea6a38a5892c854fd39f19a6723ed3627f",
   "limits": [
     "Native TeX compilation unavailable",
     "ScienceDirect reference format and length not verified",
