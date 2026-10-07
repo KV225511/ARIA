@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "skills": {
+    "academic-paper-review": {
+      "source": "zjuadurey/codex-skills",
+      "sourceType": "github",
+      "skillPath": "academic-paper-review/SKILL.md",
+      "computedHash": "bd1a2207aada008b37e3625f6ab00e745e680861852241c63233806b528dc427"
+    },
+    "academic-writing-skills": {
+      "source": "WenyuChiou/academic-writing-skills",
+      "sourceType": "github",
+      "skillPath": "skills/academic-writing-skills/SKILL.md",
+      "computedHash": "bf3fa7961a5579e21dffcf06bce627854bd71552c4e4a427b269bbb497b1614c"
+    },
+    "citation-verification": {
+      "source": "ruichenrui/citation-verification",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "8278cd03eb1d0f200f2c9d9211eed6fc0c6491f8cf27440d04884d92696ae6eb"
+    },
+    "gap-to-topic": {
+      "source": "WenyuChiou/research-hub",
+      "sourceType": "github",
+      "skillPath": "skills/gap-to-topic/SKILL.md",
+      "computedHash": "fa1ec28a88c0462b6d737d1fedab665308371104dfa08248cc1d6ecb6efc5569"
+    },
+    "literature-triage-matrix": {
+      "source": "WenyuChiou/research-hub",
+      "sourceType": "github",
+      "skillPath": "skills/literature-triage-matrix/SKILL.md",
+      "computedHash": "abbb3e9466d80bbc468700c093e93b15098f1d34ffe8f8e788611b7f554a85dd"
+    },
+    "paper-memory-builder": {
+      "source": "WenyuChiou/research-hub",
+      "sourceType": "github",
+      "skillPath": "skills/paper-memory-builder/SKILL.md",
+      "computedHash": "fd9b593713a99ef35f8f77e1603b0179798f52dd775aef48dfc5d0591e006992"
+    },
+    "sci-extract": {
+      "source": "Jensen-Yao/agents-skills",
+      "sourceType": "github",
+      "skillPath": "skills/sci-extract/SKILL.md",
+      "computedHash": "7efed80ab4ea7eae692e79e9c4958bef16d8ad4dd179edee00959e091b5dd758"
+    }
+  }
+}

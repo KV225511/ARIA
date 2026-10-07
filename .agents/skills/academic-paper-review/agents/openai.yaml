@@ -1,0 +1,4 @@
+interface:
+  display_name: "Academic Paper Review"
+  short_description: "Venue-aware manuscript improvement"
+  default_prompt: "Use $academic-paper-review to diagnose this paper before submission and prioritize the most important revisions."
