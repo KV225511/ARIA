@@ -1,0 +1,60 @@
+dossier: "Auditable adaptive interview research"
+generated: "2026-09-15"
+run_type: "retrospective gap-to-topic assessment over repository evidence and screened literature"
+downstream_consumer: research-design-helper
+recall:
+  tool: "Undermind deep search plus Scite verification"
+  query_phrasings: 8
+  unique_papers: 249
+  tool_confidence: medium
+  dossier_confidence: medium
+  screen:
+    gate: "ranked relevance plus manual claim-level fit check"
+    retrieved: 249
+    kept: 21
+    screened_out: 228
+    tier: cold-start
+    note: "The leading 50 records were manually inspected; 21 decision-relevant sources were retained."
+  note: "Local Zotero API was unavailable; Scite and Undermind coverage is not exhaustive."
+pipeline:
+  - "Undermind deep search"
+  - "literature-triage-matrix -> literature_matrix.md"
+  - "Scite identifier and bibliography verification"
+  - "gap-to-topic three-gate assessment"
+gaps:
+  - id: G1
+    name: "Auditable belief-state and offline-policy architecture for adaptive mock interviews"
+    statement: "Characterize and evaluate an adaptive mock-interview architecture that maps question-linked evidence to explicit multidimensional skill beliefs and selects questions with a conservatively learned offline policy."
+    type: A
+    open: partially-occupied
+    open_confidence: medium
+    dead_end_status: partially-attempted
+    dead_end_evidence: "Close components and integrations exist (Hemamou et al., 2019, doi:10.1609/aaai.v33i01.3301573; Wen et al., 2026, arXiv:2607.10310), but their published limitations leave auditability, criterion validity, and adaptive-policy evaluation unresolved."
+    contribution_type: incremental
+    feasibility: feasible-with-effort
+    verdict: conditional-go
+    verdict_reason: "Proceed as a reproducibility and prototype-characterization study only after fresh policy rollouts and a broader priority search; real-hiring claims require a separate human validation study."
+    linked_claim: C9
+dead_end_analysis:
+  - gap_id: G1
+    dead_end_status: partially-attempted
+    evidence: []
+    revivable_by: null
+    recall_caveat:
+      failure_queries_run: 8
+      corpora_searched: [undermind, scite, repository]
+      survey_papers_found: 3
+contribution_analysis:
+  - gap_id: G1
+    contribution_type: incremental
+    confidence: high
+    justification: "At least two independent precedents already establish multimodal interview modeling and learned adaptive item selection, so ARIA extends and integrates existing capabilities rather than unlocking a previously impossible task."
+    ab_counter_signal: "The type-A method limitation does not override the evidence that all core primitives and a weaker integrated interview platform already exist."
+    evidence: []
+open_questions:
+  - id: Q1
+    text: "Does the frozen IQL policy improve predeclared rollout outcomes over simple valid-action baselines on held-out identities?"
+  - id: Q2
+    text: "Can real-person skill evidence be anchored to job analysis and external criteria without unacceptable subgroup or accessibility burdens?"
+  - id: Q3
+    text: "Does a broader forward-citation search reveal an existing system with the same explicit audit contract?"

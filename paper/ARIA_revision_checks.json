@@ -1,15 +1,25 @@
 {
   "status": "PASS_WITH_DOCUMENTED_LIMITS",
-  "pdf_pages": 16,
-  "citations": 11,
+  "pdf_pages": 15,
+  "citations": 13,
   "figures": 5,
   "tables": 9,
   "equations": 6,
-  "source_sha256": "68ee9b740561a92bab52e84075bb0da95f6d7564911b1603aec6e0afc34981d3",
-  "pdf_sha256": "c27bbd9b4b0abbc67303dcbb7c5a99ea6a38a5892c854fd39f19a6723ed3627f",
+  "source_sha256": "adc30ccde08500e175d9cb7adba4aa2c8d414f6d39915d182df51c917292905e",
+  "pdf_sha256": "f1534e832a0d3690f7cd04cfb169f07594e608b9d791de27b02b3758ec18c4b4",
+  "canonical_summary_sha256": "686743e252a4a467ebfc620b78fdc275ef882ff3c218dc7f40f4be0f3321d94b",
+  "locked_report_sha256": "1a7bbd96838c67559855c98a444b7dfdcf41921432f9ac979f60a1fb6fcbf10f",
+  "checks": [
+    "All 32 policy rows matched canonical results at displayed precision",
+    "All seven locked belief metrics matched source report",
+    "Citation keys and cross-references resolve",
+    "PDF text and margins checked"
+  ],
   "limits": [
-    "Native TeX compilation unavailable",
+    "Native TeX compilation unavailable; PDF uses ReportLab fallback",
     "ScienceDirect reference format and length not verified",
-    "Historical baselines trace to summaries, not recovered prediction artifacts"
+    "Historical baselines trace to summaries, not recovered prediction artifacts",
+    "One comparator training seed; canonical paired episode traces unavailable locally",
+    "Structural checks do not establish statistical validity or submission readiness"
   ]
 }

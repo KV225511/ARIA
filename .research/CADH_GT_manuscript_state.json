@@ -1,0 +1,146 @@
+{
+  "schema_version": "1.1",
+  "project": {
+    "id": "CADH-GT-IEEE-conversion",
+    "title": "CADH-GT: Confidence-Aware Graph and Causal Temporal Modeling for Bimanual Webcam Gesture Control",
+    "archetype": "empirical",
+    "study_designs": [
+      "computational_model",
+      "participant_disjoint_validation"
+    ],
+    "lifecycle_stage": "submission_format_conversion",
+    "review_maturity": "submission",
+    "target_venue": "IEEE journal style",
+    "active_release": "latex-sanitized-v1"
+  },
+  "artifacts": [
+    {
+      "id": "main",
+      "path": "paper/CADH_GT_IEEE_sanitized.tex",
+      "role": "main_manuscript",
+      "status": "ACTIVE",
+      "required_for_release": true
+    }
+  ],
+  "authority_sources": [
+    {
+      "id": "analysis-output",
+      "kind": "verified_primary_evidence",
+      "path_or_reference": "C:/Users/Raghav Sejpal/Downloads/CADH_GT__Confidence_Aware_Graph_and_Causal_Temporal_Modeling_for_Bimanual_Webcam_Gesture_Control.pdf",
+      "scope": [
+        "methods",
+        "results",
+        "numbers"
+      ],
+      "status": "CONFIRMED",
+      "last_verified": "2026-09-15"
+    }
+  ],
+  "contract": {
+    "gap": "Isolated-gesture accuracy does not establish safe continuous command emission from a bimanual webcam stream.",
+    "task": "Evaluate a confidence-aware causal graph-temporal model for an 18-command bimanual desktop-control vocabulary.",
+    "outcomes": [
+      "action macro-F1",
+      "action balanced accuracy",
+      "mode macro-F1",
+      "boundary macro-F1",
+      "false-positive window-frame predictions per minute"
+    ],
+    "questions": [
+      {
+        "id": "Q1",
+        "text": "What recognition performance and failure modes does CADH-GT exhibit on participant-disjoint validation data?",
+        "lock": "SEMANTIC"
+      }
+    ],
+    "contribution": "A diagnostic evaluation of a causal bimanual graph-temporal research prototype with confidence-aware spatial encoding and dual temporal branches.",
+    "nonclaims": [
+      "No state-of-the-art claim",
+      "No deployment-readiness claim",
+      "No untouched-test-set generalization claim",
+      "No matched-baseline advantage claim",
+      "No operational command-event safety claim"
+    ]
+  },
+  "semantic_locks": [],
+  "terminology": [],
+  "style_profile": {
+    "language_variant": "American English",
+    "protected_terms": [
+      "CADH-GT",
+      "confidence-aware graph attention",
+      "causal linear attention",
+      "runtime governor"
+    ],
+    "discouraged_phrases": [
+      "data/val",
+      "data/val_backup_v1",
+      "console transcript",
+      "architecture report",
+      "evaluation script",
+      "internal file"
+    ],
+    "preferred_open_compounds": [],
+    "allowed_repetitions": [],
+    "sentence_opening_words": 4,
+    "phrase_words": 5,
+    "phrase_min_occurrences": 3
+  },
+  "facts": [],
+  "alignment": [
+    {
+      "question_id": "Q1",
+      "method": "Train and evaluate the 1,135,889-parameter CADH-GT model on participant-disjoint 48-frame bimanual landmark windows.",
+      "evidence": "Primary and secondary validation metrics, per-class results, boundary results, confusion counts, and test-time augmentation comparison.",
+      "result": "Primary action macro-F1 0.6439, mode macro-F1 0.9510, boundary macro-F1 0.5750; large per-command variation and weak offset recognition.",
+      "interpretation": "The prototype recognizes coarse modes and several mode-distinct commands more reliably than similar click, drag, and boundary events.",
+      "limitation": "Single validation participant, no untouched test set, repeated seeds, matched baselines, ablations, calibrated rejection study, or end-to-end runtime evaluation.",
+      "contribution": "Evidence-bounded characterization of architecture performance and failure modes.",
+      "status": "CURRENT"
+    }
+  ],
+  "dimensions": [],
+  "decisions": [
+    {
+      "id": "sanitize-internal-references",
+      "date": "2026-09-15",
+      "decision": "Remove repository paths, internal directory names, console-transcript references, and architecture-report references while preserving scientific meaning and reported evidence."
+    }
+  ],
+  "issues": [
+    {
+      "id": "no-local-tex-engine",
+      "scope": "delivery",
+      "severity": "S2",
+      "evidence_status": "CONFIRMED",
+      "status": "OPEN",
+      "description": "A local TeX engine is unavailable, so the source cannot be compiled and visually rendered in this environment.",
+      "authority_needed": "Local LaTeX compiler",
+      "affected_artifacts": ["main"]
+    }
+  ],
+  "release": {
+    "status": "CONDITIONALLY_READY",
+    "candidate_artifact_ids": [
+      "main"
+    ],
+    "required_checks": [
+      "argument_structure",
+      "evidence_scope",
+      "scholarly_writing",
+      "delivery_integrity",
+      "functional_completeness"
+    ],
+    "completed_checks": [
+      "argument_structure",
+      "evidence_scope",
+      "scholarly_writing",
+      "delivery_integrity",
+      "functional_completeness"
+    ],
+    "checked_hashes": {
+      "main": "338e2102b559bfc741c8f718afbb8b13b29f32f033ba9bf54118b97c3a6a35be"
+    },
+    "visual_check": "NOT_APPLICABLE_SOURCE_ONLY"
+  }
+}

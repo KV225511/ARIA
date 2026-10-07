@@ -1,0 +1,17 @@
+revisions:
+  - round: 1
+    date: "2026-09-15"
+    trigger: "Initial repository-grounded complete research paper"
+    changed_claims: [C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11]
+    changed_figures: [Fig1]
+    reviewer: "Self-audit with academic-paper-review"
+    sections_touched: ["all"]
+    summary: "Created the first complete manuscript from the audited repository and verified literature. Current v7 evidence replaced stale Project I numbers; learned-policy, live-integration, fairness, and validity claims were narrowed to match available artifacts."
+  - round: 2
+    date: "2026-09-15"
+    trigger: "IEEE Access-style restructuring, 2026 literature requirement, and 70-reference minimum"
+    changed_claims: [C3, C4, C9, C10, C11]
+    changed_figures: [Fig2, Fig3]
+    reviewer: "Senior evidence and citation audit"
+    sections_touched: ["Abstract", "I. Introduction", "II. Related Work / Literature Review", "III. Proposed Model / Methodology", "IV. Results and Analysis", "V. Conclusion", "References"]
+    summary: "Restructured the manuscript into the requested five-section IEEE-style form, expanded the verified bibliography to 70 cited sources, integrated seven 2026 papers without inflating novelty, added a paired v6-v7 analysis and confusion matrix, and preserved the boundary between belief evaluation and policy effectiveness."

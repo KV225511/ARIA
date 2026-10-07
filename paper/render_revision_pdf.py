@@ -44,9 +44,6 @@ for kind in ['table','figure']:
     for i,b in enumerate(blocks):
         lab=re.search(r'\\label\{([^}]+)\}',b)
         if lab:refs[lab.group(1)]=str(i+1)
-refs['tab:rapid']='8'; refs['sec:rapid']='A'; refs['sec:provenance']='B'
-# Longtable precedes the final ordinary table in document order.
-refs['tab:rapid']='8'
 
 def clean(s):
     s=s.replace('\\%','%').replace('\\_','_').replace('\\&','&')
@@ -82,7 +79,7 @@ def p(s,style='body'):
 
 class VectorFigure(Flowable):
     def __init__(self,kind):
-        Flowable.__init__(self);self.kind=kind;self.width=W;self.height={'architecture':252,'evidence':180,'split':136,'fusion':180,'confusion':172}[kind]
+        Flowable.__init__(self);self.kind=kind;self.width=W;self.height={'architecture':252,'evidence':180,'split':136,'returns':205,'confusion':172}[kind]
     def draw(self):
         c=self.canv
         def label(x,y,t,size=8,font='Sans',col=gray):
@@ -116,22 +113,33 @@ class VectorFigure(Flowable):
             arrow([(xs[0]+bw,61),(xs[1],61)])
             arrow([(xs[1]+bw/2,33),(xs[1]+bw/2,16),(5,16),(5,247),(xs[1]+bw/2,247),(xs[1]+bw/2,237)],True)
         elif self.kind=='evidence':
-            top=[['Component benchmarks','Five public-data tasks'],['Historical policy study','300 simulated episodes','Five non-IQL policies'],['Current offline release','600 synthetic episodes','Frozen v7 configuration']]
-            bottom=[['Module-level results','Text and fusion baselines'],['Policy trade-offs','Turns, entropy, reward','Simulated skill accuracy'],['Locked belief comparison','91 episodes','Separate validation OPE']]
+            top=[['Archived component tests','Public benchmark tasks'],['Frozen synthetic replay','422 train / 87 validation'],['Locked belief test','91 episodes']]
+            bottom=[['Historical baselines','Summary-level evidence'],['Four score conditions','Eight policy interfaces'],['v6 versus v7 beliefs','No policy rollout claim']]
             for i in range(3):
                 box(xs[i],107,bw,62,top[i]);box(xs[i],15,bw,62,bottom[i]);arrow([(xs[i]+bw/2,107),(xs[i]+bw/2,77)])
         elif self.kind=='split':
             box(16,92,W-32,35,['600 episodes / 9,018 transitions / 33 identity components'])
             for i,lines in enumerate([['Training: 422 episodes','Calibration and IQL fitting'],['Validation: 87 episodes','Selection and diagnostic OPE'],['Locked: 91 episodes','6 components; beliefs only']]):
                 box(xs[i],10,bw,56,lines);arrow([(xs[i]+bw/2,92),(xs[i]+bw/2,66)])
-        elif self.kind=='fusion':
-            x0,y0=55,32;cw=W-90;ch=127
-            c.setFont('Sans',8)
-            for i in range(6):
-                y=y0+ch*i/5;c.setStrokeColor(colors.HexColor('#DDDDDD'));c.line(x0,y,x0+cw,y);label(x0-20,y-3,f'{i/5:.1f}')
-            for i,(name,v) in enumerate([('Text',.8015),('Audio',.6098),('Vision',.5808),('Fusion',.7976)]):
-                x=x0+cw*(i+.5)/4;c.setFillColor(blue);c.rect(x-20,y0,40,ch*v,fill=1,stroke=0);label(x,y0+ch*v+7,f'{v:.4f}');label(x,17,name)
-            c.saveState();c.translate(15,100);c.rotate(90);label(0,0,'Accuracy');c.restoreState()
+        elif self.kind=='returns':
+            source=json.loads((ROOT/'paper/generated_sota/policy_comparison_summary.json').read_text())
+            values={(r['condition'],r['policy']):r['reward_mean'] for r in source['rows']}
+            policies=['aria_iql_v7','behavior_cloning','discrete_cql','decision_transformer']
+            palette=[blue,teal,colors.HexColor('#BC8431'),colors.HexColor('#89809C')]
+            x0,y0=45,58;cw=W-65;ch=130
+            for i in range(8):
+                y=y0+ch*i*5/38;c.setStrokeColor(colors.HexColor('#DDDDDD'));c.line(x0,y,x0+cw,y);label(x0-14,y-3,str(i*5))
+            for k,(condition,name) in enumerate(zip(['base','overlap','low_confidence','positive_shift'],['Base','Overlap','Low confidence','Positive shift'])):
+                center=x0+cw*(k+.5)/4
+                for j,policy in enumerate(policies):
+                    x=center+(j-1.5)*15;v=values[condition,policy]
+                    c.setFillColor(palette[j]);c.rect(x-6,y0,12,ch*v/38,fill=1,stroke=0)
+                label(center,43,name)
+            for j,name in enumerate(['ARIA IQL','Behavior cloning','Discrete CQL','DT-inspired']):
+                x=55+(j%2)*210;y=22-(j//2)*14
+                c.setFillColor(palette[j]);c.rect(x,y-2,9,7,fill=1,stroke=0)
+                c.setFont('Sans',8);c.setFillColor(gray);c.drawString(x+14,y-1,name)
+            c.saveState();c.translate(12,125);c.rotate(90);label(0,0,'Mean designed return');c.restoreState()
         elif self.kind=='confusion':
             x0,y0=165,20;cw=65;ch=34;mat=[[29,6,0],[0,31,2],[0,0,23]]
             label(x0+cw*1.5,157,'Predicted class',9,'SansBold')
@@ -142,7 +150,7 @@ class VectorFigure(Flowable):
                     shade=.1+.5*n/31;c.setFillColor(colors.Color(1-shade*.75,1-shade*.5,1-shade*.3));c.rect(x0+col*cw,y,cw-2,ch-2,fill=1,stroke=0);label(x0+col*cw+cw/2,y+12,str(n),10)
             c.saveState();c.translate(55,70);c.rotate(90);label(0,0,'True class',9,'SansBold');c.restoreState()
 
-story=[p('ARIA: A Belief-Aware Architecture for Adaptive Mock Interviews with Multimodal Baseline Evaluation','title'),
+story=[p('ARIA: Belief-Guided Adaptive Mock Interviews with Offline Policy Evaluation','title'),
        p('Raghav Samir Sejpal and Krissh Verma','center'),
        p('School of Computer Science and Engineering, Vellore Institute of Technology, Vellore, Tamil Nadu, India','center')]
 body=raw.split('\\begin{abstract}',1)[1].split('\\end{document}',1)[0]
@@ -151,9 +159,9 @@ story.extend([p('Abstract','h2'),p(abstract)])
 token=re.compile(r'(\\begin\{table\}.*?\\end\{table\}|\\begin\{figure\}.*?\\end\{figure\}|\\begin\{longtable\}.*?\\end\{longtable\}|\\begin\{equation\}.*?\\end\{equation\}|\\section\{[^}]+\}|\\subsection\{[^}]+\}|\\begin\{thebibliography\}.*?\\end\{thebibliography\}|\\appendix)',re.S)
 parts=token.split(body);sec=sub=0;app=False;tn=fn=eq=0
 equations=[
- 'J(π) = E<sub>τ∼π</sub>[ Σ<sub>t=0</sub><super>T−1</super> γ<super>t</super>r<sub>t</sub> ],   γ = 0.99',
  'ℓ<sub>c</sub>(x<sub>t</sub>) = −½[(x<sub>t</sub> − μ<sub>c</sub>)/σ<sub>c</sub>]<super>2</super> − log σ<sub>c</sub>',
- 'b<sub>k,t+1</sub>(c) ∝ b<sub>k,t</sub>(c) exp{w<sub>t</sub>ℓ<sub>c</sub>(x<sub>t</sub>)}',
+ 'b<sub>k,t+1</sub>(c) = b<sub>k,t</sub>(c) exp{w<sub>t</sub>ℓ<sub>c</sub>(x<sub>t</sub>)} / Σ<sub>j</sub>b<sub>k,t</sub>(j) exp{w<sub>t</sub>ℓ<sub>j</sub>(x<sub>t</sub>)}',
+ 'J(π) = E<sub>τ∼π</sub>[ Σ<sub>t=0</sub><super>T−1</super> γ<super>t</super>r<sub>t</sub> ],   γ = 0.99',
  'L<sub>V</sub> = E<sub>(s,a)∼D</sub>[|τ − 1(u &lt; 0)|u<super>2</super>],   u = min<sub>j</sub> Q̄<sub>j</sub>(s,a) − V(s)',
  'L<sub>π</sub> = −E<sub>(s,a)∼D</sub>[min{e<super>βA(s,a)</super>, 100} log π(a|s)],   β = 3',
  'ρ<sub>i</sub> = min{π(a<sub>i</sub>|s<sub>i</sub>)/μ(a<sub>i</sub>|s<sub>i</sub>), 20}<br/>R̂ = Σ<sub>i</sub>ρ<sub>i</sub>r<sub>i</sub> / Σ<sub>i</sub>ρ<sub>i</sub>,   ESS = (Σ<sub>i</sub>ρ<sub>i</sub>)<super>2</super> / Σ<sub>i</sub>ρ<sub>i</sub><super>2</super>'
@@ -175,10 +183,11 @@ def table_block(block,long=False):
         if '&' in line:
             line=line.split('\\\\',1)[0];data.append([clean(x) for x in line.split('&')])
     n=len(data[0]);assert all(len(r)==n for r in data),(tn,data)
-    if n==6:widths=[W*.31]+[W*.138]*5
-    elif n==5:widths=[W*.50]+[W*.125]*4 if not long else [W*.15,W*.43,W*.14,W*.14,W*.14]
-    elif n==4:widths=[W*.18,W*.27,W*.25,W*.30] if tn==1 else [W*.49,W*.17,W*.17,W*.17]
-    elif n==3:widths=[W*.25,W*.36,W*.39]
+    label=re.search(r'\\label\{([^}]+)\}',block).group(1)
+    if label=='tab:components':widths=[W*.33,W*.35,W*.15,W*.17]
+    elif n==5:widths=[W*.24]+[W*.19]*4
+    elif n==4:widths=[W*.23,W*.29,W*.25,W*.23]
+    elif n==3:widths=[W*.60,W*.20,W*.20]
     else:widths=[W/n]*n
     cells=[[Paragraph(glyph_fallback(html.escape(x)),styles['cell']) for x in row] for row in data]
     t=Table(cells,colWidths=widths,repeatRows=1,hAlign='LEFT')
@@ -208,12 +217,13 @@ for part in parts:
         story.append(CondPageBreak(180 if app else 100))
         story.append(p(n+'. '+re.search(r'\{([^}]+)\}',part).group(1),'h1'))
     elif part.startswith('\\subsection'):
-        sub+=1;story.append(p(f'{sec}.{sub}. '+re.search(r'\{([^}]+)\}',part).group(1),'h2'))
+        sub+=1;n=chr(64+sec) if app else str(sec);story.append(p(f'{n}.{sub}. '+re.search(r'\{([^}]+)\}',part).group(1),'h2'))
     elif part.startswith('\\begin{table}'):table_block(part)
     elif part.startswith('\\begin{longtable}'):table_block(part,True)
     elif part.startswith('\\begin{figure}'):
         fn+=1;cap=re.search(r'\\caption\{(.*?)\}\s*\\label',part,re.S).group(1)
-        kind=['architecture','evidence','split','fusion','confusion'][fn-1]
+        label=re.search(r'\\label\{([^}]+)\}',part).group(1)
+        kind={'fig:architecture':'architecture','fig:evidence':'evidence','fig:split':'split','fig:confusion':'confusion','fig:returns':'returns'}[label]
         story.append(KeepTogether([Spacer(1,6),VectorFigure(kind),p(f'Figure {fn}. '+cap,'caption')]))
     elif part.startswith('\\begin{equation}'):
         story.append(Paragraph(glyph_fallback(equations[eq]+f'   ({eq+1})'),styles['eq']));eq+=1
@@ -229,7 +239,7 @@ for part in parts:
 
 def footer(c,d):
     c.saveState();c.setStrokeColor(colors.HexColor('#CCCCCC'));c.line(56,40,A4[0]-56,40)
-    c.setFont('Sans',7);c.setFillColor(gray);c.drawString(56,28,'ARIA | Revised research draft | 6 October 2026');c.drawRightString(A4[0]-56,28,str(d.page));c.restoreState()
+    c.setFont('Sans',7);c.setFillColor(gray);c.drawString(56,28,'ARIA | Journal research draft | 7 October 2026');c.drawRightString(A4[0]-56,28,str(d.page));c.restoreState()
 doc=SimpleDocTemplate(str(pdf),pagesize=A4,leftMargin=56,rightMargin=56,topMargin=48,bottomMargin=54,title='ARIA: Revised journal draft',author='Raghav Samir Sejpal; Krissh Verma')
 doc.build(story,onFirstPage=footer,onLaterPages=footer)
 (ROOT/'paper/ARIA_revised_reading_text.txt').write_text('\n\n'.join(plain),encoding='utf-8')

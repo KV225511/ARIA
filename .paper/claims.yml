@@ -1,0 +1,67 @@
+claims:
+  - id: C1
+    text: "The current offline policy contract uses a 33-dimensional aria-state-v4 representation and eight actions."
+    evidence_artifacts: ["modules/module_07_rl/rl_spec.py", "modules/module_07_rl/state_builder.py", "modules/module_07_rl/aria_iql_belief_v7.pth"]
+    figure_or_table: ["Fig1", "Table1"]
+    status: supported
+    risk: "Documentation predating v7 reports 32 dimensions and must not be treated as current."
+  - id: C2
+    text: "The production synthetic corpus contains 600 episodes and 9,018 transitions, with 33 identity components isolated across train, validation, and test partitions."
+    evidence_artifacts: ["data/synthetic/v3/production-grounding-v10/qwen_rl_dataset.json", "data/synthetic/v3/production-grounding-v10/generation_distribution.json"]
+    figure_or_table: ["Table2"]
+    status: supported
+    risk: "Identity isolation prevents one form of leakage but does not imply population representativeness."
+  - id: C3
+    text: "The v7 locked synthetic belief evaluation reports accuracy 0.9121, macro-F1 0.9168, balanced accuracy 0.9227, ECE 0.0870, and Brier score 0.1395 on 91 episodes."
+    evidence_artifacts: ["data/synthetic/v3/production-grounding-v10/derived-calibration-v7/release/locked_test_evaluation_v1.json"]
+    figure_or_table: ["Table3"]
+    status: supported
+    risk: "The evaluation is synthetic and explicitly does not evaluate the learned policy."
+  - id: C4
+    text: "On the same 91 locked synthetic episodes, v7 improves accuracy by 0.1209 and macro-F1 by 0.1158 relative to the paired v6 baseline; paired identity-component bootstrap intervals are positive for both differences."
+    evidence_artifacts: ["data/synthetic/v3/production-grounding-v10/derived-calibration-v7/release/locked_test_evaluation_v1.json"]
+    figure_or_table: ["Table3", "Fig2", "Fig3"]
+    status: supported
+    risk: "The test has only six identity components and evaluates synthetic beliefs, not the learned policy or a human population."
+  - id: C5
+    text: "The frozen IQL checkpoint is traceable to aria-state-v4 and belief-v3, with best epoch 4 and validation objective 4.13864."
+    evidence_artifacts: ["modules/module_07_rl/aria_iql_belief_v7.pth"]
+    figure_or_table: ["Table4"]
+    status: supported
+    risk: "A training objective is not a deployment-effect estimate."
+  - id: C6
+    text: "Diagnostic clipped weighted importance sampling on 1,405 validation transitions estimates weighted reward 0.4618 with effective sample size 1003.5 and no ratio clipping."
+    evidence_artifacts: ["data/synthetic/v3/production-grounding-v10/derived-calibration-v7/audits/offline_policy_evaluation_v1.json"]
+    figure_or_table: ["Table4"]
+    status: supported
+    risk: "The artifact marks release_gate false and requires fresh rollouts for causal claims."
+  - id: C7
+    text: "The current live application is not an execution of the evaluated offline system: it injects fixed evidence scores and cycles through three question actions."
+    evidence_artifacts: ["app.py", "architecture.md"]
+    figure_or_table: ["Fig1"]
+    status: supported
+    risk: "Future application changes would invalidate this repository-state claim."
+  - id: C8
+    text: "The focused Module 7 and calibration suite passes 341 tests, while an unscoped repository pytest run does not collect cleanly because of vendor tests, an outdated root test, and unavailable optional dependencies."
+    evidence_artifacts: ["tests", ".research/repository_audit.md"]
+    figure_or_table: ["Table5"]
+    status: supported
+    risk: "The audit log rather than a committed machine-readable test report stores this run."
+  - id: C9
+    text: "ARIA's defensible present contribution is an auditable research prototype and artifact lineage, not validated candidate assessment or proven policy improvement."
+    evidence_artifacts: [".research/evidence_ledger.md", ".research/literature_matrix.md", ".research/topic_dossier.md"]
+    figure_or_table: ["Fig1", "Table6"]
+    status: supported
+    risk: "This is a synthesis claim bounded to the audited checkout and screened literature."
+  - id: C10
+    text: "Fresh held-out learned-policy rollouts demonstrate improvement over fixed-cycle, random-valid-action, and uncertainty-greedy baselines."
+    evidence_artifacts: []
+    figure_or_table: []
+    status: gap
+    gap_reason: "No fresh rollout artifact exists in the audited repository."
+  - id: C11
+    text: "ARIA scores are criterion-valid, fair, and accessible for real applicants."
+    evidence_artifacts: []
+    figure_or_table: []
+    status: gap
+    gap_reason: "No human-subject criterion, subgroup, disability, or deployment evaluation exists."

@@ -1,0 +1,444 @@
+{
+  "schema_version": "1.1",
+  "project": {
+    "id": "ARIA",
+    "title": "ARIA: Belief-Guided Adaptive Mock Interviews with Offline Policy Evaluation",
+    "archetype": "empirical",
+    "study_designs": [
+      "computational",
+      "simulation",
+      "AI/LLM",
+      "offline policy evaluation"
+    ],
+    "lifecycle_stage": "Complete redraft from canonical development results; author review",
+    "review_maturity": "Research draft; submission declarations and external validation remain open",
+    "target_venue": "Unspecified; user-supplied ScienceDirect style reference remains inaccessible",
+    "active_release": "2026-10-07-journal-redraft"
+  },
+  "artifacts": [
+    {
+      "id": "main-md",
+      "path": "paper/ARIA_complete_research_paper.md",
+      "role": "main_manuscript",
+      "status": "REFERENCE_ONLY",
+      "required_for_release": false
+    },
+    {
+      "id": "main-docx",
+      "path": "paper/ARIA_complete_research_paper.docx",
+      "role": "word_render",
+      "status": "REFERENCE_ONLY",
+      "required_for_release": false
+    },
+    {
+      "id": "main-pdf",
+      "path": "paper/ARIA_complete_research_paper.pdf",
+      "role": "pdf_render",
+      "status": "REFERENCE_ONLY",
+      "required_for_release": false
+    },
+    {
+      "id": "main-tex",
+      "path": "paper/ARIA_complete_IEEE_self_contained.tex",
+      "role": "self_contained_latex_source",
+      "status": "REFERENCE_ONLY",
+      "required_for_release": false
+    },
+    {
+      "id": "claims",
+      "path": ".paper/claims.yml",
+      "role": "claim_registry",
+      "status": "REFERENCE_ONLY",
+      "required_for_release": false
+    },
+    {
+      "id": "references",
+      "path": "paper/references.bib",
+      "role": "bibliography",
+      "status": "REFERENCE_ONLY",
+      "required_for_release": false
+    },
+    {
+      "id": "october-tex",
+      "path": "paper/ARIA_revised_journal_draft.tex",
+      "role": "main_manuscript",
+      "status": "ACTIVE",
+      "required_for_release": true
+    },
+    {
+      "id": "october-pdf",
+      "path": "output/pdf/ARIA_revised_journal_draft.pdf",
+      "role": "review_pdf",
+      "status": "ACTIVE",
+      "required_for_release": true
+    }
+  ],
+  "authority_sources": [
+    {
+      "id": "code-contracts",
+      "kind": "verified_primary_evidence",
+      "path_or_reference": "modules/module_07_rl/rl_spec.py; modules/module_07_rl/state_builder.py; app.py",
+      "scope": [
+        "methods",
+        "implementation",
+        "live boundary"
+      ],
+      "status": "VERIFIED",
+      "last_verified": "2026-09-15"
+    },
+    {
+      "id": "locked-release",
+      "kind": "verified_primary_evidence",
+      "path_or_reference": "data/synthetic/v3/production-grounding-v10/derived-calibration-v7/release/locked_test_evaluation_v1.json",
+      "scope": [
+        "results",
+        "numbers",
+        "nonclaims"
+      ],
+      "status": "VERIFIED",
+      "last_verified": "2026-09-15"
+    },
+    {
+      "id": "policy-diagnostic",
+      "kind": "verified_primary_evidence",
+      "path_or_reference": "data/synthetic/v3/production-grounding-v10/derived-calibration-v7/audits/offline_policy_evaluation_v1.json",
+      "scope": [
+        "policy diagnostic",
+        "nonclaims"
+      ],
+      "status": "VERIFIED",
+      "last_verified": "2026-09-15"
+    },
+    {
+      "id": "literature",
+      "kind": "verified_primary_evidence",
+      "path_or_reference": "paper/citation_verification_redraft.md",
+      "scope": [
+        "introduction",
+        "related work",
+        "discussion",
+        "ethics"
+      ],
+      "status": "VERIFIED",
+      "last_verified": "2026-10-07"
+    },
+    {
+      "id": "component-record",
+      "kind": "author_repository_report",
+      "path_or_reference": "ARIA_updated.md",
+      "scope": [
+        "historical baseline results"
+      ],
+      "status": "PROBABLE",
+      "last_verified": "2026-10-02"
+    },
+    {
+      "id": "rapid-record",
+      "kind": "author_repository_report",
+      "path_or_reference": "ARIA_PROJECT_CONTEXT_AND_RESULTS.md",
+      "scope": [
+        "Historical context only; excluded from direct comparisons"
+      ],
+      "status": "PROBABLE",
+      "last_verified": "2026-10-02"
+    },
+    {
+      "id": "canonical-policy-summary",
+      "kind": "verified_primary_evidence",
+      "path_or_reference": "paper/generated_sota/policy_comparison_summary.json",
+      "scope": [
+        "Direct synthetic development policy results"
+      ],
+      "status": "VERIFIED",
+      "last_verified": "2026-10-07"
+    }
+  ],
+  "contract": {
+    "gap": "How explicit beliefs and offline interview policies behave under a shared controlled interface; no literature-wide novelty gap claimed.",
+    "task": "Redraft all sections using latest evidence; preserve generated data and model; separate simulator and human claims.",
+    "outcomes": [
+      "Historical component baselines",
+      "Locked belief comparison",
+      "Matched policy accuracy, reward, information gain and cost",
+      "Implementation and external-validity limits"
+    ],
+    "questions": [
+      {
+        "id": "Q1",
+        "text": "What do recorded component baselines establish about the available response signals?",
+        "lock": "SEMANTIC"
+      },
+      {
+        "id": "Q2",
+        "text": "Does v7 improve synthetic belief classification over v6 on the locked split?",
+        "lock": "SEMANTIC"
+      },
+      {
+        "id": "Q3",
+        "text": "How do learned and heuristic policies compare under matched development conditions?",
+        "lock": "SEMANTIC"
+      }
+    ],
+    "contribution": "An explicit belief-to-action architecture with layered evaluation and controlled development policy comparisons.",
+    "nonclaims": [
+      "Real-candidate validity",
+      "Fairness or accessibility",
+      "Universal SOTA superiority",
+      "Faithful reproduction of original DT",
+      "Production readiness",
+      "First-system priority",
+      "Unverified patentability"
+    ]
+  },
+  "semantic_locks": [
+    {
+      "id": "scope",
+      "kind": "SEMANTIC",
+      "canonical": "research prototype, not validated hiring system",
+      "forbidden_variants": [
+        "validated hiring system",
+        "proven policy improvement"
+      ]
+    }
+  ],
+  "terminology": [
+    {
+      "id": "state",
+      "preferred": "33-dimensional state",
+      "prohibited": [
+        "32-dimensional current state"
+      ]
+    },
+    {
+      "id": "belief",
+      "preferred": "calibrated belief model",
+      "prohibited": [
+        "belief-v2 current"
+      ]
+    },
+    {
+      "id": "evaluation",
+      "preferred": "locked synthetic belief evaluation",
+      "prohibited": [
+        "learned-policy test"
+      ]
+    }
+  ],
+  "style_profile": {
+    "language_variant": "English",
+    "protected_terms": [
+      "implicit Q-learning",
+      "weighted importance sampling",
+      "expected calibration error"
+    ],
+    "discouraged_phrases": [
+      "plays a crucial role",
+      "it is important to note",
+      "taken together"
+    ],
+    "preferred_open_compounds": [
+      "machine learning",
+      "job analysis"
+    ],
+    "allowed_repetitions": [
+      "synthetic",
+      "locked test",
+      "research prototype"
+    ],
+    "sentence_opening_words": 4,
+    "phrase_words": 5,
+    "phrase_min_occurrences": 3
+  },
+  "facts": [
+    {
+      "id": "state_dim",
+      "value": "33",
+      "source_id": "code-contracts",
+      "expected_strings": [
+        "33-dimensional"
+      ],
+      "forbidden_strings": [
+        "32-dimensional"
+      ]
+    },
+    {
+      "id": "episodes",
+      "value": "600",
+      "source_id": "locked-release",
+      "expected_strings": [
+        "600 episodes"
+      ]
+    },
+    {
+      "id": "test_n",
+      "value": "91",
+      "source_id": "locked-release",
+      "expected_strings": [
+        "91"
+      ]
+    }
+  ],
+  "alignment": [
+    {
+      "question_id": "Q1",
+      "method": "Historical report consolidation",
+      "evidence": "ARIA_updated.md and baseline provenance",
+      "result": "SVM best Mohler F1; text exceeds recorded MOSEI fusion accuracy",
+      "interpretation": "Additional modalities require task-specific evidence",
+      "limitation": "Prediction artifacts missing",
+      "contribution": "Explicit component baseline comparison",
+      "status": "CONFIRMED"
+    },
+    {
+      "question_id": "Q2",
+      "method": "Frozen paired v6/v7 belief evaluation",
+      "evidence": "locked-release",
+      "result": "Accuracy and Brier improve; ECE worsens slightly",
+      "interpretation": "Synthetic discrimination improves, not every calibration metric",
+      "limitation": "91 episodes in six identity components; no policy test",
+      "contribution": "Bounded belief-model evidence",
+      "status": "CONFIRMED"
+    },
+    {
+      "question_id": "Q3",
+      "method": "Four conditions, eight policies, 45 episodes per condition",
+      "evidence": "canonical-policy-summary",
+      "result": "IQL highest mean reward and information gain among learned policies; lower overlap accuracy than several baselines",
+      "interpretation": "Simulator coverage/return trade-off",
+      "limitation": "One training seed, exploratory stress conditions, comparator adaptation limits",
+      "contribution": "Same-interface development comparison",
+      "status": "CONFIRMED"
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "offline",
+      "entities": [
+        "state",
+        "belief",
+        "corpus",
+        "IQL policy",
+        "OPE",
+        "Direct policy comparisons",
+        "Direct policy comparisons",
+        "Direct policy comparisons"
+      ],
+      "status": "LIMITED"
+    },
+    {
+      "id": "live",
+      "entities": [
+        "live interface",
+        "question cycle"
+      ],
+      "status": "LIMITED"
+    },
+    {
+      "id": "human",
+      "entities": [
+        "validity",
+        "fairness",
+        "accessibility",
+        "reactions"
+      ],
+      "status": "MISSING"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D1",
+      "decision": "Use v7 artifacts over Project I summaries",
+      "authority": "verified primary evidence",
+      "date": "2026-09-15"
+    },
+    {
+      "id": "D2",
+      "decision": "Permit scoped simulator policy findings; exclude human effectiveness and universal superiority claims",
+      "authority": "Canonical development comparisons plus locked evaluation boundary",
+      "date": "2026-10-07"
+    }
+  ],
+  "issues": [
+    {
+      "id": "I1",
+      "scope": "validity",
+      "severity": "S4",
+      "evidence_status": "CONFIRMED",
+      "status": "WAIVED",
+      "description": "No real-person criterion/fairness evidence; blocks deployment claims but not the scoped prototype paper.",
+      "waiver": {
+        "authority": "manuscript contract and verified repository absence",
+        "reason": "The paper explicitly makes this a nonclaim and future-study requirement."
+      }
+    },
+    {
+      "id": "I2",
+      "scope": "validity",
+      "severity": "S4",
+      "evidence_status": "CONFIRMED",
+      "status": "WAIVED",
+      "description": "Development rollouts now available, but comparator fidelity and single-seed limits block broad algorithm-superiority claims.",
+      "waiver": {
+        "authority": "Current task scope and canonical result artifacts",
+        "reason": "Documented scope limit for this draft, not evidence of submission readiness."
+      }
+    },
+    {
+      "id": "I3",
+      "scope": "project",
+      "severity": "S3",
+      "evidence_status": "CONFIRMED",
+      "status": "WAIVED",
+      "description": "Live application does not load the evaluated policy.",
+      "waiver": {
+        "authority": "app.py and architecture audit",
+        "reason": "The paper separates live and offline paths and does not evaluate the live system."
+      }
+    },
+    {
+      "id": "I4",
+      "scope": "project",
+      "severity": "S2",
+      "evidence_status": "CONFIRMED",
+      "status": "OPEN",
+      "description": "Unscoped pytest collection is not clean."
+    }
+  ],
+  "release": {
+    "status": "DRAFT",
+    "candidate_artifacts": [
+      "october-tex",
+      "october-pdf"
+    ],
+    "visual_check": "PASSED_ALL_15_PDF_PAGES",
+    "checked_hashes": {
+      "october-tex": "adc30ccde08500e175d9cb7adba4aa2c8d414f6d39915d182df51c917292905e",
+      "october-pdf": "f1534e832a0d3690f7cd04cfb169f07594e608b9d791de27b02b3758ec18c4b4"
+    },
+    "candidate_text_sha256": "f88447b3ab10a8ff624de33f025b0ed990139e011f5847978a7b5cfee6ba0ec1",
+    "manual_review_record": "paper/ARIA_redraft_review.json"
+  },
+  "revision_notes": {
+    "authority": "User requested complete redraft using current repository evidence; dataset and ARIA model remain fixed.",
+    "source_status": "Canonical pulled compact comparison summary used. Local detailed rollout files have different hashes and were not used for new paired inference.",
+    "style_reference": "ScienceDirect reference inaccessible; exact style and length not verified.",
+    "open_issues": [
+      "Native TeX compilation unavailable; PDF uses ReportLab fallback",
+      "ScienceDirect reference format and length not verified",
+      "Historical baselines trace to summaries, not recovered prediction artifacts",
+      "One comparator training seed; canonical paired episode traces unavailable locally",
+      "Structural checks do not establish statistical validity or submission readiness",
+      "Authors must finalize funding, conflicts, contribution statements and release URL."
+    ],
+    "scientific_changes": [
+      "Updated canonical baseline values",
+      "All eight policy accuracy/cost/return intervals included",
+      "DT-inspired label and deviations disclosed",
+      "Training shaping separated from runtime return",
+      "Stress conditions identified as exploratory",
+      "Historical and locked belief results separated from policy evaluation"
+    ],
+    "bibliography": "13 primary-source references; see paper/citation_verification_redraft.md",
+    "native_compilation": "Unavailable: compiler could not find standard directories."
+  }
+}

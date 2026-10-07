@@ -1,0 +1,55 @@
+{
+  "status": "FINDINGS",
+  "candidate_sha256": "69fc80292fec84fdb4f7bda653f979b9f9a9c3f71193e97e589d18ed02abbaf9",
+  "profile_loaded": true,
+  "findings": [
+    {
+      "code": "PROSE002",
+      "artifact": "candidate",
+      "match": "https arxiv org abs",
+      "count": 3,
+      "message": "repeated sentence opening"
+    },
+    {
+      "code": "PROSE002",
+      "artifact": "candidate",
+      "match": "source and scope aria",
+      "count": 3,
+      "message": "repeated sentence opening"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "accuracy of and macro-f of",
+      "count": 4,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "and scope aria updated md",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "source and scope aria updated",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    }
+  ],
+  "manual_checks_required": [
+    "paragraph contract and adjacent-paragraph flow",
+    "claim scope and preservation of locked meaning",
+    "functional transitions and cumulative information flow",
+    "literature-example ordering from broad context to the closest precedent and gap, or another explicit evidentiary logic",
+    "function-preserving concision and sentence rhythm",
+    "natural scholarly subjects, syntax, and disciplinary accessibility",
+    "reader accessibility, including nonessential field shorthand, transition templates, and indirect verbs",
+    "claim-to-citation support and reference-list changes",
+    "observable stock or AI-like prose features without authorship inference",
+    "dash and hyphen style, including grammatical role, established open compounds, density, and suspended compounds",
+    "necessary technical repetition versus avoidable restatement"
+  ]
+}

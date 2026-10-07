@@ -1,0 +1,20 @@
+{
+  "reviewed_source_sha256": "adc30ccde08500e175d9cb7adba4aa2c8d414f6d39915d182df51c917292905e",
+  "reviewed_pdf_sha256": "f1534e832a0d3690f7cd04cfb169f07594e608b9d791de27b02b3758ec18c4b4",
+  "candidate_text_sha256": "f88447b3ab10a8ff624de33f025b0ed990139e011f5847978a7b5cfee6ba0ec1",
+  "visual_review": "All 15 final rendered pages inspected; architecture and interval table additionally inspected at page scale.",
+  "manual_review": [
+    "RQ-to-method/results alignment checked",
+    "Claim scope and source distinctions checked",
+    "Citations matched to verified records",
+    "Tables matched to canonical results",
+    "Flow, stock phrasing, terminology and hyphen density reviewed"
+  ],
+  "retained_diagnostics": {
+    "codes": [
+      "PROSE004"
+    ],
+    "reason": "Three overlapping phrase matches identify the same central result repeated in the abstract, results and conclusion. These locations serve distinct reading functions; technical metric names and the scope among learned policies are retained."
+  },
+  "status": "DRAFT_REVIEW_COMPLETE_WITH_DOCUMENTED_LIMITS"
+}

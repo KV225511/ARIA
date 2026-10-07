@@ -1,0 +1,19 @@
+figures:
+  - id: Fig1
+    file: "paper/figures/aria_evidence_boundary.png"
+    panels: ["implemented offline evidence", "current live application", "evidence still required"]
+    key_numbers: ["33-dimensional state", "8 actions", "600 synthetic episodes", "91 locked-test episodes"]
+    supports_claims: [C1, C7, C9]
+    caption_in_manuscript: "Figure 1. Evidence boundary for the audited ARIA checkout. Solid boxes identify implemented and inspected artifacts; the live application follows a separate simplified path; dashed requirements mark evidence needed for policy-effectiveness and real-hiring claims."
+  - id: Fig2
+    file: "paper/figures/belief_metric_comparison.png"
+    panels: ["v6 paired baseline", "v7 locked result"]
+    key_numbers: ["accuracy 0.7912 to 0.9121", "macro-F1 0.8010 to 0.9168", "Brier 0.2451 to 0.1395"]
+    supports_claims: [C3, C4]
+    caption_in_manuscript: "Figure 2. Paired v6-v7 locked synthetic belief metrics. Higher is better for accuracy, macro-F1, balanced accuracy, and minimum recall; lower is better for ECE, Brier score, and ordinal MAE."
+  - id: Fig3
+    file: "paper/figures/belief_confusion_matrix.png"
+    panels: ["true low", "true medium", "true high"]
+    key_numbers: ["29 6 0", "0 31 2", "0 0 23"]
+    supports_claims: [C3, C4]
+    caption_in_manuscript: "Figure 3. Confusion matrix for the v7 locked synthetic belief evaluation (n=91). Rows are true labels and columns are predicted labels; all eight errors are adjacent-class errors."

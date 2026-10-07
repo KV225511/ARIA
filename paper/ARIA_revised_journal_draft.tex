@@ -18,76 +18,70 @@
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 \newcommand{\source}[1]{\par\smallskip{\footnotesize\emph{Source and scope:} #1}}
 \tikzset{box/.style={draw=ariaBlue,fill=ariaBlue!5,rounded corners=2pt,align=center,minimum height=12mm,text width=39mm,font=\small,inner sep=4pt},arr/.style={-{Latex[length=2mm]},thick,draw=ariaGray},pending/.style={box,draw=ariaGold,dashed,fill=ariaGold!6}}
-\title{\textbf{ARIA: A Belief-Aware Architecture for Adaptive Mock Interviews\\with Multimodal Baseline Evaluation}}
+\title{\textbf{ARIA: Belief-Guided Adaptive Mock Interviews\\with Offline Policy Evaluation}}
 \author{Raghav Samir Sejpal \and Krissh Verma}
 \date{School of Computer Science and Engineering\\Vellore Institute of Technology, Vellore, Tamil Nadu, India}
 \begin{document}
 \maketitle
 \begin{abstract}
-An adaptive mock interviewer must decide what to ask next from evidence that is incomplete and sometimes unreliable. A useful design therefore needs both a representation of what has been learned and an evaluation that distinguishes response scoring from question-selection quality. We present ARIA, an Autonomous Reinforcement-Based Interview Agent that combines role-grounded questions, calibrated skill beliefs, and an offline Implicit Q-Learning policy. The current policy interface uses a 33-dimensional state and eight actions. We bring together recorded component benchmarks, a locked synthetic belief evaluation, and matched development rollouts against behavior cloning, discrete Conservative Q-Learning, and Decision Transformer adaptations. The component records show that TF-IDF with a linear SVM achieved macro-F1 of 0.6030 on short-answer grading, while text-only CMU-MOSEI accuracy of 0.8015 slightly exceeded early fusion at 0.7976. On 91 locked-test episodes, the calibrated belief model achieved accuracy of 0.9121 and macro-F1 of 0.9168. In 45 matched development rollouts per condition, base accuracy saturated across several policies. Under overlapping evidence, ARIA IQL achieved accuracy 0.4667, while behavior cloning achieved 0.5333; however, IQL obtained the largest mean designed reward and information gain among the learned comparators in every evaluated condition. The comparison therefore supports a claim about simulator behavior, not superior assessment accuracy or real-candidate performance. Live policy integration and human validation remain necessary.
+Adaptive mock interviews require decisions about which evidence to collect as well as how to interpret an answer. We present ARIA, an architecture that connects calibrated skill beliefs to an offline Implicit Q-Learning (IQL) policy through a 33-dimensional state and eight interview actions. The evaluation separates historical component baselines, a locked synthetic belief test, and direct development comparisons against behavior cloning, discrete Conservative Q-Learning, a Decision-Transformer-inspired model, and four heuristic policies. On 91 locked episodes, the v7 belief configuration improves accuracy from 0.7912 to 0.9121 and macro-F1 from 0.8010 to 0.9168, although expected calibration error increases slightly. The policy comparison uses 45 matched episodes in each of four constructed score conditions. Base accuracy reaches 1.0000 for seven policies and cannot rank them. With overlapping evidence, IQL achieves accuracy 0.4667, compared with 0.5333 for behavior cloning and 0.5778 for uncertainty greedy. IQL nevertheless has the largest mean designed return and information gain among the learned policies across all conditions and covers all 17 skills. These findings show a coverage and reward advantage within the specified simulator, rather than uniformly better classification. The study documents the comparator adaptations, distinguishes training data from generated rollout evidence, and identifies incomplete live integration and absent human validation as limits on end-to-end claims.
 \end{abstract}
-\noindent\textbf{Keywords:} adaptive mock interviews; multimodal learning; baseline comparison; belief calibration; implicit Q-learning; offline reinforcement learning.
+\noindent\textbf{Keywords:} adaptive interviewing; skill beliefs; offline reinforcement learning; implicit Q-learning; synthetic evaluation; baseline comparison.
 
 \section{Introduction}
-A useful practice interview responds to what a candidate has actually said. A weak answer may justify a simpler question, an incomplete explanation may call for a follow-up, and a well-supported answer may allow the interviewer to move to another topic. Implementing these choices requires more than a fluent question generator. The system must retain evidence across turns, recognize uncertainty, and distinguish a change in question difficulty from a change in its estimate of the candidate's knowledge.
+A practice interview is a sequence of decisions about what evidence to collect. An interviewer may stay with a topic when an answer is incomplete, revisit a prerequisite when a response exposes a gap, or move on when the available evidence is sufficient. These choices influence both the final assessment and the time required to obtain it. A system that generates plausible questions therefore addresses only part of the problem: it also needs a way to represent uncertainty and decide which question serves the interview next.
 
-Automated interview research has approached this problem from several directions. HireNet models the hierarchy of questions and answers to predict recruiter judgments from recorded interviews \cite{hirenet}. More recent platforms, such as PolyInterview, combine role-specific questions, spoken interaction, and multimodal feedback \cite{poly}. Adaptive testing offers a complementary view: the next item is selected because of what it can reveal about an uncertain latent trait \cite{cat}. These approaches establish useful precedents, but their evaluation targets differ. A model that predicts a rating, a system that produces relevant questions, and a policy that improves the evidence collected during an interview answer different research questions.
+ARIA, an Autonomous Reinforcement-Based Interview Agent, treats these decisions as a sequential control problem. The architecture connects role and skill context to a probabilistic belief model and an offline policy. A fixed state representation exposes the current evidence, coverage, and recent interaction history, while a validity mask restricts the actions available at each turn. The intended application is mock-interview practice. The competence labels used in the experiments are synthetic categories rather than independently validated measures of professional ability.
 
-ARIA studies the connection between evidence accumulation and action selection. It represents skill estimates as probability distributions and exposes a fixed interface through which a policy can change topic, probe foundations, adjust difficulty, or end an interview. The offline learner is trained on synthetic trajectories, while separate component experiments examine visual emotion recognition, speech emotion classification, short-answer grading, sentiment fusion, and an annotated deception task. These component tasks provide engineering evidence about candidate modules. They do not turn emotion or deception labels into validated measures of interview competence.
+Existing research offers several relevant but distinct precedents. HireNet predicts recruiter judgments from recorded interviews \cite{hirenet}. SimInterview describes personalized interview practice using language models and retrieval \cite{siminterview}, while InterPilot supports human interviewers during an interview \cite{interpilot}. ARIA examines a narrower question: how an explicit belief state and an offline action policy behave when they share a controlled assessment interface. Personalization or multimodal input, by itself, is not claimed as a new contribution.
 
-The evaluation is organized around three questions. First, what do the available baseline experiments reveal about the usefulness of the proposed components? Second, does the current calibration improve belief estimates on a held-out synthetic set? Third, what evidence connects those estimates to the behavior of an adaptive interview policy? This organization allows positive findings to be stated directly while making clear where the evidence stops.
+The present evaluation combines three sources of evidence. Archived component experiments compare response-processing methods on public benchmark tasks. A locked synthetic evaluation compares two belief configurations. A subsequent development experiment trains policy comparators on ARIA's stored transitions and evaluates them in matched synthetic rollouts. Keeping these sources distinct matters because their labels, sampling units, and outcomes differ. A component classifier can improve without improving interview decisions, and a policy can obtain a higher designed reward without classifying candidates more accurately.
 
-The study contributes a code-grounded account of the belief-to-action architecture, a consolidated analysis of previously scattered baseline results, and a paired evaluation of the current belief model. It also positions the system against contemporary work without treating scores from different datasets as a common leaderboard. The strongest present result concerns synthetic belief estimation. The complete architecture remains a research prototype for mock-interview experimentation.
+We address three research questions. RQ1 asks what the recorded component baselines establish about the value of the available response signals. RQ2 asks whether the frozen v7 belief configuration improves synthetic classification over v6 on the locked split. RQ3 asks how the existing IQL policy compares with learned and heuristic alternatives under the same development rollout interface, including conditions with ambiguous or weak evidence.
+
+The contribution is a documented belief-to-action architecture and a layered empirical analysis of that architecture. The direct comparisons add behavioral evidence beyond a single accuracy score, including information gain, coverage, and interview length. They reveal a trade-off between IQL's coverage-oriented behavior and the classification performance of simpler policies. The study also identifies the limits of a score-based simulator and of compact adaptations of published algorithms. These limits define the scope of the findings rather than being deferred to a claim of general superiority.
 
 \section{Related work and state-of-the-art analysis}
-\subsection{From interview scoring to interactive practice}
-HireNet treats an interview as a sequence of question--answer pairs and uses hierarchical attention to model context \cite{hirenet}. Its target is a recruiter-provided hirability judgment. This is a relevant precedent for representing interview evidence, although it does not evaluate ARIA's eight-action policy. PolyInterview moves closer to the interaction problem by conditioning questions on a CV and job description, asking answer-aware follow-ups, and linking feedback to multimodal observations \cite{poly}. Its existence means that adaptation and multimodal feedback alone cannot serve as ARIA's distinguishing contribution.
+\subsection{Interview assessment and interactive support}
+HireNet models the structure of question--answer sequences using hierarchical attention and predicts recruiter-provided hirability judgments \cite{hirenet}. This makes it relevant to the representation of interview evidence, but its prediction target differs from the choice of an interview action. A direct comparison would require compatible labels and inputs, not merely an accuracy column beside ARIA's results.
 
-The distinction is clearer when the system is viewed as an experimental interface. ARIA exposes the state used for action selection, the conditions under which a belief can be reported, and the provenance of the frozen evaluation. Researchers can then ask whether a changed component alters belief quality or policy behavior. Inspectability is an engineering property; it is not evidence of superior interviewing performance.
+Recent systems broaden the interaction setting. SimInterview uses language models and retrieval to organize personalized practice around applicant and job information \cite{siminterview}. InterPilot instead supplies real-time assistance to a human interviewer, including questions and evidence-oriented support \cite{interpilot}. These examples place ARIA within a field that already includes adaptive practice and interviewer assistance. They are systems-level references, not models trained in the experiments reported here.
 
-\subsection{Multimodal prediction and the value of additional signals}
-Multimodal assessment is useful only when an added signal contributes information relevant to the intended target. Kim et al. address fairness in automated video interview assessment through distributional regularization, with a tunable accuracy--fairness trade-off \cite{kim}. MAG-BERT-ARL combines a multimodal language representation with adversarial reweighting to address underrepresented groups without relying on sensitive attributes \cite{mag}. These studies treat fairness as an evaluation objective rather than a consequence of adding more modalities.
+MAG-BERT-ARL combines multimodal language representations with adversarial reweighting to study fairness in automated video interview assessment \cite{mag}. Its emphasis on underrepresented groups highlights a separate evaluation requirement. Neither multimodal inputs nor a confidence score demonstrate that a system treats candidate groups comparably. ARIA's synthetic policy experiments do not contain the population evidence needed to answer that question.
 
-AVI-Personality provides a recent dataset built around trait-targeted interview questions and labels reported by participants and observers. Its benchmarks find strong text baselines and only modest overall gains from multimodal methods \cite{avi}. For ARIA, the relevant implication is methodological: each modality should be compared against a text baseline under the same split and outcome definition. The local fusion results examined below make this requirement concrete. A visually elaborate architecture should not obscure a simpler model that performs as well or better.
+\subsection{Offline policies and calibration}
+Implicit Q-Learning (IQL) learns values from logged state--action pairs and extracts a policy by advantage-weighted fitting \cite{iql}. Conservative Q-Learning (CQL) adds a penalty to reduce optimistic action-value estimates in offline learning \cite{cql}. Decision Transformer treats control as return-conditioned sequence prediction \cite{dt}. These are established algorithmic precedents with different training objectives. Their original benchmark results cannot be transferred to an interview simulator.
 
-\subsection{Adaptive assessment and offline learning}
-Deep computerized adaptive testing combines multivariate latent-trait modeling with learned item selection \cite{cat}. Its testing setting differs from open-ended interviews, but it supports treating question selection as a sequential decision problem rather than a fixed script. In ARIA, the policy acts on an explicit summary of beliefs, coverage, and recent evidence.
+We therefore distinguish algorithm provenance from implementation fidelity. The experiments use the existing ARIA IQL checkpoint, a behavior-cloning baseline, a compact discrete CQL implementation, and a return-conditioned causal Transformer inspired by Decision Transformer. The last comparator combines several embeddings at each time step and differs from the published tokenization. None of the newly trained comparators is an imported, author-supplied interview system. Their results assess these local implementations under ARIA's interface.
 
-Implicit Q-Learning provides the algorithmic basis for the offline policy \cite{iql}. Its advantage-weighted policy extraction and expectile value learning reduce the need to query unsupported actions during training. Conservative Q-Learning instead regularizes learned action values to reduce overestimation outside the logged distribution \cite{cql}. Decision Transformer frames offline control as return-conditioned causal sequence modeling over states, actions, and rewards \cite{decisiontransformer}. These methods provide relevant same-data architectures, but their original benchmark scores are not directly comparable with ARIA. Off-policy evaluation addresses a separate question: how much can be inferred about a new policy from data collected by another policy? Work on high-confidence evaluation makes the distinction between a point estimate and a defensible performance bound explicit \cite{ope}.
+Calibration is also distinct from discrimination. A classifier may become more accurate while the probabilities it reports become less well aligned with observed frequencies. Guo et al. study this distinction for modern neural networks \cite{calibration}. Accordingly, the locked evaluation reports both classification and probability-quality measures. For offline policy evaluation, Thomas et al. formulate confidence bounds on expected policy return \cite{ope}; ARIA's transition-level weighting diagnostic does not implement that guarantee.
 
-\subsection{Comparative position of ARIA}
-Table~\ref{tab:sota} compares representative contemporary systems and methodological precedents. Here, state-of-the-art analysis means an assessment of relevant approaches and their evidence, not a claim that ARIA has achieved the best published score. The comparison is selective and includes 2026 preprints; publication status is retained because the level of external review differs across sources.
+\subsection{Scope of the comparison}
+Table~\ref{tab:sota} organizes the literature by its evaluation target. The state-of-the-art analysis is selective, rather than a systematic review or an exhaustive claim about the newest available system. Publication records and abstracts were checked against primary sources; the 2026 InterPilot report is identified as a preprint. The table provides conceptual positioning. The numerical head-to-head comparison appears later and concerns only policies that share ARIA's state, actions, and simulator.
 
 \begin{table}[htbp]
 \centering\small
-\caption{State-of-the-art analysis by task and evaluation target. No row is a direct numerical competitor to ARIA's synthetic belief test.}
+\caption{Representative literature and the scope of comparison. External interview systems are reviewed, not reproduced.}
 \label{tab:sota}
-\begin{tabularx}{\linewidth}{p{27mm}YYY}
+\begin{tabularx}{\linewidth}{p{29mm}YYY}
 \toprule
-Work & Main approach & Evidence or target & Relationship to ARIA \\ \midrule
-HireNet (2019) \cite{hirenet} & Hierarchical attention over recorded interviews & Recruiter hirability judgments & Representation precedent; different labels and no shared policy test \\
-Kim et al. (2023) \cite{kim} & Fairness-aware multimodal learning & Predictive scores and fairness trade-offs & Establishes the need to measure group effects separately \\
-MAG-BERT-ARL (2024) \cite{mag} & Multimodal language model with adversarial reweighting & Performance and fairness on interview-related datasets & Fairness comparator; not reproduced in this study \\
-Deep CAT (2026) \cite{cat} & Multivariate trait estimation and learned item selection & Simulated and real assessment data & Sequential-assessment precedent; different item and response setting \\
-PolyInterview (2026 preprint) \cite{poly} & Role-conditioned dialogue and multimodal feedback & Platform use, question alignment, expert assessment & Close systems comparator; ARIA's contribution must be narrower than adaptation \\
-AVI-Personality (2026 preprint) \cite{avi} & Trait-activated multimodal interview dataset & Reliability, validity, fairness, predictive benchmarks & Future external-validation resource; not an ARIA evaluation dataset \\
-ARIA (this study) & Calibrated belief state and offline IQL interface & Locked beliefs and matched synthetic development rollouts & Inspectable integration design; real-candidate policy effectiveness remains open \\
+Work & Method or role & Outcome studied & Use in this study \\ \midrule
+HireNet (2019) & Hierarchical interview representation & Recruiter judgments & Related scoring system \\
+MAG-BERT-ARL (2024) & Multimodal prediction and reweighting & Assessment and group fairness & Related assessment system \\
+SimInterview (2025) & Personalized language-model practice & Interactive practice & Related interview framework \\
+InterPilot (2026 preprint) & Assistance to human interviewers & Interview support & Related interactive system \\
+IQL (2022) & Expectile value learning & Offline control & Existing ARIA implementation \\
+CQL (2020) & Conservative action values & Offline control & Compact discrete adaptation \\
+Decision Transformer (2021) & Return-conditioned sequence model & Offline control & DT-inspired adaptation \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-\section{Problem formulation and architecture}
-\subsection{Interview state and decision objective}
-Let $o_t$ denote the response evidence available after turn $t$. For each skill $k$, ARIA maintains a three-class belief $b_{k,t}$ over beginner, intermediate, and expert levels. These are operational categories in the synthetic evaluation. They should not be read as validated occupational qualifications. The policy receives a summary $s_t=\phi(b_t,h_t,m_t)$, where $h_t$ contains recent interaction history and $m_t$ indicates which evidence channels are available.
+\section{ARIA architecture and learning formulation}
+\subsection{Context, evidence, and skill beliefs}
+Figure~\ref{fig:architecture} presents the architecture and its implementation boundary. Resume and job-description context identify relevant skills and guide question construction. Candidate responses can be represented through semantic and optional acoustic or visual processing. The belief module receives an evidence score together with confidence and availability information. Keeping this interface explicit allows the policy to operate on compact state features without consuming raw recordings.
 
-The sequential objective is
-\begin{equation}
-J(\pi)=\mathbb{E}_{\tau\sim\pi}\left[\sum_{t=0}^{T-1}\gamma^t r_t\right],\qquad \gamma=0.99.
-\end{equation}
-Here, $r_t$ is a designed simulation reward. It is distinct from a human judgment of interview quality. A policy can optimize this objective only to the extent that the reward and environment represent the intended behavior. The historical simulations and the current offline diagnostic use different evidence streams, so their reward numbers are not combined.
-
-\subsection{System overview}
-Figure~\ref{fig:architecture} separates context construction, evidence processing, and sequential decision making. Resume and job-description context define the skill space. Response-processing modules can provide semantic, acoustic, and visual observations, while availability indicators allow missing channels to remain visible. The current belief update uses semantic evidence and confidence factors; the behavioral score is accepted by the function interface for compatibility but does not enter its competency likelihood.
+The current competency likelihood depends on semantic evidence. A behavioral score remains in the interface for compatibility but is not included in that likelihood. Emotion recognition and the historical deception task are therefore component investigations, not validated proxies for competence in the policy study. Missing or weak evidence is represented through reliability factors rather than silently converted into a confident skill judgment.
 
 \begin{figure}[htbp]
 \centering
@@ -107,102 +101,68 @@ Figure~\ref{fig:architecture} separates context construction, evidence processin
 \draw[arr] (policy)--(mask);
 \draw[arr,dashed] (mask.south)--++(0,-7mm)-| ([xshift=-7mm]context.west)|-(question.north);
 \end{tikzpicture}
-\caption{ARIA's intended decision loop and current implementation boundary. Solid arrows show component data dependencies; the dashed return path denotes the intended learned-policy control loop. The live application does not yet execute that loop. Acoustic and visual channels are candidate contextual inputs, not validated skill measurements.}
+\caption{ARIA architecture. Solid connections show the evidence-to-policy interface implemented in the offline environment; the dashed feedback path represents its intended use in an interactive interviewer. The live application still uses fixed evidence and a three-action cycle, so these experiments do not validate the complete live loop.}
 \label{fig:architecture}
 \end{figure}
 
-The architecture therefore has two implementation levels. The offline pipeline contains the calibrated belief configuration, trajectory reconstruction, a trained policy, and provenance checks. The live application supports question and response interaction, but currently supplies semantic and behavioral values of 0.9, assigns low cognitive load, and cycles through foundation probing, increased difficulty, and topic switching. An inference module for the IQL checkpoint exists; its existence does not mean the application invokes it. Keeping this distinction in the architecture prevents an interface demonstration from being mistaken for an end-to-end policy experiment.
-
-\subsection{The 33-dimensional state}
-Table~\ref{tab:state} follows the ordered feature contract in the current state builder. Aggregating skill beliefs avoids a state size that depends on the number or order of ontology nodes. The focused skill still has its own three-class distribution, allowing the policy to distinguish uncertainty about the present topic from uncertainty about the interview as a whole.
-
-\begin{table}[htbp]
-\centering\small
-\caption{State groups in the current implementation. The valid-action mask is supplied separately.}
-\label{tab:state}
-\begin{tabularx}{\linewidth}{Y r Y}
-\toprule Group & Dimensions & Contents \\ \midrule
-Global belief and uncertainty & 5 & Three aggregate probabilities; assessment and mean visited-skill entropy \\
-Session progress & 3 & Skill coverage, turn fraction, valid-evidence fraction \\
-Focused skill & 5 & Three probabilities, effective evidence, consecutive-focus fraction \\
-Recent evidence & 8 & Semantic score, reliability, behavior score, four cognitive-label indicators, incongruence score \\
-Previous action & 8 & One-hot representation of the preceding action \\
-Evidence availability & 4 & Semantic, behavioral, cognitive, and incongruence flags \\
-\midrule Total & 33 & Fixed ordered representation, \texttt{aria-state-v4} \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-Progress variables and effective evidence are bounded before entering the policy. The representation includes a previous-action encoding, while the action mask identifies choices that are currently legal. For example, concluding can be disallowed until the environment's stopping conditions are met. The eight actions are increasing difficulty, decreasing difficulty, following up on the same topic, switching topic, probing foundations, asking a behavioral question, asking a situational question, and concluding. A policy action specifies the interview move; the question generator supplies the corresponding wording.
-
-\subsection{Belief update and decision calibration}
-For semantic score $x_t$ and class $c$, the implemented log-likelihood has the form
+For each skill k, the model maintains a probability distribution over beginner, intermediate, and expert categories. Given semantic score x at a turn, the class-specific Gaussian log likelihood is
 \begin{equation}
 \ell_c(x_t)=-\frac{1}{2}\left(\frac{x_t-\mu_c}{\sigma_c}\right)^2-\log\sigma_c.
 \end{equation}
-The update is a reliability-weighted change in log probability:
+The omitted Gaussian constant is shared across classes. The update can be written in normalized form as
 \begin{equation}
-b_{k,t+1}(c)\propto b_{k,t}(c)\exp\{w_t\ell_c(x_t)\}.
+b_{k,t+1}(c)=\frac{b_{k,t}(c)\exp\{w_t\ell_c(x_t)\}}{\sum_j b_{k,t}(j)\exp\{w_t\ell_j(x_t)\}}.
 \end{equation}
-The weight $w_t$ combines evidence, transcription, and modality confidence. It is discounted as effective evidence accumulates, reduced for a repeated question fingerprint, and capped by the remaining evidence allowance for that skill. Normalization and a posterior floor keep the distribution usable. These operations limit the influence of repeated or unreliable evidence without treating a missing observation as a negative answer.
+The weight w represents the evidence-strength adjustment used by the implementation. Lower confidence reduces the influence of an observation. Coverage and reporting checks determine whether accumulated evidence is sufficient to emit a label. This distinction between holding a posterior and having enough evidence to report it is part of the assessment interface.
 
-The aggregate belief uses a normalized log-opinion pool over visited skills. Skill importance and capped effective evidence determine the pooling weights. A temperature parameter adjusts the aggregate distribution. The current belief schema also supports a beginner-class logit bias, applied before confidence and the final decision are calculated. This cost-sensitive adjustment should be distinguished from probability calibration: an improved classification boundary can coexist with a worse calibration metric.
+\subsection{Policy state and action constraints}
+The policy observes 33 features: five global belief summaries, three progress features, five features for the focused skill, eight summaries of recent evidence, eight indicators of the previous action, and four channel availability features. The representation has a fixed size even when the underlying skill context changes. It summarizes the interview rather than preserving the full response history, which makes learning tractable but can discard distinctions between histories with similar summaries.
 
-A label is returned only when confidence, effective evidence, and visited-skill coverage satisfy their configured requirements. Otherwise, the output is insufficient evidence. All locked-test episodes were classified in the recorded evaluation; this observation does not imply that abstention is disabled in the implementation.
+The action set contains eight choices: increase difficulty, decrease difficulty, ask a follow-up on the same topic, switch topic, probe a foundation, ask a behavioral question, ask a situational question, and conclude the interview. An external validity mask identifies available actions before selection. The mask is not counted among the 33 state features. All policies in the direct comparison use this action interface and the same final belief aggregation, so classification differences arise through the evidence collected rather than through separate downstream classifiers.
 
-\subsection{Offline IQL training and inference}
-The implementation contains a value network, two Q-functions, and a categorical policy network. Each uses two hidden layers of 256 units, layer normalization, ReLU activations, and dropout of 0.1. Q-functions receive the state and one-hot action; the policy produces eight action logits. Following IQL \cite{iql}, the value objective uses an asymmetric squared error,
+The offline environment implements the belief update, masking, and action loop. The live application is less complete: its current response path supplies fixed evidence scores and cycles through three actions. The offline results therefore evaluate the environment and frozen checkpoints. They do not demonstrate that the deployed interaction already selects questions through the learned policy or that raw audio and video are calibrated into the tested scores.
+
+\subsection{Reward and IQL objective}
+The policy objective is discounted return,
 \begin{equation}
-L_V=\mathbb{E}_{(s,a)\sim D}\left[|\tau-\mathbb{1}(u<0)|u^2\right],\quad u=\min_j\bar Q_j(s,a)-V(s),
+J(\pi)=\mathbb{E}_{\tau\sim\pi}\left[\sum_{t=0}^{T-1}\gamma^t r_t\right],\qquad\gamma=0.99.
 \end{equation}
-with expectile $\tau=0.8$. The Q-functions fit the target $r+\gamma(1-d)V(s')$, where $d$ indicates termination. Policy extraction minimizes
-\begin{equation}
-L_\pi=-\mathbb{E}_{(s,a)\sim D}\left[\min\{e^{\beta A(s,a)},100\}\log\pi(a\mid s)\right],\quad \beta=3.
-\end{equation}
-These equations describe the current training code. They do not define a new offline RL algorithm. At inference, schema checks validate the feature order and checkpoint provenance, and action masking removes illegal choices before selection.
+The implemented step reward gives 1.5 times nonnegative information gain, a 0.5 bonus for the first visit to a skill, and a 0.1 time cost. Repeated visits incur an additional penalty that increases by 0.05 per previous visit up to 0.15. Anxiety and invalid-action penalties are 1.0 and 0.5, respectively. A valid stop has zero immediate step reward. Other coefficients retained in the configuration are not treated as active terms unless the reward function uses them.
 
-\section{Experimental design and evidence provenance}
-\subsection{Three evaluation streams}
-The repository contains results produced at different stages of development. Figure~\ref{fig:evidence} shows how they are used. Component benchmark summaries provide recorded results for candidate modules. A separate 300-episode simulation compares five historical policies. The current release provides machine-readable belief and policy-diagnostic reports. Only the last stream is tied to the frozen v7 belief configuration and current IQL checkpoint.
+The replay construction can additionally apply a terminal outcome adjustment once: +5 for the correct class, -2.5 for an adjacent class, -5 for a two-level error, and -1.25 for no prediction. This uses the known synthetic label during data construction. The direct rollout harness does not add this ground-truth terminal adjustment to the summed environment rewards. Its reported designed return therefore reflects the runtime evidence, coverage, and cost terms, not a separately awarded correctness bonus. Logged training return and rollout return must be interpreted with this difference in mind.
+
+ARIA uses twin action-value networks, a state-value network, and a policy network. The value loss weights positive and negative residuals asymmetrically:
+\begin{equation}
+L_V=\mathbb{E}_{(s,a)\sim D}[|\tau-\mathbf{1}(u<0)|u^2],\qquad u=\min_j\bar Q_j(s,a)-V(s).
+\end{equation}
+The frozen configuration uses expectile 0.8. Policy extraction minimizes
+\begin{equation}
+L_\pi=-\mathbb{E}_{(s,a)\sim D}[\min\{\exp(\beta A(s,a)),100\}\log\pi(a\mid s)],\qquad\beta=3.
+\end{equation}
+These objectives follow the IQL learning pattern \cite{iql}; the architecture and hyperparameters described here are the repository implementation. The existing checkpoint is held fixed throughout this revision and the direct comparisons.
+
+\section{Materials and experimental protocol}
+\subsection{Evidence sources and units of analysis}
+Figure~\ref{fig:evidence} separates the three evaluation streams. The historical component results concern public benchmark examples and are available mainly as repository summaries. The locked belief analysis concerns entire synthetic episodes, grouped by linked identities. The direct policy analysis concerns newly constructed score sequences generated within a shared environment. We do not combine these observations into a pooled accuracy or use one stream as a substitute for another.
 
 \begin{figure}[htbp]
 \centering
-\begin{tikzpicture}[node distance=10mm and 9mm]
-\node[box] (a) {Component benchmarks\\FER2013, RAVDESS, Mohler, MOSEI, Box of Lies};
-\node[box,right=of a] (b) {Historical policy study\\300 simulated episodes\\Five non-IQL policies};
-\node[box,right=of b] (c) {Current offline release\\600 synthetic episodes\\Frozen v7 configuration};
-\node[box,below=of a] (aa) {Module-level results\\Text baselines and fusion ablations};
-\node[box,below=of b] (bb) {Policy trade-offs\\Turns, entropy, reward, simulated accuracy};
-\node[box,below=of c] (cc) {Locked belief comparison\\91 episodes\\Separate validation OPE};
-\draw[arr] (a)--(aa);\draw[arr] (b)--(bb);\draw[arr] (c)--(cc);
+\begin{tikzpicture}[node distance=9mm and 9mm]
+\node[box] (a) {Archived component tests\\Public benchmark tasks};
+\node[box,right=of a] (b) {Frozen synthetic replay\\422 train / 87 validation};
+\node[box,right=of b] (c) {Locked belief test\\91 episodes};
+\node[box,below=of a] (d) {Historical baselines\\Summary-level evidence};
+\node[box,below=of b] (e) {Four score conditions\\Eight policy interfaces};
+\node[box,below=of c] (f) {v6 versus v7 beliefs\\No policy rollout claim};
+\draw[arr] (a)--(d); \draw[arr] (b)--(e); \draw[arr] (c)--(f);
 \end{tikzpicture}
-\caption{Evidence streams are analyzed separately. A module score, a historical simulator result, and a locked belief metric cannot be pooled into an overall ARIA accuracy. The component and historical-policy values are transcribed from repository reports; the current belief values are checked against JSON artifacts.}
+\caption{Three evidence streams with different units of analysis. Direct policy rollouts use a constructed score generator after replay-based training; they are separate from both the historical benchmarks and the locked belief test.}
 \label{fig:evidence}
 \end{figure}
 
-The distinction matters for reproducibility. The 25-model report names a combined CSV and model-training scripts that were not located in the inspected checkout. Several values also differ from the earlier detailed report, and one identical text result is assigned different model names. We retain identifiable results as repository-reported findings, document conflicts in Appendix~\ref{sec:provenance}, and avoid treating the rapid-run table as a controlled architecture ranking. No new model-training experiment was performed for this manuscript revision.
+The frozen development corpus contains 600 episodes and 9,018 transitions, with 200 episodes per synthetic class. There are 33 linked-identity components. The split assigns 422 episodes to training, 87 to validation, and 91 to the locked test. Grouping linked identities prevents a connected identity group from straddling these partitions. It does not remove dependencies within a group, nor does it make synthetic episodes representative of a human population.
 
-\subsection{Component datasets and tasks}
-Table~\ref{tab:data} records the tasks and sample information supplied in the detailed benchmark report. The unit of analysis changes across rows. FER2013 concerns images, RAVDESS concerns acted speech, Mohler concerns student answers, and CMU-MOSEI concerns sentiment. The Box of Lies task uses annotated dialogue data. Their results assess particular prediction problems; none directly measures whether ARIA improves a candidate's interview performance.
-
-\begin{table}[htbp]
-\centering\small
-\caption{Component evaluation inventory as recorded in the repository. Split and label details need the original execution artifacts for independent reproduction.}
-\label{tab:data}
-\begin{tabularx}{\linewidth}{p{24mm}YY}
-\toprule Dataset & Recorded task and size & Interpretation boundary \\ \midrule
-FER2013 & Seven emotion classes; 28,709 training and 7,178 evaluation images & Facial expression labels do not establish knowledge or confidence \\
-RAVDESS & Eight emotion classes; 1,440 speech files from 24 actors & Acted emotion is a proxy task, not measured cognitive load \\
-Mohler & 2,273 answers; three derived skill-level categories & Academic short-answer grading differs from interview competency \\
-CMU-MOSEI & Binary sentiment; 16,326/1,871/4,659 train/validation/test records & Sentiment prediction is not interview assessment \\
-Box of Lies & 225 samples from 25 EAF files; 168/57 train/test records & Annotated deception does not validate candidate-integrity inference \\
-\bottomrule
-\end{tabularx}
-\source{\texttt{ARIA\_updated.md}, dataset and baseline sections. Dataset descriptions here report local experiment records, not a new audit of the upstream datasets.}
-\end{table}
-
-\subsection{Current synthetic corpus and split isolation}
-The current offline corpus contains 600 episodes and 9,018 transitions, with 200 episodes in each synthetic skill class. Resume--job-description pairs and their variants are grouped into 33 linked identity components. Entire components are assigned to a partition, producing 422 training, 87 validation, and 91 locked-test episodes. The locked test contains six components. Grouping prevents linked identities from crossing partitions, although shared generation models and prompts can still produce dependence beyond the identity graph.
+The historical component datasets serve different purposes: FER2013 concerns facial-expression recognition \cite{fer}, RAVDESS provides acted emotional speech and song \cite{ravdess}, the Mohler corpus supports short-answer grading \cite{mohler}, and CMU-MOSEI concerns multimodal sentiment and emotion \cite{mosei}. These references identify the source tasks; the numerical baseline results below come from ARIA's archived experiments, not from the original dataset papers.
 
 \begin{figure}[htbp]
 \centering
@@ -219,135 +179,119 @@ The current offline corpus contains 600 episodes and 9,018 transitions, with 200
 \label{fig:split}
 \end{figure}
 
-The frozen checkpoint metadata reports seed 42, learning rate $10^{-4}$, target-update coefficient 0.005, patience 10, and best epoch 4. The selected validation objective is 4.13864. This quantity is an optimization statistic, not an interview-performance score. Model identifiers, prompt versions, split assignments, calibration parameters, and checkpoint hashes must accompany a reproduction because a newly generated synthetic corpus is a different experiment.
+The v7 release records a locked comparison against v6. This is a belief-model evaluation: the report explicitly states that it does not evaluate the learned policy. The direct comparator training uses the train and validation replay artifacts and does not use the locked test. Its matched rollouts are development experiments, not a second locked-test assessment. The same underlying generated dataset and the same ARIA checkpoint are retained.
 
-\subsection{Metrics and comparison rules}
-Accuracy measures the fraction of correct classifications. Macro-F1 gives each class equal weight, making it useful when majority classes can dominate accuracy. Balanced accuracy averages class recall. For the belief model, the Brier score assesses the full probability vector, while expected calibration error (ECE) summarizes the difference between confidence and observed correctness in bins. These measures answer different questions; classification accuracy alone does not establish calibrated probabilities \cite{calibration}.
+\subsection{Learned comparators and training protocol}
+Behavior cloning predicts the logged action using cross-entropy. Its network maps the 33-dimensional state through two hidden layers of width 128 to eight outputs, with normalization and rectified-linear activations. Training uses the recorded actions; validation and rollout selection apply the legal-action mask. This provides a useful imitation baseline without a learned return objective.
 
-The paired belief comparison applies two frozen configurations to the same 91 episodes. The report resamples identity components to obtain percentile-bootstrap intervals for metric differences. With only six test components, those intervals should be interpreted within the recorded synthetic experiment. The historical module and policy summaries do not provide equivalent paired uncertainty estimates, so numerical differences in those tables are described without claims of statistical significance.
+The discrete CQL comparator uses a network of the same width. It combines a temporal-difference loss with a conservative penalty formed from the log-sum-exp of legal action values minus the value of the logged action. The penalty coefficient is 1.0 and the discount is 0.99. A target network is synchronized once per epoch. This is a compact discrete adaptation of the CQL principle \cite{cql}, not a reproduction of every training choice in the original study.
 
-The current policy diagnostic is a normalized importance-weighted average of transition rewards. For logged behavior probability $\mu(a_i\mid s_i)$, its implementation uses
-\begin{equation}
-\rho_i=\min\left\{\frac{\pi(a_i\mid s_i)}{\mu(a_i\mid s_i)},20\right\},\quad
-\widehat R=\frac{\sum_i\rho_i r_i}{\sum_i\rho_i},\quad
-\mathrm{ESS}=\frac{(\sum_i\rho_i)^2}{\sum_i\rho_i^2}.
-\end{equation}
-Because it reweights individual logged transitions, this diagnostic is not a demonstrated estimate of the full discounted return under the target policy's induced state distribution. A favorable value cannot replace fresh rollouts or a justified trajectory-level evaluation protocol.
+The DT-inspired comparator uses a causal Transformer with two layers, four attention heads, width 128, and context length 12. State, previous-action, return-to-go, and position embeddings are summed into one token at each time step. Training uses undiscounted remaining logged rewards, scaled by the maximum absolute training-episode return, and an action loss at the last valid position of each context. The rollout target starts from the 90th percentile of training-episode returns. These choices produce a return-conditioned sequence baseline, but the combined token differs from the separate return, state, and action tokens of Decision Transformer \cite{dt}.
 
-\section{Baseline results and analysis}
-\subsection{Visual and acoustic baselines}
-The detailed component report records FER2013 accuracy of 0.5548 and macro-F1 of approximately 0.48 for the CNN. RAVDESS accuracy is 0.5590 and macro-F1 approximately 0.52 for the deep audio model. These values establish useful starting points, but aggregate performance hides uneven class behavior. The visual report lists disgust recall of 0.13, compared with happy recall of 0.80. The acoustic report lists happy recall of 0.10 and disgust recall of 0.89. Such variation argues against mapping an uncertain class prediction directly into a skill judgment.
+There is also a consequential implementation limitation: training contexts contain a separate remaining return for each historical time step, whereas inference repeats the current remaining target across the context. Together with the difference between logged terminal shaping and rollout rewards, this complicates the interpretation of the Transformer's low return. The present paper reports the observed implementation faithfully; it does not infer that the published algorithm is intrinsically unsuitable for interviewing.
 
-The separate rapid-run report gives CNN accuracy of 0.5552 and macro-F1 of 0.4600. It also includes deeper architectures trained for much shorter durations. These are retained as another recorded run in Appendix~\ref{sec:rapid}, rather than averaged with the detailed report. A future controlled comparison needs the same examples, preprocessing, stopping rule, and declared compute budget. Without those controls, a lower transformer score can reflect the experiment's budget rather than an inherent weakness of the architecture.
-
-\subsection{Text grading baselines}
-Table~\ref{tab:text} contains the five text baselines from the detailed report. The hybrid semantic-rubric model has the highest recorded accuracy, 0.7516, while TF-IDF with a linear SVM has the highest macro-F1, 0.6030. Their accuracy difference is only 0.0021, or 0.21 percentage points. The SVM exceeds the hybrid model's macro-F1 by 0.0144. The preferred model therefore depends on whether the priority is aggregate correctness or balance across the three classes.
+All three new comparators use seed 42, 20 epochs, batches of 256, and a learning rate of 0.0003. The selected checkpoint maximizes validation logged-action accuracy across 1,405 transitions. The frozen IQL network instead has hidden width 256 and its own earlier training and selection procedure. Thus, the comparison matches data access and rollout conditions, but not parameter count, tuning effort, or selection objective. In particular, imitation accuracy is an imperfect selection criterion for reward-oriented methods.
 
 \begin{table}[htbp]
 \centering\small
-\caption{Recorded Mohler text baselines. Precision and recall are supplied at two-decimal resolution; F1 and accuracy retain the report's precision. Bold values mark column maxima within this table only.}
-\label{tab:text}
+\caption{Training and model-selection details. Validation accuracy measures agreement with logged actions, not candidate classification.}
+\label{tab:training}
+\begin{tabularx}{\linewidth}{p{25mm}YYY}
+\toprule
+Policy & Configuration & Checkpoint selection & Validation action accuracy \\ \midrule
+ARIA IQL & Frozen v7; hidden width 256 & Earlier IQL procedure & Not a common selection result \\
+Behavior cloning & Width 128; 20 epochs & Best validation action accuracy & 0.2975 \\
+Discrete CQL & Width 128; penalty 1.0; 20 epochs & Best validation action accuracy & 0.2776 \\
+DT-inspired & 2 layers; 4 heads; width 128; context 12 & Best validation action accuracy & 0.1516 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Four non-learned policies complete the comparison: random valid actions, a fixed script, a rule-based adaptive policy, and an uncertainty-greedy policy. They expose whether a learned policy improves over simple behavior under the same evidence and stopping constraints. They receive the same shared belief machinery as the learned policies. Their inclusion is especially useful when class separation makes almost any sequence of valid questions sufficient for correct classification.
+
+\subsection{Matched development rollouts}
+Each condition contains 45 episodes, balanced across the three synthetic classes, and each of the eight policies is evaluated on those scenarios. There are 1,440 policy--scenario runs across four conditions. The scenario identities recur across conditions; these are not 1,440 independent candidates. Each rollout uses the default 17-skill ontology and a maximum of 30 turns.
+
+The score provider begins with the center assigned to the known synthetic class. It adds an episode-level offset, a turn-level perturbation, any global shift, and a 0.025 bonus for a follow-up or foundation probe, then clips the score to the unit interval. Perturbations are deterministic functions of the scenario and action context. The true class is used by the generator and evaluator, not passed directly as an input to the policy. Behavioral score is fixed at 0.5; the provider occasionally assigns the anxiety flag used by the reward.
+
+Matching therefore means that every policy faces the same scenario specification and deterministic response rule. Different actions can produce different scores because the rule includes the action, turn, and targeted skill. Policies do not necessarily observe identical realized evidence. This is a controlled intervention within a simulator, not a replay of the same human answers to alternative questions.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Synthetic score conditions. Jitter and bias entries are full widths, not standard deviations. Confidence is evaluator / modality reliability.}
+\label{tab:conditions}
 \begin{tabularx}{\linewidth}{p{25mm}YYYY}
-\toprule Model & Precision & Recall & Macro-F1 & Accuracy \\ \midrule
-TF-IDF + logistic regression & 0.50 & \textbf{0.61} & 0.5167 & 0.6681 \\
-TF-IDF + linear SVM & 0.62 & 0.59 & \textbf{0.6030} & 0.7495 \\
-SBERT cosine threshold & 0.46 & 0.48 & 0.4629 & 0.6791 \\
-SBERT feature classifier & 0.52 & 0.58 & 0.5410 & 0.7165 \\
-Hybrid semantic-rubric & \textbf{0.78} & 0.55 & 0.5886 & \textbf{0.7516} \\
+\toprule
+Condition & Class centers & Jitter / episode bias & Global shift & Confidence \\ \midrule
+Base & 0.20 / 0.50 / 0.80 & 0.16 / 0.00 & 0.00 & 1.00 / 1.00 \\
+Overlap & 0.38 / 0.50 / 0.62 & 0.50 / 0.24 & 0.00 & 1.00 / 1.00 \\
+Low confidence & 0.25 / 0.50 / 0.75 & 0.30 / 0.16 & 0.00 & 0.55 / 0.60 \\
+Positive shift & 0.20 / 0.50 / 0.80 & 0.24 / 0.12 & 0.10 & 1.00 / 1.00 \\
 \bottomrule
 \end{tabularx}
-\source{\texttt{ARIA\_updated.md}, Section 10. Results are repository-reported; prediction files and the exact split manifest were not recovered in this revision.}
 \end{table}
 
-The dataset summary contains 1,639 expert, 554 intermediate, and 80 beginner examples. This imbalance makes a single accuracy figure particularly difficult to interpret. The stronger SVM macro-F1 is a reason to keep the lexical baseline in subsequent evaluation, not evidence that semantic embeddings are generally inferior. Question-grouped splitting and class-level errors should be recovered before drawing broader conclusions about transfer to unseen interview questions.
+Table~\ref{tab:conditions} specifies the four conditions. Base evidence has well-separated class centers. Overlap moves the centers closer and increases noise. Low confidence reduces the reliability supplied to the updater while also varying scores. Positive shift introduces an upward bias. The latter three conditions were added after the base accuracy ceiling was observed. They are exploratory stress analyses, not a preregistered confirmatory test, and they cover only a small part of the possible response distributions.
 
-\subsection{Does multimodal fusion improve the baseline?}
-The CMU-MOSEI ablation provides a direct check on the assumption that combining channels helps. Text-only accuracy is 0.8015, compared with 0.7976 for early fusion, 0.6098 for audio-only, and 0.5808 for vision-only. Fusion is lower than text-only by 0.0039, or 0.39 percentage points. No paired significance test is available, so the result supports a modest conclusion: the recorded experiment does not demonstrate an accuracy gain from early fusion.
+\subsection{Outcomes, uncertainty, and provenance}
+Classification accuracy compares the final aggregate belief label with the synthetic class. Macro-F1 gives each class equal weight. Mean designed return is the sum of rollout rewards. Cumulative information gain sums nonnegative decreases in target-skill entropy, each weighted by the increase in effective evidence count. Turn count and distinct skills visited describe the cost and breadth of evidence collection. Because information gain and coverage appear directly in the reward, agreement among these metrics is partly built into the objective and is not independent validation.
 
-\begin{figure}[htbp]
-\centering
-\begin{tikzpicture}
-\begin{axis}[width=.86\linewidth,height=5.5cm,ybar,bar width=22pt,ymin=0,ymax=1,ylabel={Accuracy},symbolic x coords={Text,Audio,Vision,Fusion},xtick=data,grid=major,grid style={gray!15},nodes near coords,nodes near coords style={font=\small},point meta=y,ytick={0,.2,.4,.6,.8,1}]
-\addplot[fill=ariaBlue!75,draw=ariaBlue] coordinates {(Text,0.8015) (Audio,0.6098) (Vision,0.5808) (Fusion,0.7976)};
-\end{axis}
-\end{tikzpicture}
-\caption{Repository-reported CMU-MOSEI modality ablation. The axis starts at zero to show the small text--fusion difference in context. Uncertainty bars are omitted because the report supplies no run-level or paired uncertainty estimates.}
-\label{fig:fusion}
-\end{figure}
+The canonical rollout reports use 2,000 episode-bootstrap resamples for their intervals. We retain the archived reward intervals in Appendix A. They describe scenario variation conditional on one fitted checkpoint; they do not quantify training-seed variability. A bootstrap accuracy interval can collapse to [1,1] when every sampled episode is correct. Such a result reflects the finite, saturated sample and is not proof of perfect population performance.
 
-This finding concerns early concatenation with a classifier. It does not establish that all fusion methods are ineffective. It does, however, set a concrete requirement for a more elaborate model: it should improve on the text-only baseline under a matched protocol. The rapid-run fusion variants all report accuracy of 0.7800 but macro-F1 of 0.4382. Identical aggregate metrics are insufficient to diagnose their prediction behavior; the confusion matrices would be needed before concluding that they learned similar representations or collapsed to a majority class.
+The locked belief report includes a paired cluster analysis over only six linked-identity components. The report marks that analysis as diagnostic. We preserve this qualification rather than turning its intervals into a broad confirmatory claim. Likewise, no significance ranking is inferred from overlapping or non-overlapping marginal rollout intervals. Canonical per-episode traces are not included in the compact summary used for this redraft, so no new paired tests are calculated from locally available traces belonging to a different run.
 
-\subsection{Annotated incongruence experiment}
-The detailed Box of Lies report records accuracy of 0.5965 on a 57-sample test set and reports that the best test accuracy occurred at epoch 2. It also describes training accuracy reaching 1.0 while later test performance remained lower. These observations suggest that model selection and overfitting need closer examination. If the final checkpoint was chosen by repeatedly inspecting test accuracy, that test set would no longer provide an untouched generalization estimate.
+\section{Results}
+\subsection{Historical component baselines}
+Table~\ref{tab:components} reports the recoverable component results. On Mohler short-answer grading, the hybrid method has the highest listed accuracy, 0.7516, but the linear SVM has the highest macro-F1, 0.6030. The ordering changes with the metric. This favors reporting both measures rather than describing a single model as uniformly best.
 
-The rapid-run report lists accuracy of 0.6800 and macro-F1 of 0.5614 for a multimodal transformer, but the corresponding full training and split artifacts were not located. This remains a recorded exploratory result. In particular, it cannot justify inferring dishonesty from a candidate's facial behavior, accent, or hesitation. The benchmark's annotation target and the intended interview use would require separate validation.
-
-\subsection{Historical policy baselines}
-Table~\ref{tab:policy} restores the five-policy comparison already present in the repository. The source describes 300 simulated episodes. It does not provide enough recovered execution detail to confirm pairing, seeds, uncertainty, or equivalence to the present environment. The policy named ARIA in that report is a reward heuristic, not the frozen IQL checkpoint.
+On CMU-MOSEI, text-only accuracy is 0.8015 and early fusion reaches 0.7976. The available summary therefore provides no accuracy gain for that fusion configuration. Audio and visual results are lower when used alone. This observation concerns those implementations and the recorded split; it is not evidence that audio or video can never help an interview system. It does show why additional modalities need an explicit contribution analysis before being treated as useful evidence.
 
 \begin{table}[htbp]
 \centering\small
-\caption{Historical simulation baselines, reported as a 300-episode study. These values must not be interpreted as current IQL rollout results.}
-\label{tab:policy}
-\begin{tabularx}{\linewidth}{Yrrrrr}
-\toprule Policy & Turns & Entropy & Info. gain & Reward & Skill acc. \\ \midrule
-Random & 6.77 & 1.4316 & 0.2621 & $-1.1559$ & 0.4933 \\
-Fixed script & 10.00 & 1.2792 & 0.4104 & $-1.4683$ & 0.6393 \\
-Rule-based adaptive & 19.00 & 1.0865 & 0.7407 & $-1.6446$ & 0.6320 \\
-Greedy entropy & 19.00 & 1.4103 & 0.6264 & $-2.0814$ & 0.4767 \\
-ARIA reward heuristic & 19.00 & 1.0531 & 0.7666 & $-1.6901$ & 0.6887 \\
+\caption{Historical component baselines recovered from repository summaries. Approximate F1 entries retain the original summary precision; a dash denotes an unreported value.}
+\label{tab:components}
+\begin{tabularx}{\linewidth}{YYrr}
+\toprule
+Task / dataset & Method & Accuracy & Macro-F1 \\ \midrule
+Visual emotion / FER2013 & Recorded CNN & 0.5548 & approx. 0.48 \\
+Speech emotion / RAVDESS & Recorded deep classifier & 0.5590 & approx. 0.52 \\
+Short answers / Mohler & TF-IDF + logistic regression & 0.6681 & 0.5167 \\
+Short answers / Mohler & TF-IDF + linear SVM & 0.7495 & 0.6030 \\
+Short answers / Mohler & Sentence embedding cosine & 0.6791 & 0.4629 \\
+Short answers / Mohler & Feature classifier & 0.7165 & 0.5410 \\
+Short answers / Mohler & Hybrid & 0.7516 & 0.5886 \\
+Sentiment / CMU-MOSEI & Text only & 0.8015 & -- \\
+Sentiment / CMU-MOSEI & Audio only & 0.6098 & -- \\
+Sentiment / CMU-MOSEI & Vision only & 0.5808 & -- \\
+Sentiment / CMU-MOSEI & Early fusion & 0.7976 & approx. 0.77 \\
 \bottomrule
 \end{tabularx}
-\source{\texttt{ARIA\_updated.md}, Section 10, Model 6. Entropy units and the aggregation definition of skill accuracy are not established by the recovered table.}
 \end{table}
 
-The reward heuristic has the highest recorded skill accuracy and information gain, as well as the lowest final entropy. It also uses more turns than the random and fixed-script policies. Random selection has the highest reward because its value is the least negative. Thus, no policy dominates all reported objectives. A plausible concern is that reward and assessment quality are not sufficiently aligned, but the table alone does not identify the cause. Re-running the policies under the current reward definition would test whether the discrepancy persists.
+The FER2013 and RAVDESS summaries indicate moderate performance on their respective emotion tasks. Their labels differ from the competency categories used by ARIA. The Box of Lies record is more uncertain: repository summaries contain differing values and the documented model-selection history raises test-use concerns. We retain the record in the provenance notes, but exclude it from positive assessment claims. Prediction artifacts and full split manifests have not been recovered for these historical experiments, so their results are descriptive context rather than independently revalidated benchmarks.
 
-\subsection{Same-data offline-policy comparators}
-We trained three additional policies on the frozen v7 development transitions: an MLP behavior-cloning baseline, a discrete CQL adaptation \cite{cql}, and a return-conditioned causal Transformer adapted from Decision Transformer \cite{decisiontransformer}. These are compact ARIA-specific implementations rather than executions of the authors' original code. All use the same 33-dimensional state, eight masked actions, training split, validation split, and seed. The existing IQL checkpoint and generated dataset were not modified. Model selection used validation logged-action accuracy, which was 0.2975 for behavior cloning, 0.2776 for CQL, and 0.1516 for Decision Transformer. This diagnostic measures agreement with logged actions; it is not a rollout performance measure.
-
-Each selected policy was then evaluated on 45 matched synthetic development scenarios, with 15 scenarios per class. The base condition uses separated semantic-score centers. Three prespecified stress conditions increase score overlap, reduce evaluator and modality confidence, or add a positive score shift. Table~\ref{tab:directpolicy} reports assessment accuracy together with the designed cumulative reward and information gain. Bootstrap intervals and episode-level traces are retained in the machine-readable companion reports.
-
-\begin{table}[htbp]
-\centering\scriptsize
-\caption{Direct learned-policy comparison on matched synthetic development scenarios. Cells show accuracy / mean designed reward / mean information gain. These are not locked-test or human-interview results.}
-\label{tab:directpolicy}
-\begin{tabularx}{\linewidth}{Yrrrr}
-\toprule Policy & Base & Overlap & Low confidence & Positive shift \\ \midrule
-ARIA IQL v7 & 1.0000 / 32.16 / 17.88 & 0.4667 / 31.09 / 17.26 & 0.9111 / 11.50 / 3.96 & 1.0000 / 31.14 / 17.27 \\
-Behavior cloning & 1.0000 / 25.90 / 14.02 & 0.5333 / 24.28 / 13.01 & 0.9333 / 8.33 / 2.85 & 1.0000 / 25.08 / 13.47 \\
-Discrete CQL & 1.0000 / 27.54 / 16.72 & 0.5111 / 25.38 / 15.79 & 0.8889 / 5.01 / 3.35 & 1.0000 / 27.31 / 16.55 \\
-Decision Transformer & 1.0000 / 7.22 / 5.13 & 0.4889 / 7.12 / 5.06 & 0.8889 / 2.97 / 1.82 & 1.0000 / 7.04 / 5.01 \\
-\bottomrule
-\end{tabularx}
-\source{Generated comparator and rollout companion reports; all conditions use seed 42. The locked test was not used.}
-\end{table}
-
-Base accuracy is a ceiling result: random-valid and fixed-script policies also reach 1.0, so it cannot rank policies. The overlap condition removes that ceiling and reveals no classification winner for IQL; behavior cloning is numerically higher, and the bootstrap intervals overlap. In contrast, IQL has the largest mean designed reward and information gain among the learned comparators in all four conditions and covers all 17 skills. Its paired mean reward advantage over behavior cloning is 6.25 in the base condition (95\% bootstrap interval [5.96, 6.53]) and 6.80 under overlap ([6.35, 7.21]). These findings show alignment with ARIA's simulator reward and exploration objective. Because that reward is designed by the system authors, the result does not independently establish assessment validity or interview quality.
-
-\section{Current locked belief results and policy diagnostic}
-\subsection{Paired belief comparison}
-The locked JSON report confirms 83 correct predictions out of 91 for the current configuration, compared with 72 out of 91 for the preceding configuration. Macro-F1 rises from 0.8010 to 0.9168. Table~\ref{tab:belief} preserves both favorable and unfavorable changes. The largest class-sensitive change is minimum recall, which increases from 0.5143 to 0.8286.
+\subsection{Locked synthetic belief evaluation}
+The v7 belief configuration correctly classifies 83 of 91 locked episodes, compared with 72 for v6. Accuracy rises from 0.7912 to 0.9121 and macro-F1 from 0.8010 to 0.9168. The absolute accuracy difference is 0.1209. Table~\ref{tab:locked} also shows improved balanced accuracy and Brier score. These results answer RQ2 for the fixed synthetic split.
 
 \begin{table}[htbp]
 \centering\small
-\caption{Current v7 versus preceding v6 calibration on the same locked synthetic episodes. Arrows indicate the preferred direction.}
-\label{tab:belief}
-\begin{tabularx}{\linewidth}{Yrrr}
-\toprule Metric & v6 & v7 & Difference \\ \midrule
-Accuracy $\uparrow$ & 0.7912 & 0.9121 & $+0.1209$ \\
-Macro-F1 $\uparrow$ & 0.8010 & 0.9168 & $+0.1158$ \\
-Balanced accuracy $\uparrow$ & 0.8179 & 0.9227 & $+0.1048$ \\
-Minimum class recall $\uparrow$ & 0.5143 & 0.8286 & $+0.3143$ \\
-ECE $\downarrow$ & 0.0808 & 0.0870 & $+0.0062$ \\
-Brier score $\downarrow$ & 0.2451 & 0.1395 & $-0.1055$ \\
-Ordinal MAE $\downarrow$ & 0.2088 & 0.0879 & $-0.1209$ \\
+\caption{Locked belief-model comparison on the same 91 synthetic episodes. Higher classification scores and lower error scores are preferable. This table does not evaluate the learned policy.}
+\label{tab:locked}
+\begin{tabularx}{\linewidth}{Xrr}
+\toprule
+Metric & v6 & v7 \\ \midrule
+Accuracy & 0.7912 & 0.9121 \\
+Macro-F1 & 0.8010 & 0.9168 \\
+Balanced accuracy & 0.8179 & 0.9227 \\
+Minimum class recall & 0.5143 & 0.8286 \\
+Expected calibration error & 0.0808 & 0.0870 \\
+Brier score & 0.2451 & 0.1395 \\
+Ordinal mean absolute error & 0.2088 & 0.0879 \\
 \bottomrule
 \end{tabularx}
-\source{\texttt{locked\_test\_evaluation\_v1.json}; 91 episodes, six identity components. Differences are computed from unrounded values.}
 \end{table}
 
-The paired component-bootstrap 95\% interval is [0.0435, 0.2235] for the accuracy difference and [0.0443, 0.1976] for the macro-F1 difference. These positive intervals support improvement within this synthetic test. They do not quantify uncertainty for a population of real candidates. ECE increases slightly while the Brier score falls. Reporting only the better classification metrics would conceal this calibration trade-off.
+Expected calibration error increases from 0.0808 to 0.0870 despite the improvement in classification and Brier score. The update is therefore not uniformly better on every probability-quality measure. Figure~\ref{fig:confusion} shows that the eight classification errors are adjacent-level errors: six beginner episodes are labeled intermediate and two intermediate episodes are labeled expert. The 23 expert episodes are classified correctly, and the report records no abstentions. This concentration of errors is useful diagnostically but does not establish reliability on new identities or human candidates.
 
 \begin{figure}[htbp]
 \centering
@@ -361,107 +305,167 @@ The paired component-bootstrap 95\% interval is [0.0435, 0.2235] for the accurac
 \label{fig:confusion}
 \end{figure}
 
-All eight mistakes are adjacent-class overestimates. Perfect expert recall therefore does not imply equally strong recognition of all classes. Beginner recall remains the lowest at 0.8286. This asymmetry is relevant when deciding how cautiously the system should interpret weak evidence, and it motivates retaining class-level reporting even when overall accuracy is high.
+\subsection{Accuracy under matched policy conditions}
+Table~\ref{tab:accuracy} reports all eight policies. In the base condition, seven reach accuracy 1.0000; the rule-based policy is the exception. This ceiling cannot distinguish the quality of the successful policies. Widely separated class-conditioned scores make the synthetic classes easy to recover through the common belief updater, even when a policy visits relatively few skills.
 
-\subsection{What the policy diagnostic establishes}
-The validation diagnostic uses 1,405 transitions and yields a weighted reward estimate of 0.4618. Its effective sample size is 1003.5, the maximum importance ratio is 5.464, and no ratio exceeds the clipping threshold of 20. These values describe the weighting behavior of the available log. They do not demonstrate improved coverage, shorter interviews, or higher assessment quality under the learned policy.
-
-The report explicitly sets the policy release gate to false. The new matched rollouts address policy behavior only in controlled development simulations; they do not change that release decision. The locked belief report, in turn, explicitly states that it does not evaluate the learned policy. This separation resolves an otherwise tempting but invalid inference: the 0.9121 belief accuracy cannot be placed in a policy table as an IQL rollout-accuracy result. The underlying populations, trajectories, and evaluation targets differ.
-
-\section{Discussion}
-\subsection{What the baseline results change}
-The component results favor a restrained interpretation of architectural complexity. The text experiment gives a simple lexical classifier the strongest macro-F1, and the modality ablation does not show a gain from early fusion. These findings make the baselines part of the argument rather than a formality. The next model should justify additional parameters or sensing requirements through a matched improvement in the target outcome.
-
-The matched comparison confirms that more informative interviews can be longer and that reward ordering can disagree with accuracy ordering. In the overlap condition, IQL collects the most information and reward but has lower accuracy than behavior cloning, CQL, and the uncertainty heuristic. A single scalar reward therefore hides a material trade-off. The present reports retain accuracy, macro-F1, coverage, duration, information gain, reward, bootstrap intervals, and paired initial conditions. Repeated training seeds and an externally justified outcome remain necessary before claiming policy superiority.
-
-\subsection{Relation to contemporary systems}
-The SOTA analysis identifies complementary strengths rather than a universal winner. Interactive platforms evaluate question relevance and feedback, predictive models evaluate labels, fairness-aware systems examine group effects, and adaptive testing evaluates selection strategies. ARIA contributes a transparent connection between a calibrated belief representation and an offline action interface. It has not yet reproduced the external studies or evaluated itself on their datasets.
-
-This position also defines a useful route forward. External interview data with a defensible label construction could test the semantic and belief components. A controlled simulator study could test policy behavior. An accessible human practice study could test whether the interaction is understandable and useful. Each study would add a different kind of evidence; one high benchmark score would not replace the others.
-
-\subsection{Limitations and reproducibility}
-The current belief evidence is synthetic and clustered into few test components. Its labels reflect the generation and evaluation process rather than independent judgments of real-world competence. The component results are preserved in summary documents, but some raw logs, split manifests, and training scripts referenced by those documents were not recovered. The rapid-run comparison also allocates unequal training time. These limitations prevent claims of broad model superiority.
-
-There are additional use-specific boundaries. Speech-emotion data cannot establish cognitive-load recognition, and annotated deception data cannot establish reliable integrity assessment in interviews. No human criterion-validity, subgroup fairness, or accessibility study has been completed for ARIA. The live application does not execute the evaluated offline stack. These are separate gaps: fixing the application wiring would not validate the measurements, and validating a component would not prove the policy beneficial.
-
-The versioned state schema, frozen JSON reports, comparator checkpoint hashes, policy provenance checks, and deterministic stress conditions provide a basis for reproduction of the current offline release. The direct comparisons are development experiments because the existing locked set had already been used for belief-model analysis before the comparator protocol was defined. For the component studies, the priority is to recover the original predictions and split assignments, resolve the model-name conflicts, and document how checkpoints were selected. Appendix~\ref{sec:provenance} lists the specific distinctions retained in this revision.
-
-\section{Conclusion}
-ARIA provides a research architecture for connecting role-grounded mock interviews to calibrated skill beliefs and offline action selection. The recovered baseline results show that simple text models remain competitive and that early multimodal fusion does not automatically improve accuracy. The historical simulation illustrates trade-offs between interview length, information gain, assessment accuracy, and reward.
-
-The current locked experiment supplies the strongest traceable classification evidence: the v7 belief configuration improves accuracy and macro-F1 over v6 on the same 91 synthetic episodes, while ECE shows a small adverse change. The new same-data policy comparison adds a narrower result. IQL consistently obtains the greatest designed reward and information gain among the learned comparators, but it does not lead accuracy when semantic evidence overlaps. The base accuracy of 1.0 is a simulator ceiling rather than evidence of superiority. These findings establish behavior within the specified synthetic protocol; they do not establish real-candidate effectiveness or the validity of automated hiring decisions. A preregistered external evaluation, repeated training seeds, and human validation are the next steps needed to extend the claims.
-
-\appendix
-\section{Exploratory 25-model benchmark record}\label{sec:rapid}
-Table~\ref{tab:rapid} transcribes the separate rapid-run report. Architecture names are source labels; they were not independently verified against the absent training implementations. Timing is reported execution time, not a standardized measure of inference latency. The baseline and rapid variants should not be ranked as though they received equal training.
-
-\small
-\begin{longtable}{p{26mm}p{67mm}rrr}
-\caption{Repository-reported rapid-run benchmark matrix. Unequal budgets and unrecovered split details prevent a controlled SOTA ranking.}\label{tab:rapid}\\
-\toprule Domain & Architecture & Accuracy & Macro-F1 & Time (s) \\ \midrule
-\endfirsthead
-\toprule Domain & Architecture & Accuracy & Macro-F1 & Time (s) \\ \midrule
-\endhead
-\bottomrule\endfoot
-Video & Baseline CNN & 0.5552 & 0.4600 & 276.75 \\
-Video & ResNet-18 & 0.1800 & 0.0436 & 7.49 \\
-Video & MobileNet-SE & 0.2500 & 0.0571 & 5.41 \\
-Video & ConvNeXt & 0.1600 & 0.0745 & 5.51 \\
-Video & Vision Transformer (ViT) & 0.1700 & 0.0484 & 5.36 \\
-Audio & Baseline BiGRU & 0.5590 & 0.5200 & 952.45 \\
-Audio & Temporal ConvNet (TCN) & 0.1000 & 0.0227 & 5.52 \\
-Audio & Audio Spectrogram Transformer & 0.2800 & 0.1891 & 5.28 \\
-Audio & ECAPA-TDNN & 0.2600 & 0.1449 & 5.01 \\
-Audio & DenseNet-BiLSTM & 0.1400 & 0.0445 & 5.16 \\
-Text & Baseline MLP & 0.6681 & 0.5167 & 54.53 \\
-Text & DistilBERT Bi-Encoder & 0.0333 & 0.0215 & 15.03 \\
-Text & Gradient Boosted Trees & 0.7833 & 0.5201 & 1.57 \\
-Text & Cross-Encoder Network & 0.6167 & 0.3637 & 13.82 \\
-Text & BiLSTM Attention & 0.6167 & 0.2543 & 15.00 \\
-Fusion & Baseline Early Concat & 0.7976 & 0.7700 & 175.27 \\
-Fusion & Tensor Fusion Network & 0.7800 & 0.4382 & 38.79 \\
-Fusion & Gated Multimodal Unit & 0.7800 & 0.4382 & 26.94 \\
-Fusion & Cross-Modal Transformer & 0.7800 & 0.4382 & 50.75 \\
-Fusion & Hierarchical Residual Fusion & 0.7800 & 0.4382 & 39.68 \\
-Annotated deception & Baseline Gated Cross-Attention & 0.5965 & 0.5113 & 21.66 \\
-Annotated deception & Cross-Modal Dual Attention & 0.6400 & 0.3902 & 13.95 \\
-Annotated deception & Multimodal Transformer & 0.6800 & 0.5614 & 13.87 \\
-Annotated deception & Multimodal Gradient Boosting & 0.6400 & 0.5322 & 1.75 \\
-Annotated deception & Bilinear Tensor Interaction & 0.6400 & 0.3902 & 13.80 \\
-\end{longtable}
-\normalsize
-
-\section{Provenance and unresolved record differences}\label{sec:provenance}
 \begin{table}[htbp]
 \centering\small
-\caption{Evidence handling for this manuscript revision. These differences remain explicit rather than being silently reconciled.}
-\begin{tabularx}{\linewidth}{p{28mm}YY}
-\toprule Record & Issue & Treatment \\ \midrule
-Detailed component report & FER2013 accuracy 0.5548, macro-F1 about 0.48 & Retained as the detailed-run result \\
-Rapid-run report & FER2013 accuracy 0.5552, macro-F1 0.4600 & Retained separately in Appendix A \\
-Text model identity & The pair 0.6681/0.5167 is called TF-IDF + logistic regression in one report and baseline MLP in another & No assertion that the two labels identify the same trained model \\
-Box of Lies F1 & Detailed report gives rounded 0.55; rapid report gives 0.5113 for the baseline & No pooled F1; only source-specific values retained \\
-Historical RL table & Reward heuristic is named ARIA; full rollout artifacts not located & Not relabeled as IQL and not merged with current locked results \\
-Current locked evaluation & Machine-readable v6/v7 metrics and hashes are available & Primary numerical evidence for the belief comparison \\
-Current OPE & Transition-reward diagnostic; release gate false & Not presented as discounted policy-return improvement \\
-Direct policy comparison & Frozen development splits, matched synthetic rollouts, and comparator hashes available & Reported as development-only simulator evidence; locked test not reused \\
+\caption{Classification accuracy for all eight policies in the matched development rollouts. Each condition contains 45 episodes, with 15 per synthetic class. Values are proportions, not percentages.}
+\label{tab:accuracy}
+\begin{tabularx}{\linewidth}{Xrrrr}
+\toprule
+Policy & Base & Overlap & Low confidence & Positive shift \\ \midrule
+ARIA IQL & 1.0000 & 0.4667 & 0.9111 & 1.0000 \\
+Behavior cloning & 1.0000 & 0.5333 & 0.9333 & 1.0000 \\
+Discrete CQL & 1.0000 & 0.5111 & 0.8889 & 1.0000 \\
+DT-inspired & 1.0000 & 0.4889 & 0.8889 & 1.0000 \\
+Random valid & 1.0000 & 0.5333 & 0.8889 & 1.0000 \\
+Fixed script & 1.0000 & 0.5333 & 0.9111 & 0.9556 \\
+Rule adaptive & 0.3333 & 0.1111 & 0.2444 & 0.4222 \\
+Uncertainty greedy & 1.0000 & 0.5778 & 0.9556 & 0.9111 \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-\noindent\textbf{Internal source inventory.} The component and historical-policy tables come from \texttt{ARIA\_updated.md}. Appendix A comes from \texttt{ARIA\_PROJECT\_CONTEXT\_AND\_RESULTS.md}. Current belief results come from \texttt{locked\_test\_evaluation\_v1.json}; the policy diagnostic comes from \texttt{offline\_policy\_evaluation\_v1.json}, both under the production v7 calibration release. Direct comparator summaries, source hashes, and rollout conditions are recorded under \texttt{paper/generated\_sota}. Architecture statements were checked against the state builder, belief update, training code, policy inference module, and application. The companion revision notes preserve exact paths and file hashes.
+Overlap removes the ceiling. IQL reaches 0.4667, behavior cloning 0.5333, discrete CQL 0.5111, and the DT-inspired comparator 0.4889. Among all policies, uncertainty greedy reaches 0.5778. With 45 episodes, a single additional correct decision changes accuracy by approximately 0.0222, so small rank differences should not be overinterpreted. Nevertheless, the recorded ordering does not support superior classification by IQL.
 
-\begin{thebibliography}{11}
-\bibitem{hirenet} L. Hemamou, G. Felhi, V. Vandenbussche, J.-C. Martin, and C. Clavel, ``HireNet: A Hierarchical Attention Model for the Automatic Analysis of Asynchronous Video Job Interviews,'' AAAI, 2019. \url{https://doi.org/10.1609/aaai.v33i01.3301573}. Abstract verified at \url{https://arxiv.org/abs/1907.11062}.
-\bibitem{poly} Z. Wen et al., ``PolyInterview: An LLM-based Platform for Immersive Mock Interview Practice with Comprehensive Multimodal Assessment,'' preprint, 2026. \url{https://arxiv.org/abs/2607.10310}.
-\bibitem{cat} J. Li, R. Gibbons, and V. Rockova, ``Deep Computerized Adaptive Testing,'' \emph{Psychometrika}, 2026. \url{https://doi.org/10.1017/psy.2026.10106}. Accessible version: \url{https://arxiv.org/abs/2502.19275}.
-\bibitem{kim} C. Kim, J. Choi, J. Yoon, D. Yoo, and W. Lee, ``Fairness-Aware Multimodal Learning in Automatic Video Interview Assessment,'' \emph{IEEE Access}, vol. 11, pp. 122677--122693, 2023. \url{https://doi.org/10.1109/ACCESS.2023.3325891}.
-\bibitem{mag} B. Putra et al., ``MAG-BERT-ARL for Fair Automated Video Interview Assessment,'' \emph{IEEE Access}, vol. 12, pp. 145188--145205, 2024. \url{https://doi.org/10.1109/ACCESS.2024.3473314}.
-\bibitem{avi} T. Zhang, J. Shang, A. Koutsoumpis, Y. Zong, R. E. de Vries, and W. Zheng, ``AVI-Personality: A Trait-Activated Multimodal Dataset for Personality and Competency Assessment in Asynchronous Video Interviews,'' preprint, 2026. \url{https://arxiv.org/abs/2608.25316}.
-\bibitem{iql} I. Kostrikov, A. Nair, and S. Levine, ``Offline Reinforcement Learning with Implicit Q-Learning,'' preprint, 2021. \url{https://arxiv.org/abs/2110.06169}.
-\bibitem{cql} A. Kumar, A. Zhou, G. Tucker, and S. Levine, ``Conservative Q-Learning for Offline Reinforcement Learning,'' \emph{Advances in Neural Information Processing Systems}, vol. 33, 2020. \url{https://proceedings.neurips.cc/paper/2020/hash/0d2b2061826a5df3221116a5085a6052-Abstract.html}.
-\bibitem{decisiontransformer} L. Chen et al., ``Decision Transformer: Reinforcement Learning via Sequence Modeling,'' \emph{Advances in Neural Information Processing Systems}, vol. 34, 2021. \url{https://proceedings.neurips.cc/paper_files/paper/2021/hash/7f489f642a0ddb10272b5c31057f0663-Abstract.html}.
-\bibitem{ope} P. Thomas, G. Theocharous, and M. Ghavamzadeh, ``High-Confidence Off-Policy Evaluation,'' AAAI, 2015. \url{https://doi.org/10.1609/aaai.v29i1.9541}.
-\bibitem{calibration} C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, ``On Calibration of Modern Neural Networks,'' \emph{PMLR}, vol. 70, pp. 1321--1330, 2017. \url{https://proceedings.mlr.press/v70/guo17a.html}.
+In the low-confidence condition, behavior cloning reaches 0.9333 and IQL reaches 0.9111; CQL and the DT-inspired comparator both reach 0.8889. The positive-shift condition again produces a ceiling for the learned policies. These findings answer the accuracy part of RQ3: changing the score distribution is more informative than repeating the easy base condition, and the learned objective does not translate into a consistent accuracy advantage.
+
+\subsection{Designed return, information gain, and interview cost}
+Table~\ref{tab:returns} separates control outcomes from classification. IQL has the largest mean designed return and cumulative information gain among the four learned policies in each condition. In base, its mean return is 32.16, compared with 27.54 for CQL, 25.90 for behavior cloning, and 7.22 for the DT-inspired comparator. Under overlap, IQL retains a return of 31.09 even while its classification accuracy falls to 0.4667. The reward is responding to evidence acquisition and coverage rather than directly rewarding the final class in this rollout harness.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Designed return and information gain for the learned policies. Each cell is mean return / mean information gain. These are simulator quantities.}
+\label{tab:returns}
+\begin{tabularx}{\linewidth}{Xrrrr}
+\toprule
+Policy & Base & Overlap & Low confidence & Positive shift \\ \midrule
+ARIA IQL & 32.16 / 17.88 & 31.09 / 17.26 & 11.50 / 3.96 & 31.14 / 17.27 \\
+Behavior cloning & 25.90 / 14.02 & 24.28 / 13.01 & 8.30 / 2.84 & 25.08 / 13.47 \\
+Discrete CQL & 27.54 / 16.72 & 25.38 / 15.79 & 5.01 / 3.35 & 27.31 / 16.55 \\
+DT-inspired & 7.22 / 5.13 & 7.12 / 5.06 & 2.97 / 1.82 & 7.04 / 5.01 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.94\linewidth,height=58mm,ybar,bar width=11pt,ymin=0,ymax=38,ylabel={Mean designed return},symbolic x coords={Base,Overlap,Low,Shift},xtick=data,legend style={at={(0.5,-0.2)},anchor=north,legend columns=2,font=\small},ymajorgrids=true,grid style={gray!20}]
+\addplot coordinates {(Base,32.1557) (Overlap,31.0858) (Low,11.4973) (Shift,31.1404)};
+\addplot coordinates {(Base,25.9036) (Overlap,24.2808) (Low,8.2989) (Shift,25.0812)};
+\addplot coordinates {(Base,27.5418) (Overlap,25.3791) (Low,5.0065) (Shift,27.3070)};
+\addplot coordinates {(Base,7.2224) (Overlap,7.1233) (Low,2.9723) (Shift,7.0441)};
+\legend{ARIA IQL,Behavior cloning,Discrete CQL,DT-inspired}
+\end{axis}
+\end{tikzpicture}
+\caption{Mean designed return across the four score conditions. Higher return reflects the specified reward, which directly rewards information gain and first visits to skills. Error intervals are reported in Table~\ref{tab:uncertainty}; this plot does not establish an ordering of human interview quality.}
+\label{fig:returns}
+\end{figure}
+
+Lower reliability reduces accumulated information gain and return for every learned policy. IQL's mean return falls to 11.50 and its information gain to 3.96. This response is consistent with the updater giving weak evidence less influence. The finding is internal to the confidence mechanism: these confidence values are supplied by the simulator, not estimated from a calibrated speech or vision pipeline.
+
+Table~\ref{tab:efficiency} explains part of the return ordering. IQL covers all 17 skills in every condition. CQL averages 30 turns throughout, reaching the evaluation horizon. Behavior cloning usually collects evidence more briefly, while the DT-inspired policy visits only five skills on average in three of the conditions. The latter can still classify easy episodes correctly because all skills draw from the same episode-level latent class. Thus, high aggregate accuracy need not imply broad coverage.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Interview length and skill coverage for all policies. Each cell is mean turns / mean distinct skills. The default ontology contains 17 skills and the rollout cap is 30 turns.}
+\label{tab:efficiency}
+\begin{tabularx}{\linewidth}{Xrrrr}
+\toprule
+Policy & Base & Overlap & Low confidence & Positive shift \\ \midrule
+ARIA IQL & 19.38 / 17.00 & 20.11 / 17.00 & 18.22 / 17.00 & 20.02 / 17.00 \\
+Behavior cloning & 13.78 / 13.78 & 13.67 / 13.60 & 13.76 / 12.33 & 13.80 / 13.80 \\
+Discrete CQL & 30.00 / 15.98 & 30.00 / 15.44 & 30.00 / 12.11 & 30.00 / 16.38 \\
+DT-inspired & 13.00 / 5.00 & 13.00 / 5.00 & 15.33 / 7.33 & 13.00 / 5.00 \\
+Random valid & 20.96 / 6.89 & 20.96 / 6.89 & 20.96 / 6.89 & 20.96 / 6.89 \\
+Fixed script & 10.00 / 6.00 & 10.00 / 6.00 & 10.00 / 6.00 & 10.00 / 6.00 \\
+Rule adaptive & 30.00 / 2.33 & 30.00 / 2.42 & 30.00 / 2.33 & 30.00 / 2.60 \\
+Uncertainty greedy & 30.00 / 3.00 & 30.00 / 3.00 & 28.09 / 4.00 & 30.00 / 3.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The non-learned baselines expose another trade-off. Uncertainty greedy has the highest overlap accuracy but a negative mean designed return. A method can therefore appear favorable on one output while being costly under the defined reward. A complete claim about interview quality would require deciding which of these outcomes matters to a user, then measuring it externally. The present evidence supports a description of policy behavior, not an overall winner independent of the chosen objective.
+
+\subsection{Offline weighting diagnostic}
+The release also records a validation-only transition weighting estimate. With clipped importance ratios, the implemented statistic is
+\begin{equation}
+\rho_i=\min\left\{\frac{\pi(a_i\mid s_i)}{\mu(a_i\mid s_i)},20\right\},\qquad
+\widehat R=\frac{\sum_i\rho_i r_i}{\sum_i\rho_i},\qquad
+\mathrm{ESS}=\frac{(\sum_i\rho_i)^2}{\sum_i\rho_i^2}.
+\end{equation}
+The reported value is 0.4618, with effective sample size approximately 1,003.5 and maximum ratio approximately 5.464. This is a weighted one-step reward diagnostic over validation transitions. It does not estimate a complete interview return with a trajectory-level uncertainty guarantee, and its numerical scale should not be compared with the cumulative rollout returns above. The release's deployment gate remains false.
+
+\section{Discussion}
+The evaluation demonstrates why the unit of analysis must be explicit in an adaptive interview study. The locked belief experiment measures how a fixed evidence processor labels stored episodes. The direct policy experiment measures which evidence an action policy collects from a constructed response rule. The historical component tests measure still other tasks. Together they describe different parts of the architecture, but they do not add up automatically to an end-to-end human evaluation.
+
+The central behavioral result is the separation between coverage-oriented return and classification. IQL reliably spreads its questions across the default skill set and obtains more information gain under the defined update. Under overlapping evidence, however, greater accumulated information is not enough to give it the most accurate final label. An entropy reduction can accompany a mistaken belief when the likelihood is misspecified. Rewarding uncertainty reduction therefore requires separate checks of correctness and calibration.
+
+The base accuracy ceiling is also instructive. It is not, on its own, proof of leakage or a coding failure. The score generator assigns widely separated centers to the known classes, and the common belief updater is designed to recover those distinctions. At the same time, perfect performance in this environment is a weak test of adaptive interviewing. The result identifies a property of the generator--updater combination, not evidence that arbitrary candidate responses can be assessed perfectly.
+
+The direct comparators improve the study by placing several learning approaches behind the same interface. They do not establish that IQL is superior to the full published CQL or Decision Transformer methods. Capacity and checkpoint selection differ, only one training seed is available, and the Transformer has documented representation and inference limitations. The most defensible statement is that the frozen IQL checkpoint obtains higher mean simulator return than the particular comparators trained here.
+
+Finally, the component results favor restraint in the architecture's multimodal claims. The strongest recorded MOSEI accuracy comes from text alone, and the competency likelihood in the current offline evaluation is semantic. Audio and video may still support feedback or interaction, but their contribution to accurate skill assessment remains unmeasured in this loop. This observation connects the baseline analysis to a concrete design question: which signal changes an assessment decision in a way that is useful and justified?
+
+\section{Limitations and research implications}
+The first limitation is construct validity. The synthetic classes and class-conditioned score generator simplify the relationship between answers and competence. Skills within an episode share a latent class, and fixed action bonuses encode assumptions about the value of particular questions. The evaluator does not measure relevance, factual correctness, conversational coherence, learning benefit, or candidate experience from generated dialogue. Those properties require evidence beyond scalar scores.
+
+The second limitation is experimental breadth. The new policy results use one training seed and 45 episodes per condition, with stress conditions chosen after observing a ceiling. Matching reduces differences in scenario assignment but does not account for uncertainty in the response model itself. The locked belief test contains only six identity components, which limits the stability of cluster-based inference. No broad population or confirmatory significance claim follows from these samples.
+
+The third limitation concerns comparison fidelity. The frozen IQL checkpoint and newly trained baselines do not share an identical tuning budget. Validation action accuracy may select a good imitator rather than the best return-maximizing policy. The DT-inspired implementation also differs materially from its published predecessor, and the replay reward includes terminal shaping absent from the reported online reward sum. These are reasons to qualify algorithm-level conclusions, not to suppress the measured results.
+
+The fourth limitation is evidence completeness. Canonical compact summaries preserve result values and hashes, but the corresponding per-episode artifacts are needed for new paired analyses. Historical component metrics rely on summaries without recovered prediction files. The current live application does not execute the entire evaluated adaptive loop. Consequently, neither the component benchmarks nor the synthetic policy experiment establishes a deployable automated assessment system.
+
+For future evaluation, the same frozen model could be tested across additional scenario seeds and externally specified score conditions without changing its training data. Stronger evidence would also separate heterogeneous skill profiles, question usefulness, calibration under missing modalities, and candidate-facing outcomes. Any study involving people would need an explicit protocol, consent and data-handling arrangements, and relevant approval where required. No such study or approval is claimed here. Fairness, accessibility, and adverse effects remain empirical questions, especially when behavioral signals are involved.
+
+\section{Conclusion}
+ARIA provides an explicit interface between skill beliefs and offline interview actions. The revised evaluation shows improved synthetic belief classification for v7, identifies useful historical component baselines, and compares the frozen IQL policy with learned and heuristic alternatives under matched development conditions. IQL obtains the largest mean designed return and information gain among the learned policies across all four conditions, while simpler alternatives classify better when evidence overlaps. The result is evidence of a simulator-specific coverage and reward advantage, with clear limits on claims about assessment quality. A complete live integration and externally grounded evaluation are needed before extending that conclusion to real interviews.
+
+\appendix
+\section{Reward intervals and reproducibility}
+Table~\ref{tab:uncertainty} retains the archived reward intervals for every policy, including non-learned baselines. Rounded numbers in the manuscript are drawn from the canonical comparison summary, not recomputed from a different local run. The full-precision CSV and JSON remain the numerical record. The comparator training report hash begins with 1c988a6935e5833a; the complete hash and source-file digests are recorded in the companion provenance notes.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Mean designed return with the archived episode-bootstrap 95 percent interval, conditional on the fitted checkpoint. These intervals do not measure variation across training seeds.}
+\label{tab:uncertainty}
+\begin{tabularx}{\linewidth}{XYYYY}
+\toprule
+Policy & Base & Overlap & Low confidence & Positive shift \\ \midrule
+ARIA IQL & 32.16 [31.37, 32.86] & 31.09 [30.50, 31.67] & 11.50 [11.03, 11.94] & 31.14 [30.62, 31.64] \\
+Behavior cloning & 25.90 [25.16, 26.52] & 24.28 [23.70, 24.89] & 8.30 [7.89, 8.67] & 25.08 [24.50, 25.70] \\
+Discrete CQL & 27.54 [26.38, 28.70] & 25.38 [24.63, 26.13] & 5.01 [4.50, 5.50] & 27.31 [26.22, 28.32] \\
+DT-inspired & 7.22 [6.92, 7.53] & 7.12 [6.85, 7.37] & 2.97 [2.80, 3.13] & 7.04 [6.74, 7.31] \\
+Random valid & 9.88 [8.65, 11.10] & 9.67 [8.44, 10.89] & 1.94 [1.28, 2.57] & 9.70 [8.53, 10.89] \\
+Fixed script & 10.50 [10.16, 10.80] & 10.19 [9.86, 10.47] & 3.51 [3.24, 3.75] & 10.37 [10.04, 10.65] \\
+Rule adaptive & -4.19 [-5.24, -3.08] & -3.22 [-4.38, -2.04] & -6.46 [-7.10, -5.81] & -3.36 [-4.60, -2.11] \\
+Uncertainty greedy & -2.39 [-2.72, -2.08] & -2.51 [-2.79, -2.22] & -4.17 [-5.13, -3.04] & -2.44 [-2.78, -2.12] \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Training and evaluation are available through the repository's SOTA command-line entry point. Despite that utility name, the experiment itself is a direct development comparison rather than a certified state-of-the-art benchmark. Reproduction requires the frozen replay, the selected checkpoints, the release configuration, and the condition definitions. Hash agreement is needed before combining compact tables with detailed traces. A changed file digest identifies a different artifact; it does not, by itself, establish whether a difference came from training randomness, configuration, or another cause.
+
+\section{Historical evidence and availability}
+The component table consolidates the repository's historical results and accompanying provenance notes. Additional rapid architecture sweeps are not used to claim faithful reproduction of named published systems. The earlier 300-episode heuristic policy experiment also uses a different simulator configuration and is not pooled with the new matched rollouts. These records remain useful for tracing development decisions, but only results with the same evaluation definition belong in a direct numerical comparison.
+
+Code, manuscript source, and compact result artifacts are retained in the ARIA repository used for this study. Public archival availability is not asserted by this draft. The reported policy and belief experiments use synthetic episodes; they do not include a newly conducted human-subject interview study.
+
+\begin{thebibliography}{13}
+\bibitem{hirenet} L. Hemamou, G. Felhi, V. Vandenbussche, J.-C. Martin, and C. Clavel. HireNet: A hierarchical attention model for the automatic analysis of asynchronous video job interviews. AAAI, 2019. doi:10.1609/aaai.v33i01.3301573.
+\bibitem{siminterview} T. T. H. Nguyen, T. D. Q. Nguyen, H. L. Cao, T. C. T. Tran, T. C. M. Truong, and H. Cao. SimInterview: Transforming Business Education through Large Language Model-Based Simulated Multilingual Interview Training System. arXiv:2508.11873, 2025. doi:10.48550/arXiv.2508.11873.
+\bibitem{interpilot} Z. Xu, Z. Xia, Z. Zhu, N. Boonprakong, Y.-A. Chen, R. Zbib, C. P. Carrino, and Y.-C. Lee. InterPilot: Exploring the Design Space of AI-assisted Job Interview Support for HR Professionals. arXiv:2602.20891, 2026, preprint. doi:10.48550/arXiv.2602.20891.
+\bibitem{mag} B. Putra, K. Azizah, C. O. Mawalim, I. A. Hanif, S. Sakti, C. W. Leong, and S. Okada. MAG-BERT-ARL for Fair Automated Video Interview Assessment. IEEE Access, 12:145188--145205, 2024. doi:10.1109/ACCESS.2024.3473314.
+\bibitem{iql} I. Kostrikov, A. Nair, and S. Levine. Offline Reinforcement Learning with Implicit Q-Learning. ICLR, 2022. arXiv:2110.06169.
+\bibitem{cql} A. Kumar, A. Zhou, G. Tucker, and S. Levine. Conservative Q-Learning for Offline Reinforcement Learning. Advances in Neural Information Processing Systems, 33, 2020.
+\bibitem{dt} L. Chen, K. Lu, A. Rajeswaran, K. Lee, A. Grover, M. Laskin, P. Abbeel, A. Srinivas, and I. Mordatch. Decision Transformer: Reinforcement Learning via Sequence Modeling. Advances in Neural Information Processing Systems, 34, 2021.
+\bibitem{calibration} C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger. On Calibration of Modern Neural Networks. Proceedings of Machine Learning Research, 70:1321--1330, 2017.
+\bibitem{ope} P. Thomas, G. Theocharous, and M. Ghavamzadeh. High-Confidence Off-Policy Evaluation. AAAI, 29(1), 2015. doi:10.1609/aaai.v29i1.9541.
+\bibitem{fer} I. J. Goodfellow et al. Challenges in Representation Learning: A report on three machine learning contests. arXiv:1307.0414, 2013.
+\bibitem{ravdess} S. R. Livingstone and F. A. Russo. The Ryerson Audio-Visual Database of Emotional Speech and Song (RAVDESS): A dynamic, multimodal set of facial and vocal expressions in North American English. PLOS ONE, 13(5):e0196391, 2018. doi:10.1371/journal.pone.0196391.
+\bibitem{mohler} M. Mohler, R. Bunescu, and R. Mihalcea. Learning to Grade Short Answer Questions using Semantic Similarity Measures and Dependency Graph Alignments. ACL-HLT, pages 752--762, 2011.
+\bibitem{mosei} A. Bagher Zadeh, P. P. Liang, S. Poria, E. Cambria, and L.-P. Morency. Multimodal Language Analysis in the Wild: CMU-MOSEI Dataset and Interpretable Dynamic Fusion Graph. ACL, pages 2236--2246, 2018. doi:10.18653/v1/P18-1208.
 \end{thebibliography}
 \end{document}

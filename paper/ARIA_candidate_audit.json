@@ -1,0 +1,216 @@
+{
+  "status": "FINDINGS",
+  "candidate_sha256": "a4f3559c2be3765ba173e6357ef85a9ba8b272a3c4add12515d02ee23a4dff50",
+  "profile_loaded": true,
+  "findings": [
+    {
+      "code": "PROSE010",
+      "artifact": "candidate",
+      "match": "Fairness-aware, trade-offs, MAG-BERT-ARL, interview-related, Sequential-assessment, Role-conditioned, AVI-Personality, Trait-activated, external-validation",
+      "count": 9,
+      "message": "dense lexical hyphenation in one sentence; inspect clarity and field convention"
+    },
+    {
+      "code": "PROSE010",
+      "artifact": "candidate",
+      "match": "valid-action, visited-skill, valid-evidence, consecutive-focus, cognitive-label, One-hot, aria-state",
+      "count": 7,
+      "message": "dense lexical hyphenation in one sentence; inspect clarity and field convention"
+    },
+    {
+      "code": "PROSE010",
+      "artifact": "candidate",
+      "match": "skill-level, short-answer, CMU-MOSEI, candidate-integrity",
+      "count": 4,
+      "message": "dense lexical hyphenation in one sentence; inspect clarity and field convention"
+    },
+    {
+      "code": "PROSE010",
+      "artifact": "candidate",
+      "match": "MobileNet-SE, ECAPA-TDNN, DenseNet-BiLSTM, Bi-Encoder, Cross-Encoder, Cross-Modal, Cross-Attention, Cross-Modal",
+      "count": 8,
+      "message": "dense lexical hyphenation in one sentence; inspect clarity and field convention"
+    },
+    {
+      "code": "PROSE010",
+      "artifact": "candidate",
+      "match": "detailed-run, Rapid-run, TF-IDF, source-specific, Machine-readable, Transition-reward, policy-return, historical-policy",
+      "count": 8,
+      "message": "dense lexical hyphenation in one sentence; inspect clarity and field convention"
+    },
+    {
+      "code": "PROSE002",
+      "artifact": "candidate",
+      "match": "begin table htbp centering",
+      "count": 6,
+      "message": "repeated sentence opening"
+    },
+    {
+      "code": "PROSE002",
+      "artifact": "candidate",
+      "match": "begin figure htbp centering",
+      "count": 5,
+      "message": "repeated sentence opening"
+    },
+    {
+      "code": "PROSE002",
+      "artifact": "candidate",
+      "match": "url https doi org",
+      "count": 5,
+      "message": "repeated sentence opening"
+    },
+    {
+      "code": "PROSE002",
+      "artifact": "candidate",
+      "match": "url https arxiv org",
+      "count": 3,
+      "message": "repeated sentence opening"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "begin table htbp centering small",
+      "count": 7,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "table htbp centering small caption",
+      "count": 7,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "begin figure htbp centering begin",
+      "count": 5,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "figure htbp centering begin tikzpicture",
+      "count": 5,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "url https arxiv org abs",
+      "count": 5,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "accuracy of and macro-f of",
+      "count": 4,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "bottomrule end tabularx source texttt",
+      "count": 4,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "begin tabularx linewidth p mm",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "begin tikzpicture node distance mm",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "bottomrule end tabularx end table",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "centering begin tikzpicture node distance",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "distance mm and mm node",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "end tabularx source texttt aria",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "htbp centering begin tikzpicture node",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "mm and mm node box",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "node distance mm and mm",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "source texttt aria updated md",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "tabularx source texttt aria updated",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    },
+    {
+      "code": "PROSE004",
+      "artifact": "candidate",
+      "match": "tikzpicture node distance mm and",
+      "count": 3,
+      "message": "repeated multiword phrase across sentences"
+    }
+  ],
+  "manual_checks_required": [
+    "paragraph contract and adjacent-paragraph flow",
+    "claim scope and preservation of locked meaning",
+    "functional transitions and cumulative information flow",
+    "literature-example ordering from broad context to the closest precedent and gap, or another explicit evidentiary logic",
+    "function-preserving concision and sentence rhythm",
+    "natural scholarly subjects, syntax, and disciplinary accessibility",
+    "reader accessibility, including nonessential field shorthand, transition templates, and indirect verbs",
+    "claim-to-citation support and reference-list changes",
+    "observable stock or AI-like prose features without authorship inference",
+    "dash and hyphen style, including grammatical role, established open compounds, density, and suspended compounds",
+    "necessary technical repetition versus avoidable restatement"
+  ]
+}
