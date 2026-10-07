@@ -180,15 +180,26 @@ function InterviewScreen({ sessionId, onEndSession }) {
     if (!stream || isSpeaking || mediaRecorderRef.current?.state === 'recording') return;
     audioChunksRef.current = [];
     try {
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const audioTracks = stream.getAudioTracks().filter((track) => track.readyState === 'live');
+      if (!audioTracks.length) throw new Error('No microphone track is available');
+      const audioStream = new MediaStream(audioTracks);
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+        .find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(audioStream, mimeType ? { mimeType } : undefined);
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
       recorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        mediaRecorderRef.current = null;
+        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        audioChunksRef.current = [];
+        if (!audioBlob.size) {
+          setAudioError('No audio was captured. Please check your microphone and record for longer.');
+          return;
+        }
         const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
+          if (reader.error || typeof reader.result !== 'string') return;
           const socket = wsRef.current;
           if (socket?.readyState === WebSocket.OPEN) {
             setAudioError('');
@@ -197,23 +208,28 @@ function InterviewScreen({ sessionId, onEndSession }) {
             socket.send(JSON.stringify({ type: 'candidate_audio', audio_base64: reader.result }));
           }
         };
+        reader.onerror = () => setAudioError('The recording could not be read. Please try again.');
+        reader.readAsDataURL(audioBlob);
       };
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      recorder.start(250);
+      setAudioError('');
       setRecordingMode('hold');
     } catch (error) {
       console.error('Failed to start MediaRecorder:', error);
+      setAudioError('The microphone could not start. Check its browser permission and try again.');
       setRecordingMode('idle');
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current?.stop();
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
     setRecordingMode('idle');
   };
 
   const handlePointerDown = (event) => {
     if (event.button !== undefined && event.button !== 0) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     if (recordingMode === 'locked') {
       stopRecording();
       pointerDownTimeRef.current = 0;
@@ -230,11 +246,6 @@ function InterviewScreen({ sessionId, onEndSession }) {
     const duration = Date.now() - pointerDownTimeRef.current;
     if (duration < 300) setRecordingMode('locked');
     else stopRecording();
-    pointerDownTimeRef.current = 0;
-  };
-
-  const handlePointerLeave = () => {
-    if (recordingMode === 'hold') stopRecording();
     pointerDownTimeRef.current = 0;
   };
 
@@ -344,13 +355,13 @@ function InterviewScreen({ sessionId, onEndSession }) {
                 className="record-button"
                 onPointerDown={handlePointerDown}
                 onPointerUp={handlePointerUp}
-                onPointerLeave={handlePointerLeave}
+                onPointerCancel={stopRecording}
                 disabled={isSpeaking || mediaState !== 'ready' || connectionState !== 'live'}
                 aria-label={isRecording ? 'Stop recording' : 'Record answer'}
               ><MicIcon /></button>
               <form onSubmit={handleSendAnswer}>
                 <label htmlFor="candidate-answer">
-                  {recordingMode === 'locked' ? 'Recording — tap the microphone to send' : recordingMode === 'hold' ? 'Recording — release to send' : 'Answer by voice or type below'}
+                  {recordingMode === 'locked' ? 'Recording — tap the microphone to send' : recordingMode === 'hold' ? 'Recording — release to send' : 'Hold the microphone to record, or tap twice to start and send'}
                 </label>
                 <div className="text-entry">
                   <input

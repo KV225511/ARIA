@@ -197,7 +197,11 @@ async def generate_grounded_session_question(session: dict, action: str, send_ev
 
 async def transcribe_candidate_audio(audio_base64: str) -> str:
     """Decode one browser recording without persisting candidate audio."""
+    if not isinstance(audio_base64, str):
+        raise ValueError("The recording was invalid. Please record again.")
     encoded = audio_base64.split("base64,", 1)[-1]
+    if len(encoded) > 28_000_000:
+        raise ValueError("The recording was too large. Please record a shorter answer.")
     try:
         audio_bytes = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -265,7 +269,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     candidate_text = await transcribe_candidate_audio(
                         payload.get("audio_base64", "")
                     )
-                except Exception as e:
+                except ValueError as exc:
+                    logger.info("Rejected audio for session %s: %s", session_id, exc)
+                    await websocket.send_json({
+                        "type": "audio_error",
+                        "message": str(exc),
+                    })
+                    continue
+                except Exception:
                     logger.exception("Audio transcription failed for session %s", session_id)
                     await websocket.send_json({
                         "type": "audio_error",

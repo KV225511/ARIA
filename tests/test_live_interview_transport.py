@@ -77,6 +77,19 @@ def test_audio_error_keeps_websocket_open_and_text_can_continue(monkeypatch):
             receive_question(websocket)
 
 
+def test_empty_browser_recording_reports_cause_and_keeps_session(monkeypatch):
+    session_id = create_session(monkeypatch)
+    with TestClient(live_app.app) as client:
+        with client.websocket_connect(f"/ws/interview/{session_id}") as websocket:
+            receive_question(websocket)
+            websocket.send_json({"type": "candidate_audio", "audio_base64": ""})
+            error = websocket.receive_json()
+            assert error["type"] == "audio_error"
+            assert "empty" in error["message"].lower()
+            websocket.send_json({"type": "candidate_answer", "text": "A technical answer"})
+            receive_question(websocket)
+
+
 def test_voice_answer_gets_transcript_and_streamed_followup(monkeypatch):
     session_id = create_session(monkeypatch)
 
