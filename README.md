@@ -168,7 +168,7 @@ Or run the services separately:
 ```powershell
 # Terminal 1 — repository root
 .\.venv\Scripts\alembic.exe upgrade head
-.\.venv\Scripts\uvicorn.exe app:app --reload --port 8000
+.\.venv\Scripts\python.exe -m backend.server --port 8000
 
 # Terminal 2 — repository root
 .\.venv\Scripts\python.exe -m backend.worker

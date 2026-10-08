@@ -23,13 +23,11 @@ if ($existing) {
 }
 
 # --- Start FastAPI backend in a new visible window ---
-$uvicorn = "$rootDir\.venv\Scripts\uvicorn.exe"
-Write-Host "Using uvicorn: $uvicorn" -ForegroundColor DarkGray
+$python = "$rootDir\.venv\Scripts\python.exe"
 Write-Host "Starting ARIA Backend (uvicorn)..." -ForegroundColor Cyan
-Start-Process "powershell.exe" -ArgumentList "-NoExit", "-Command", "Set-Location '$rootDir'; & '$uvicorn' app:app --reload --port 8000"
+Start-Process "powershell.exe" -ArgumentList "-NoExit", "-Command", "Set-Location '$rootDir'; & '$python' -m backend.server --port 8000"
 
 # The durable worker processes document extraction and deletion jobs.
-$python = "$rootDir\.venv\Scripts\python.exe"
 Start-Process "powershell.exe" -WindowStyle Hidden -ArgumentList "-Command", "Set-Location '$rootDir'; & '$python' -m backend.worker"
 
 # Wait for backend to bind
