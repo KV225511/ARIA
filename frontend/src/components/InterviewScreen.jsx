@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { apiFetch, newId, responseData } from '../api';
 
 const MicIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -42,6 +43,9 @@ function InterviewScreen({ sessionId, onEndSession }) {
   const [stream, setStream] = useState(null);
   const [mediaState, setMediaState] = useState('requesting');
   const [recordingMode, setRecordingMode] = useState('idle');
+  const [revision, setRevision] = useState(0);
+  const [writable, setWritable] = useState(false);
+  const [pendingSubmission, setPendingSubmission] = useState(null);
 
   const videoRef = useRef(null);
   const wsRef = useRef(null);
@@ -96,14 +100,29 @@ function InterviewScreen({ sessionId, onEndSession }) {
   }, [stream]);
 
   useEffect(() => {
-    const socket = new WebSocket(`ws://localhost:8000/ws/interview/${sessionId}`);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/interview/${sessionId}`);
     wsRef.current = socket;
     setConnectionState('connecting');
 
     socket.onopen = () => setConnectionState('live');
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === 'aria_stream_start') {
+      if (data.type === 'control_granted') {
+        setWritable(true);
+      } else if (data.type === 'control_lost') {
+        setWritable(false);
+        setAudioError(data.message || 'This interview is open in another tab.');
+      } else if (data.type === 'session_snapshot') {
+        setRevision(data.revision);
+        setWritable(data.writable);
+        const restored = (data.turns || []).flatMap((turn) => [
+          { id: turn.question.id, sender: 'ARIA', text: turn.question.text, action: turn.question.action },
+          ...(turn.answer ? [{ id: turn.answer.id, sender: 'Candidate', text: turn.answer.text }] : []),
+        ]);
+        setMessages(restored);
+        setIsPreparing(!data.current_question && !['completed', 'cancelled', 'failed', 'expired'].includes(data.status));
+      } else if (data.type === 'aria_stream_start') {
         setStreamedQuestion('');
         setIsPreparing(true);
       } else if (data.type === 'aria_chunk') {
@@ -115,7 +134,10 @@ function InterviewScreen({ sessionId, onEndSession }) {
         setStreamedQuestion('');
         setIsPreparing(false);
         setIsSpeaking(true);
-        setMessages((previous) => [...previous, { sender: 'ARIA', text: data.text, action: data.action }]);
+        setRevision(data.revision);
+        setMessages((previous) => previous.some((message) => message.id === data.id)
+          ? previous
+          : [...previous, { id: data.id, sender: 'ARIA', text: data.text, action: data.action }]);
 
         const utterance = new SpeechSynthesisUtterance(data.text);
         utterance.rate = 1.02;
@@ -127,7 +149,14 @@ function InterviewScreen({ sessionId, onEndSession }) {
       } else if (data.type === 'transcription_result') {
         setIsTranscribing(false);
         setAudioError('');
-        setMessages((previous) => [...previous, { sender: 'Candidate', text: data.text }]);
+      } else if (data.type === 'answer_accepted') {
+        setRevision(data.revision);
+        setPendingSubmission(null);
+        setCandidateInput('');
+        setIsTranscribing(false);
+        setMessages((previous) => previous.some((message) => message.id === data.id)
+          ? previous
+          : [...previous, { id: data.id, sender: 'Candidate', text: data.text }]);
       } else if (data.type === 'audio_error') {
         setIsTranscribing(false);
         setAudioError(data.message);
@@ -136,6 +165,10 @@ function InterviewScreen({ sessionId, onEndSession }) {
         setDebugPrompt(data.prompt);
       } else if (data.type === 'error') {
         setConnectionState('error');
+        setIsPreparing(false);
+      } else if (data.type === 'operation_error') {
+        setPendingSubmission(null);
+        setAudioError(data.message || 'The operation could not be completed.');
         setIsPreparing(false);
       }
     };
@@ -147,7 +180,11 @@ function InterviewScreen({ sessionId, onEndSession }) {
       current === 'error' ? 'error' : 'disconnected'
     ));
 
+    const heartbeat = window.setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'heartbeat' }));
+    }, 15000);
     return () => {
+      window.clearInterval(heartbeat);
       window.speechSynthesis.cancel();
       socket.close();
       wsRef.current = null;
@@ -163,17 +200,17 @@ function InterviewScreen({ sessionId, onEndSession }) {
 
   const sendCandidateText = (text) => {
     const socket = wsRef.current;
-    if (!text.trim() || socket?.readyState !== WebSocket.OPEN) return;
-    setMessages((previous) => [...previous, { sender: 'Candidate', text: text.trim() }]);
+    if (!text.trim() || !currentQuestion?.id || pendingSubmission || socket?.readyState !== WebSocket.OPEN) return;
+    const submissionId = newId();
+    setPendingSubmission(submissionId);
     setAudioError('');
     setIsPreparing(true);
-    socket.send(JSON.stringify({ type: 'candidate_answer', text: text.trim() }));
+    socket.send(JSON.stringify({ type: 'candidate_answer', question_id: currentQuestion.id, submission_id: submissionId, text: text.trim() }));
   };
 
   const handleSendAnswer = (event) => {
     event.preventDefault();
     sendCandidateText(candidateInput);
-    setCandidateInput('');
   };
 
   const startRecording = () => {
@@ -202,10 +239,13 @@ function InterviewScreen({ sessionId, onEndSession }) {
           if (reader.error || typeof reader.result !== 'string') return;
           const socket = wsRef.current;
           if (socket?.readyState === WebSocket.OPEN) {
+            if (!currentQuestion?.id || pendingSubmission) return;
+            const submissionId = newId();
+            setPendingSubmission(submissionId);
             setAudioError('');
             setIsTranscribing(true);
             setIsPreparing(true);
-            socket.send(JSON.stringify({ type: 'candidate_audio', audio_base64: reader.result }));
+            socket.send(JSON.stringify({ type: 'candidate_audio', question_id: currentQuestion.id, submission_id: submissionId, audio_base64: reader.result }));
           }
         };
         reader.onerror = () => setAudioError('The recording could not be read. Please try again.');
@@ -256,6 +296,19 @@ function InterviewScreen({ sessionId, onEndSession }) {
     error: 'Connection issue',
   }[connectionState];
 
+  const handleEndSession = async () => {
+    try {
+      await responseData(await apiFetch(`/api/interviews/${sessionId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_revision: revision }),
+      }));
+      onEndSession();
+    } catch (endError) {
+      setAudioError(endError.message);
+    }
+  };
+
   return (
     <div className="interview-page">
       <header className="interview-header">
@@ -268,7 +321,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
         </div>
         <div className="header-actions">
           <span className={`connection-pill ${connectionState}`}><i /> {connectionLabel}</span>
-          <button type="button" className="end-button" onClick={onEndSession}>End session</button>
+          <button type="button" className="end-button" onClick={handleEndSession}>End session</button>
         </div>
       </header>
 
@@ -356,7 +409,7 @@ function InterviewScreen({ sessionId, onEndSession }) {
                 onPointerDown={handlePointerDown}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={stopRecording}
-                disabled={isSpeaking || mediaState !== 'ready' || connectionState !== 'live'}
+                disabled={isSpeaking || !writable || pendingSubmission || mediaState !== 'ready' || connectionState !== 'live'}
                 aria-label={isRecording ? 'Stop recording' : 'Record answer'}
               ><MicIcon /></button>
               <form onSubmit={handleSendAnswer}>
@@ -370,9 +423,9 @@ function InterviewScreen({ sessionId, onEndSession }) {
                     placeholder="Type your answer…"
                     value={candidateInput}
                     onChange={(event) => setCandidateInput(event.target.value)}
-                    disabled={isSpeaking || isRecording || connectionState !== 'live'}
+                    disabled={isSpeaking || !writable || Boolean(pendingSubmission) || isRecording || connectionState !== 'live'}
                   />
-                  <button type="submit" disabled={isSpeaking || isRecording || !candidateInput.trim() || connectionState !== 'live'} aria-label="Send answer"><SendIcon /></button>
+                  <button type="submit" disabled={isSpeaking || !writable || Boolean(pendingSubmission) || isRecording || !candidateInput.trim() || connectionState !== 'live'} aria-label="Send answer"><SendIcon /></button>
                 </div>
               </form>
             </div>
