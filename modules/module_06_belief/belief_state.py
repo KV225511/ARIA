@@ -94,6 +94,38 @@ class BeliefStateUpdater:
     def get_visited_skills(self):
         return [skill for skill, count in self.evidence_counts.items() if count > 0]
 
+    def to_checkpoint(self) -> dict:
+        return {
+            "serializer_version": 1,
+            "skill_ids": list(self.beliefs),
+            "beliefs": {skill: value.tolist() for skill, value in self.beliefs.items()},
+            "evidence_counts": dict(self.evidence_counts),
+            "effective_sample_sizes": dict(self.effective_sample_sizes),
+        }
+
+    @classmethod
+    def from_checkpoint(cls, payload: dict) -> "BeliefStateUpdater":
+        if payload.get("serializer_version") != 1:
+            raise ValueError("Unsupported belief checkpoint version")
+        updater = cls(payload["skill_ids"])
+        updater.beliefs = {
+            skill: np.asarray(payload["beliefs"][skill], dtype=np.float64)
+            for skill in payload["skill_ids"]
+        }
+        updater.evidence_counts = {
+            skill: int(payload["evidence_counts"][skill]) for skill in payload["skill_ids"]
+        }
+        updater.effective_sample_sizes = {
+            skill: float(payload["effective_sample_sizes"][skill])
+            for skill in payload["skill_ids"]
+        }
+        updater.evidence_strengths = updater.effective_sample_sizes
+        updater.entropies = {
+            skill: updater._calculate_entropy(value) for skill, value in updater.beliefs.items()
+        }
+        updater.global_entropy_sum = float(sum(updater.entropies.values()))
+        return updater
+
     def ensure_skill(self, skill):
         """Add a previously unseen skill without changing existing evidence."""
         skill = str(skill)

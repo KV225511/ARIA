@@ -46,12 +46,8 @@ sessions: Dict[str, Dict[str, Any]] = {}
 llm_gen = None
 tts_engine = None
 
-# Pre-load heavy singletons
-try:
-    llm_gen = LLMQuestionGenerator()
-    tts_engine = TTSAvatarBaseline()
-except Exception as e:
-    logger.error(f"Failed to load singletons: {e}")
+# The served ASGI app is replaced by backend.api at the end of this compatibility
+# module. Avoid loading the retired in-memory orchestrator's heavy singletons.
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     """Helper to extract text from a PDF memory stream using PyMuPDF."""
@@ -341,3 +337,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         if session_id in sessions:
             logger.info(f"Cleaning up session: {session_id}")
             del sessions[session_id]
+
+
+# The versioned application now lives in backend.api.  Keeping this module as
+# the Uvicorn entry point avoids changing operator commands while removing the
+# legacy routes from the served ASGI application.
+from backend.api import app, transcribe_candidate_audio  # noqa: E402,F401

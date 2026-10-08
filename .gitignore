@@ -1,5 +1,9 @@
 .venv/
 .env
+.aria-private/
+data/private_documents/
+data/deletion-ledger.jsonl
+postgres-data/
 
 __pycache__/
 *.py[cod]

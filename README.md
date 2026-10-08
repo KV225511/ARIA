@@ -130,6 +130,8 @@ See [ARIA_RL_IMPROVEMENT_CHANGES.md](ARIA_RL_IMPROVEMENT_CHANGES.md) for the com
 - [Ollama](https://ollama.com/) with the configured local model;
 - `ffmpeg` available on `PATH` for recorded audio answers;
 - optional NVIDIA CUDA support for the full speech, vision, and prosody stack.
+- Docker Desktop for the local PostgreSQL 17 database;
+- a Google OAuth web client with the callback `http://localhost:8000/api/auth/google/callback`.
 
 ### Install
 
@@ -141,6 +143,11 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
+Copy-Item .env.example .env
+python scripts/generate_dev_keys.py
+# Copy the printed ARIA_OAUTH_ENCRYPTION_KEY into .env, then add your
+# ARIA_GOOGLE_CLIENT_ID and ARIA_GOOGLE_CLIENT_SECRET values.
+
 ollama pull llama3.1
 
 Set-Location frontend
@@ -150,7 +157,7 @@ Set-Location ..
 
 ### Run the Application
 
-The launcher starts the FastAPI backend on port `8000` and the Vite frontend on port `5173`:
+The launcher starts PostgreSQL, applies Alembic migrations, starts the durable worker and FastAPI backend on port `8000`, and runs the Vite frontend on port `5173`:
 
 ```powershell
 .\run.ps1
@@ -160,9 +167,13 @@ Or run the services separately:
 
 ```powershell
 # Terminal 1 — repository root
+.\.venv\Scripts\alembic.exe upgrade head
 .\.venv\Scripts\uvicorn.exe app:app --reload --port 8000
 
-# Terminal 2
+# Terminal 2 — repository root
+.\.venv\Scripts\python.exe -m backend.worker
+
+# Terminal 3
 Set-Location frontend
 npm run dev
 ```
@@ -178,6 +189,12 @@ ARIA reads the following environment variables, including values placed in a roo
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama service used by ontology, question, and report generation |
 | `OLLAMA_MODEL` | `llama3.1` | Live ontology/question/report model |
 | `ARIA_DEVICE` | `cuda` | Primary ML execution device; use `cpu` when CUDA is unavailable |
+| `ARIA_DATABASE_URL` | local PostgreSQL | Async application database connection |
+| `ARIA_GOOGLE_CLIENT_ID` / `ARIA_GOOGLE_CLIENT_SECRET` | none | Google OpenID Connect web client |
+| `ARIA_OAUTH_ENCRYPTION_KEY` | none | Fernet key for temporary PKCE verifier encryption |
+| `ARIA_JWT_PRIVATE_KEY_PATH` / `ARIA_JWT_PUBLIC_KEY_PATH` | `.aria-private/…` | ARIA access-token signing keys |
+| `ARIA_PUBLIC_ORIGIN` | `http://localhost:5173` | Exact permitted browser origin |
+| `ARIA_STORAGE_ROOT` | `data/private_documents` | Private local PDF storage root |
 | `ARIA_CANDIDATE_MODEL` | `qwen2.5:7b` | Synthetic candidate model used during rollout generation |
 | `ARIA_EVALUATOR_MODEL` | `gemma3:4b` | Independent semantic evaluator used during rollout generation |
 | `L2CS_WEIGHTS_PATH` | `models/L2CSNet_gaze360.pkl` | Gaze-estimation checkpoint path |

@@ -5,6 +5,14 @@ $rootDir = (Get-Location).Path
 
 Write-Host "ARIA root: $rootDir" -ForegroundColor Cyan
 
+# --- Start PostgreSQL and apply the approved schema ---
+Write-Host "Starting PostgreSQL..." -ForegroundColor Cyan
+docker compose up -d postgres
+if ($LASTEXITCODE -ne 0) { throw "PostgreSQL could not be started." }
+$alembic = "$rootDir\.venv\Scripts\alembic.exe"
+& $alembic upgrade head
+if ($LASTEXITCODE -ne 0) { throw "Database migrations failed." }
+
 # --- Cleanup stale backend process on port 8000 ---
 $existing = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
 if ($existing) {
@@ -19,6 +27,10 @@ $uvicorn = "$rootDir\.venv\Scripts\uvicorn.exe"
 Write-Host "Using uvicorn: $uvicorn" -ForegroundColor DarkGray
 Write-Host "Starting ARIA Backend (uvicorn)..." -ForegroundColor Cyan
 Start-Process "powershell.exe" -ArgumentList "-NoExit", "-Command", "Set-Location '$rootDir'; & '$uvicorn' app:app --reload --port 8000"
+
+# The durable worker processes document extraction and deletion jobs.
+$python = "$rootDir\.venv\Scripts\python.exe"
+Start-Process "powershell.exe" -WindowStyle Hidden -ArgumentList "-Command", "Set-Location '$rootDir'; & '$python' -m backend.worker"
 
 # Wait for backend to bind
 Write-Host "Waiting for backend..." -ForegroundColor Yellow

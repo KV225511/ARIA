@@ -114,6 +114,24 @@ class SkillOntologyGraph:
             self.skill_metadata = {}
             return False
 
+    def restore_profile(self, payload: dict, experience: str) -> None:
+        """Restore the exact persisted ontology used by an interview session."""
+        profile = RoleProfile.from_dict(payload)
+        self._clear_graph()
+        self.role_profile = profile
+        self.skill_metadata = {skill.canonical_name: skill for skill in profile.skills}
+        names_by_id = {skill.skill_id: skill.canonical_name for skill in profile.skills}
+        for skill in profile.skills:
+            self._add_node(skill.canonical_name)
+        for skill in profile.skills:
+            for prerequisite_id in skill.prerequisite_ids:
+                prerequisite = names_by_id.get(prerequisite_id)
+                if prerequisite:
+                    self._add_edge(prerequisite, skill.canonical_name)
+        self._validate_graph()
+        self.inferred_role = profile.role_title
+        self.inferred_experience = experience
+
     @staticmethod
     def _infer_experience(resume_text: str) -> str:
         text = resume_text.casefold()

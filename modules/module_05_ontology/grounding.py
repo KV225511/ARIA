@@ -86,6 +86,30 @@ class RoleProfile:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, payload: dict) -> "RoleProfile":
+        """Restore a persisted, versioned role profile without rerunning extraction."""
+        skills = []
+        for item in payload.get("skills", []):
+            item = dict(item)
+            item["aliases"] = tuple(item.get("aliases", ()))
+            item["prerequisite_ids"] = tuple(item.get("prerequisite_ids", ()))
+            item["jd_evidence"] = tuple(
+                EvidenceSpan(**span) for span in item.get("jd_evidence", ())
+            )
+            item["resume_evidence"] = tuple(
+                EvidenceSpan(**span) for span in item.get("resume_evidence", ())
+            )
+            skills.append(GroundedSkill(**item))
+        return cls(
+            schema_version=payload["schema_version"],
+            normalized_document_hash=payload["normalized_document_hash"],
+            role_title=payload["role_title"],
+            role_domain=payload["role_domain"],
+            skills=tuple(skills),
+            acronym_resolutions=tuple(payload.get("acronym_resolutions", ())),
+        )
+
     def skill(self, skill_id_or_name: str) -> GroundedSkill | None:
         key = str(skill_id_or_name).casefold()
         return next(

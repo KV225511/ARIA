@@ -2,19 +2,19 @@
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — awaiting owner review; implementation is not authorized** |
-| Version | 0.1 |
+| Status | **APPROVED — implementation authorized** |
+| Version | 1.0 |
 | Prepared | 2026-10-08 |
 | Decision owner | Raghav Sejpal |
 | Scope | Google login, ARIA JWT sessions, private document uploads, owned interviews, durable questions and answers |
 | Confirmed preferences | Google only initially; local development first, hosted pilot later; PostgreSQL preferred |
-| Approval record | Not yet approved |
+| Approval record | Approved by Raghav Sejpal on 2026-10-08 by instruction to implement this specification |
 
 ## 1. Purpose and specification workflow
 
 ARIA must reliably identify who uploaded each résumé and job description, requested each interview, received each question, and submitted each answer. The initial release must support private interview history that survives browser refreshes and backend restarts.
 
-This document is the proposed implementation contract. **MUST** identifies a required behavior after approval; **SHOULD** identifies a recommendation whose exception must be documented. All numeric limits and architecture choices remain proposals until this specification is approved. The confirmed preferences above do not constitute approval of the whole specification.
+This document is the approved implementation contract. **MUST** identifies required behavior; **SHOULD** identifies a recommendation whose exception must be documented. Numeric limits and architecture choices in this version are approved defaults unless a later amendment changes them.
 
 Workflow:
 
@@ -558,25 +558,26 @@ Commit coherent completed changes with requirement IDs and relevant test evidenc
 |---|---|---|---|
 | D-01 | Initial identity provider | Google only | **Confirmed by user** |
 | D-02 | Rollout | Local development first; hosted pilot later | **Confirmed by user** |
-| D-03 | Database and access stack | PostgreSQL 17 + SQLAlchemy 2 + Psycopg 3 + Alembic | PostgreSQL preferred; detailed stack pending approval |
-| D-04 | Auth ownership | ARIA issues JWT/refresh sessions after Google OIDC; secure cookies and same-origin UI | Proposed; choosing managed Supabase Auth would require revising sections 5–6 |
-| D-05 | File formats and reuse | PDF only; one file of each kind per interview; reusable immutable uploads; proposed limits in section 7 | Pending approval |
-| D-06 | Audio and accepted-answer editing | Save transcript only; transient raw audio; accepted answers immutable in v1 | Pending approval |
-| D-07 | Retention and consent | Section 9 defaults; no training reuse | Pending approval |
+| D-03 | Database and access stack | PostgreSQL 17 + SQLAlchemy 2 + Psycopg 3 + Alembic | **Approved** |
+| D-04 | Auth ownership | ARIA issues JWT/refresh sessions after Google OIDC; secure cookies and same-origin UI | **Approved** |
+| D-05 | File formats and reuse | PDF only; one file of each kind per interview; reusable immutable uploads; proposed limits in section 7 | **Approved** |
+| D-06 | Audio and accepted-answer editing | Save transcript only; transient raw audio; accepted answers immutable in v1 | **Approved** |
+| D-07 | Retention and consent | Section 9 defaults; no training reuse | **Approved** |
 | D-08 | Hosted provider/storage/region/budget and backup deletion ledger | Prefer Neon DB; choose private object store and region together before pilot | Deferred to hosted decision; not required to begin local implementation after spec approval |
-| D-09 | Multiple live connections | One writer connection per interview with a PostgreSQL lease, 15-second heartbeat, 45-second expiry, and explicit takeover; other tabs are read-only | Pending approval; schema and protocol specified in sections 6–8 |
-| D-10 | Content/history scope | Persist all accepted final questions and answer attempts; rejected generation metadata only; transcript/history UI without placeholder assessment scores | Pending approval |
+| D-09 | Multiple live connections | One writer connection per interview with a PostgreSQL lease, 15-second heartbeat, 45-second expiry, and explicit takeover; other tabs are read-only | **Approved** |
+| D-10 | Content/history scope | Persist all accepted final questions and answer attempts; rejected generation metadata only; transcript/history UI without placeholder assessment scores | **Approved** |
 
 Approval checklist:
 
-- [ ] Resolve D-03 through D-07, D-09, and D-10; record any changes.
-- [ ] Confirm fixed two-file schema, ownership constraints, retry behavior, and deletion scope.
-- [ ] Approve the connection lease behavior and review checkpoint payload definitions before M0 exits.
-- [ ] Record approved specification version, approver, and date.
-- [ ] Explicitly authorize implementation against that version.
+- [x] Resolve D-03 through D-07, D-09, and D-10; record any changes.
+- [x] Confirm fixed two-file schema, ownership constraints, retry behavior, and deletion scope.
+- [x] Approve the connection lease behavior and review checkpoint payload definitions before M0 exits.
+- [x] Record approved specification version, approver, and date.
+- [x] Explicitly authorize implementation against that version.
 
 ## 13. Change log
 
 | Version | Date | Change |
 |---|---|---|
 | 0.1 | 2026-10-08 | Initial review draft grounded in the live app; confirmed Google-only login and local-first rollout; proposed PostgreSQL schema, auth lifecycle, storage, persistence, API contracts, acceptance criteria, and approval gate |
+| 1.0 | 2026-10-08 | Approved by the decision owner through the instruction to implement the specification; D-03 through D-07, D-09, and D-10 accepted as written |
