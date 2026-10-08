@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch, newId, responseData } from '../api';
 
 
-function UploadSlot({ kind, title, hint, document, onReady }) {
+function UploadSlot({ kind, title, hint, document, onReady, disabled }) {
   const inputRef = useRef(null);
   const [status, setStatus] = useState(document?.status || 'idle');
   const [name, setName] = useState(document?.original_filename || '');
@@ -56,14 +56,14 @@ function UploadSlot({ kind, title, hint, document, onReady }) {
   return (
     <div className="document-field">
       <div className="field-heading"><label>{title}</label><span>PDF · 10 MB max</span></div>
-      <button type="button" className={`file-dropzone ${status !== 'idle' ? 'has-file' : ''}`} onClick={() => inputRef.current?.click()}>
+      <button type="button" className={`file-dropzone ${status !== 'idle' ? 'has-file' : ''}`} disabled={disabled} onClick={() => inputRef.current?.click()}>
         <span className="file-copy">
           <strong>{name || 'Choose a PDF'}</strong>
           <small>{error || (status === 'idle' ? hint : status.replaceAll('_', ' '))}</small>
         </span>
-        <span className="file-action">{status === 'processing' || status === 'uploading' ? 'Working…' : 'Browse'}</span>
+        <span className="file-action">{disabled ? 'Consent required' : (status === 'processing' || status === 'uploading' ? 'Working…' : 'Browse')}</span>
       </button>
-      <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(event) => upload(event.target.files[0])} />
+      <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden disabled={disabled} onChange={(event) => upload(event.target.files[0])} />
     </div>
   );
 }
@@ -74,7 +74,10 @@ function Dashboard({ user, onOpenInterview, onLogout }) {
   const [jd, setJd] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [consentVersion, setConsentVersion] = useState(user.consent_version);
+  const [consentLoading, setConsentLoading] = useState(false);
   const [error, setError] = useState('');
+  const consentCurrent = consentVersion === user.required_consent_version;
 
   const loadHistory = async () => {
     try {
@@ -86,6 +89,23 @@ function Dashboard({ user, onOpenInterview, onLogout }) {
   };
 
   useEffect(() => { loadHistory(); }, []);
+
+  const recordConsent = async () => {
+    setConsentLoading(true);
+    setError('');
+    try {
+      const data = await responseData(await apiFetch('/api/me/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: user.required_consent_version }),
+      }));
+      setConsentVersion(data.consent_version);
+    } catch (consentError) {
+      setError(consentError.message);
+    } finally {
+      setConsentLoading(false);
+    }
+  };
 
   const waitForInterview = async (id) => {
     for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -106,14 +126,6 @@ function Dashboard({ user, onOpenInterview, onLogout }) {
     setLoading(true);
     setError('');
     try {
-      if (user.consent_version !== user.required_consent_version) {
-        await responseData(await apiFetch('/api/me/consent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ version: user.required_consent_version }),
-        }));
-        user.consent_version = user.required_consent_version;
-      }
       const interview = await responseData(await apiFetch('/api/interviews', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': newId() },
@@ -142,11 +154,24 @@ function Dashboard({ user, onOpenInterview, onLogout }) {
         <section className="setup-card">
           <div className="card-heading"><div><p className="section-kicker">New session</p><h2>Build the interview</h2></div><span className="step-label">2 documents</span></div>
           <form onSubmit={prepare}>
-            <UploadSlot kind="job_description" title="Job description" hint="Role, responsibilities, and requirements" document={jd} onReady={setJd} />
-            <UploadSlot kind="resume" title="Candidate résumé" hint="Your background and experience" document={resume} onReady={setResume} />
+            <div className={`consent-control ${consentCurrent ? 'is-complete' : ''}`}>
+              <div>
+                <strong>{consentCurrent ? 'Privacy consent recorded' : 'Allow document processing'}</strong>
+                <small>I consent to ARIA extracting and storing these documents and interview responses for this account. This does not permit training use or external LLM processing.</small>
+              </div>
+              {consentCurrent ? (
+                <span className="consent-status">Accepted</span>
+              ) : (
+                <button type="button" onClick={recordConsent} disabled={consentLoading}>
+                  {consentLoading ? 'Saving…' : 'Accept and continue'}
+                </button>
+              )}
+            </div>
+            <UploadSlot disabled={!consentCurrent} kind="job_description" title="Job description" hint="Role, responsibilities, and requirements" document={jd} onReady={setJd} />
+            <UploadSlot disabled={!consentCurrent} kind="resume" title="Candidate résumé" hint="Your background and experience" document={resume} onReady={setResume} />
             <p className="privacy-note">Files are private to your account. Audio is transcribed and then discarded.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
-            <button className="primary-button" disabled={!resume || !jd || loading}>
+            <button className="primary-button" disabled={!consentCurrent || !resume || !jd || loading}>
               <span>{loading ? 'Preparing interview' : 'Prepare interview'}</span><span aria-hidden="true">→</span>
             </button>
           </form>

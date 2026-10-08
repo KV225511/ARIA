@@ -255,6 +255,64 @@ svg {
   margin-top: 24px;
 }
 
+.consent-control {
+  margin-bottom: 24px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #f7eee3;
+  border-left: 3px solid var(--accent);
+}
+
+.consent-control.is-complete {
+  background: #f1f5ef;
+  border-left-color: #66806b;
+}
+
+.consent-control strong,
+.consent-control small {
+  display: block;
+}
+
+.consent-control strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.consent-control small {
+  max-width: 520px;
+  margin-top: 5px;
+  color: #696b64;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.consent-control button {
+  flex: 0 0 auto;
+  padding: 9px 11px;
+  color: #fff;
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.consent-control button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.consent-status {
+  color: #526b57;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .field-heading {
   margin-bottom: 9px;
   display: flex;
@@ -301,6 +359,13 @@ svg {
   background: #f4f6f1;
   border-style: solid;
   border-color: #98a79a;
+}
+
+.file-dropzone:disabled {
+  color: #8b8c86;
+  background: #f0efea;
+  border-color: #d2d0c8;
+  cursor: not-allowed;
 }
 
 .file-icon {
