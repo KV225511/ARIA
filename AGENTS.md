@@ -8,6 +8,12 @@ ARIA helps students and job seekers practice role-specific technical interviews 
 
 Today, the FastAPI/React path creates role-grounded sessions, accepts typed and recorded answers, transcribes WebM audio through PyAV and faster-whisper, and streams draft question chunks through the interview WebSocket before confirming the grounded final question. Audio failures report an error without closing the session; speech recognition falls back to CPU when CUDA is unavailable. The live loop still uses placeholder evidence scores and a fixed three-action cycle; it does not load the saved calibrated belief configuration or trained policy checkpoint. Several modules and final reporting remain disconnected. Document this behavior honestly until integration is verified.
 
+## Specification Approval Gate
+
+Authentication and durable interview ownership are now planned through spec-driven development. The review draft is `docs/specs/001-auth-and-interview-persistence.md`. The user has selected Google as the initial login provider and local development first, with a hosted pilot later. PostgreSQL is preferred. Obtain the user's explicit approval of the finalized specification before implementing its authentication, database, storage, API, or frontend changes. Record approved decisions and map implementation work and acceptance tests to requirement IDs; update the specification before changing an approved contract. Draft recommendations are not approved implementation decisions.
+
+The current live application has no authenticated ownership or durable session history. Its in-memory sessions are deleted on WebSocket disconnect. Module 15's standalone SQLite trajectory logger is not the live application's account or interview-history store. Preserve existing offline datasets and model artifacts; do not infer owners for legacy data.
+
 ## Architecture and Boundaries
 
 Target flow: résumé and job description → grounded skill ontology → question → candidate response → perception and scored evidence → per-skill competency beliefs → **33-feature policy state and valid-action mask** → frozen eight-action policy → grounded next question → frontend. At completion, recorded evidence and the interview trajectory feed evaluation, feedback, and permitted persistence. The **72-feature multimodal fusion vector is separate** from the policy state.
