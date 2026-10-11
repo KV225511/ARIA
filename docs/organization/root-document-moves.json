@@ -1,0 +1,189 @@
+{
+    "schema_version":  1,
+    "organized_on":  "2026-10-12",
+    "operation":  "Move independent root documents without changing existing contents; retain original paths required by links or scripts.",
+    "moved_files":  [
+                        {
+                            "original_path":  "ARIA_CALIBRATION_V4_RUNBOOK.md",
+                            "organized_path":  "docs/runbooks/calibration/ARIA_CALIBRATION_V4_RUNBOOK.md",
+                            "category":  "docs/runbooks/calibration",
+                            "sha256":  "9fe57225e7b395cf46ae42f4ae306b689b10737e11b084af917e257110240992",
+                            "size_bytes":  2681,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "ARIA_CALIBRATION_V5_RUNBOOK.md",
+                            "organized_path":  "docs/runbooks/calibration/ARIA_CALIBRATION_V5_RUNBOOK.md",
+                            "category":  "docs/runbooks/calibration",
+                            "sha256":  "4e4dc7b917cf2e8dff41bc9585d478d096ec0fd848bd7c64cc0125a4ded197b1",
+                            "size_bytes":  3105,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "ARIA_CALIBRATION_V6_RUNBOOK.md",
+                            "organized_path":  "docs/runbooks/calibration/ARIA_CALIBRATION_V6_RUNBOOK.md",
+                            "category":  "docs/runbooks/calibration",
+                            "sha256":  "d1769a9d0efbafd164d5b5cef7c230119b0fee2e917068aa408d5b6b34d194b8",
+                            "size_bytes":  6567,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "ARIA_PIPELINE_V3_RUNBOOK.md",
+                            "organized_path":  "docs/runbooks/dataset-generation/ARIA_PIPELINE_V3_RUNBOOK.md",
+                            "category":  "docs/runbooks/dataset-generation",
+                            "sha256":  "edb6e1dda4ba1469e76981dc2c64de8b21d6c9166bad4ae78a1f22960e14fdff",
+                            "size_bytes":  8824,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "ARIA_V3_OPERATOR_RUNBOOK.md",
+                            "organized_path":  "docs/runbooks/dataset-generation/ARIA_V3_OPERATOR_RUNBOOK.md",
+                            "category":  "docs/runbooks/dataset-generation",
+                            "sha256":  "56f17d15e981f00fc4906dfc3d476d36909e36e1895747a7c274c0d20a42ca0f",
+                            "size_bytes":  13412,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "ARIA_V3_KRISSH_COMMANDS.md",
+                            "organized_path":  "docs/runbooks/dataset-generation/ARIA_V3_KRISSH_COMMANDS.md",
+                            "category":  "docs/runbooks/dataset-generation",
+                            "sha256":  "3fa7b56a9b7507cfb06d37341e9e5b6e0909b0e1993cef01a5ff9094566270f9",
+                            "size_bytes":  8187,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "DATASET_GENERATION_AND_TRAINING_RUNBOOK.md",
+                            "organized_path":  "docs/runbooks/dataset-generation/DATASET_GENERATION_AND_TRAINING_RUNBOOK.md",
+                            "category":  "docs/runbooks/dataset-generation",
+                            "sha256":  "5ea6ff24d9e3944380585831cf12a7a68e9c39d46d1dd215b5ad9f9dfbd1195b",
+                            "size_bytes":  9470,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "SOTA_TRAINING_RUNBOOK.md",
+                            "organized_path":  "docs/runbooks/benchmarks/SOTA_TRAINING_RUNBOOK.md",
+                            "category":  "docs/runbooks/benchmarks",
+                            "sha256":  "70eef9a08600291f2546ad055c8e45e2d6e7606d3378ba882e8bd4352bc35f40",
+                            "size_bytes":  3692,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "ARIA_TRAINING_AND_DEBUGGING_REPORT.md",
+                            "organized_path":  "docs/reports/training/ARIA_TRAINING_AND_DEBUGGING_REPORT.md",
+                            "category":  "docs/reports/training",
+                            "sha256":  "32148e406ebefb13f9a14dbe824d82c1ea34393cbf4232036b009eb165a372e9",
+                            "size_bytes":  15225,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "council-report-20260830-201134Z-q9ec87cb9.html",
+                            "organized_path":  "docs/decisions/council/2026-08-30/council-report-20260830-201134Z-q9ec87cb9.html",
+                            "category":  "docs/decisions/council/2026-08-30",
+                            "sha256":  "63ad2853e9ff374e4e305afa2139f21ee0b4ff927bcf4aed5008630732b409f5",
+                            "size_bytes":  20162,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "council-transcript-20260830-201134Z-q9ec87cb9.md",
+                            "organized_path":  "docs/decisions/council/2026-08-30/council-transcript-20260830-201134Z-q9ec87cb9.md",
+                            "category":  "docs/decisions/council/2026-08-30",
+                            "sha256":  "765d908741df79b66accf97fe433b9ef3d09f091dce4067ec17523cc5c4dc97b",
+                            "size_bytes":  23584,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "council-report-20260910-114704Z-q0a6f95eb.html",
+                            "organized_path":  "docs/decisions/council/2026-09-10/council-report-20260910-114704Z-q0a6f95eb.html",
+                            "category":  "docs/decisions/council/2026-09-10",
+                            "sha256":  "972c25a586db3b1fbe429739b67eb08df95fb638ce342c99040dd93bea362968",
+                            "size_bytes":  2203,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "council-transcript-20260910-114704Z-q0a6f95eb.md",
+                            "organized_path":  "docs/decisions/council/2026-09-10/council-transcript-20260910-114704Z-q0a6f95eb.md",
+                            "category":  "docs/decisions/council/2026-09-10",
+                            "sha256":  "a6d0380d3c036636673c2b6606b8bc9957efa47199098d6dce12e0819f2e7e7e",
+                            "size_bytes":  3078,
+                            "git_tracked":  true
+                        },
+                        {
+                            "original_path":  "ARIA_BCSE497J_Project_I_Report.docx",
+                            "organized_path":  "docs/reports/academic/project-i/ARIA_BCSE497J_Project_I_Report.docx",
+                            "category":  "docs/reports/academic/project-i",
+                            "sha256":  "069ed100996a0261ae338728adb8a8052e4295f46ea4df0ea5796ad8ab89fb34",
+                            "size_bytes":  2920494,
+                            "git_tracked":  false
+                        },
+                        {
+                            "original_path":  "ARIA_BCSE497J_Project_I_Report_Humanized.docx",
+                            "organized_path":  "docs/reports/academic/project-i/ARIA_BCSE497J_Project_I_Report_Humanized.docx",
+                            "category":  "docs/reports/academic/project-i",
+                            "sha256":  "bc9a5614a828894ade9dc590189ef902451b4f98a8384bfc9758029a43007e86",
+                            "size_bytes":  5224235,
+                            "git_tracked":  false
+                        },
+                        {
+                            "original_path":  "vit-logo.jpg",
+                            "organized_path":  "docs/reports/academic/project-i/assets/vit-logo.jpg",
+                            "category":  "docs/reports/academic/project-i/assets",
+                            "sha256":  "10f96a44345149c82559f1b6fe854fbd64634a11e6cbaf485f1a84aaa0bd2a3f",
+                            "size_bytes":  5844,
+                            "git_tracked":  false
+                        }
+                    ],
+    "retained_root_documents":  [
+                                    {
+                                        "path":  "README.md",
+                                        "sha256":  "3336f93f297022bb4295fd8e49eebc8c72bfd719e5df10a21995962f034d9646",
+                                        "size_bytes":  15305
+                                    },
+                                    {
+                                        "path":  "AGENTS.md",
+                                        "sha256":  "54d60463ff2699ae24f75564c06502842efcbbeb1ce4f4a26983bc40657365eb",
+                                        "size_bytes":  8031
+                                    },
+                                    {
+                                        "path":  "architecture.md",
+                                        "sha256":  "82fd8f61a3f500a8c8179f455f410ecd48f466d762aa036c130b1f350939fce3",
+                                        "size_bytes":  11220
+                                    },
+                                    {
+                                        "path":  "ARIA_Coding_Assistant_Guide.md",
+                                        "sha256":  "ce798f57cc23ccaa11fbe93f5dfb0be9a0142413ee54c55aa6ca4592c7248d88",
+                                        "size_bytes":  32435
+                                    },
+                                    {
+                                        "path":  "ARIA_RL_IMPROVEMENT_CHANGES.md",
+                                        "sha256":  "d718b0a77674349259db6b333f20c24c5471bf565908ab6ee0cd4bf4fdd1a09f",
+                                        "size_bytes":  7544
+                                    },
+                                    {
+                                        "path":  "ARIA_Benchmark_Diagnosis.md",
+                                        "sha256":  "b262fba750b6a8221f6565ce37fe5e44d20b71127ce1d7f540d90580f2d351c5",
+                                        "size_bytes":  13034
+                                    },
+                                    {
+                                        "path":  "ARIA_PROJECT_CONTEXT_AND_RESULTS.md",
+                                        "sha256":  "c341c2e1ba429e0953d20c1894219c48fbcad2632d00d1f892ee4fbd18b19d10",
+                                        "size_bytes":  15718
+                                    },
+                                    {
+                                        "path":  "ARIA_updated.md",
+                                        "sha256":  "7fded378d4e16ff4f8d72cdeef49168f3302f9ff6564fe3718732913a8466c4c",
+                                        "size_bytes":  53897
+                                    },
+                                    {
+                                        "path":  "notes.md",
+                                        "sha256":  "2e009bbe91e4e9714f7eb3f6e2ac13f2af846e52ad4fbf002dcd011b6ae9900d",
+                                        "size_bytes":  56392
+                                    }
+                                ],
+    "verification":  {
+                         "algorithm":  "SHA-256",
+                         "moved_files_verified":  16,
+                         "retained_root_documents_verified":  9,
+                         "existing_tracked_files_verified":  442,
+                         "existing_file_contents_changed":  0
+                     }
+}
