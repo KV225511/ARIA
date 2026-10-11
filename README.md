@@ -1,215 +1,291 @@
-# ARIA — Autonomous Reinforcement-Based Interview Agent
+<div align="center">
 
-ARIA is a local-first research prototype for adaptive, multimodal technical interviews. Instead of following a fixed question list, ARIA models an interview as a partially observable decision process: it gathers evidence from each response, updates a probabilistic competency model, and selects the next interview strategy based on what remains uncertain.
+# ARIA: Autonomous Reinforcement-Based Interview Agent
 
-The project combines speech, vision, prosody, skill ontologies, Bayesian belief tracking, offline reinforcement learning, local LLM question generation, interview integrity signals, fairness auditing, reporting, and feedback logging in a modular 15-part architecture.
+### Local-first technical interview practice with grounded questions and probabilistic assessment.
 
-> **Project status:** all 15 module areas have prototype implementations. A polished React interface and FastAPI/WebSocket interview loop are available, but the full multimodal and learned-policy stack is not yet connected end to end. ARIA is a research system, not a production hiring or automated decision product.
+**Turn a résumé and job description into a role-specific interview.**
 
-## How ARIA Works
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)](#quick-start)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](#architecture)
+[![React 19](https://img.shields.io/badge/React-19-149ECA?style=flat-square&logo=react&logoColor=white)](frontend/)
+[![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?style=flat-square&logo=postgresql&logoColor=white)](backend/models.py)
+[![PyTorch](https://img.shields.io/badge/Offline_RL-PyTorch-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](#beliefs-and-policy)
 
-```text
-Job description + résumé
-          |
-          v
-Dynamic skill ontology
-          |
-          v
-Candidate audio + video + text
-          |
-          +--> speech / semantic evidence
-          +--> facial, gaze, and temporal signals
-          +--> prosody and response behavior
-          |
-          v
-72-dimensional multimodal representation
-          |
-          +--> cognitive-load context
-          +--> integrity and incongruence signals
-          +--> fairness monitoring
-          |
-          v
-Bayesian competency belief over skill nodes
-          |
-          v
-Interview policy action
-          |
-          v
-Locally generated question --> speech/UI --> next turn
-```
+[Quick start](#quick-start) · [Architecture](#architecture) · [Engineering details](#engineering-details) · [Evaluation](#evaluation) · [Development](#development) · [Documentation](#documentation)
 
-ARIA separates **what to ask** from **how to ask it**. The policy chooses one of eight interview actions—such as probing a foundation, following up, switching topics, or changing difficulty—while a local Ollama model turns that action and the current evidence into a natural question.
+<code>.\run.ps1</code>
 
-## Current Implementation
+<br /><br />
 
-| Layer | Modules | Implemented | Current integration state |
-|---|---:|---|---|
-| Perception and signal | 1–4 | Speech-to-text, semantic grading, facial landmarks, emotion, gaze, temporal action units, prosody, normalization, concatenation, and attention fusion | Implemented and tested as modules; only speech transcription is currently used by the live API |
-| Intelligence and control | 5–8 | Dynamic skill ontology, belief-v2 competency model, replay-v2 data pipeline, IQL training, environment, audits, calibration, and Ollama question generation | Ontology, belief updates, and question generation are live; the trained IQL checkpoint is not yet loaded by the web app |
-| Synthesis and interaction | 9 | Local TTS/avatar baseline plus browser speech synthesis | Browser TTS is live; lip-synchronized avatar output remains a future integration |
-| Cognitive and behavioral analysis | 10–13 | Cognitive-load classification, anti-gaming signals, cross-modal incongruence detection, and fairness auditing | Implemented and tested independently; not yet orchestrated in every live turn |
-| Evaluation and feedback | 14–15 | Structured report generation and SQLite trajectory/hiring-outcome logging | Implemented as services; not yet exposed as a complete post-interview product flow |
+<a href="docs/assets/aria-overview.svg"><img src="docs/assets/aria-overview.png" alt="ARIA system overview: the live React and FastAPI application uses PostgreSQL, private document storage, and local models. A separate offline pipeline calibrates beliefs and trains a 33-feature, eight-action IQL policy; integrating that policy into the live application remains in progress." width="1200" /></a>
 
-### Live Interview Application
+<br />
 
-The current application includes:
+</div>
 
-- a responsive React 19 and Vite interface;
-- drag-and-drop PDF setup for the job description and candidate résumé;
-- FastAPI session creation and PDF text extraction;
-- candidate-specific ontology adaptation;
-- a real-time WebSocket interview channel;
-- streaming local-LLM question generation;
-- typed and recorded candidate answers;
-- `ffmpeg` audio conversion and local speech transcription;
-- browser speech synthesis, camera preview, recording state, and a live transcript;
-- explicit connection, media, privacy, and interview-strategy states.
+ARIA helps students and job seekers practice technical interviews against a specific role. Upload a résumé and job description, answer by text or recorded audio, and return to your saved interview history. Local language models construct a grounded skill profile and generate questions tied to the source documents.
 
-The live orchestrator currently uses a simplified belief update after each answer. Multimodal fusion, calibrated semantic evidence, the learned IQL action policy, fairness signals, and final reporting still need to be wired into that loop before the application represents the complete architecture.
+The research architecture treats interviewing as sequential inference: maintain uncertainty over each skill, gather answer evidence, and choose the next action with an offline reinforcement-learning policy. Fifteen modules cover perception, beliefs, policy learning, question generation, and feedback.
 
-## The 15 Modules
+> **Current status:** the authenticated application, document processing, persisted interviews, streaming questions, and audio transcription are implemented. The live loop still uses placeholder evidence scores and a fixed three-action cycle. Calibrated beliefs and the trained IQL policy work in the offline pipeline; connecting them to the live interview, along with full multimodal analysis and final reporting, is the next integration milestone. ARIA is an interview-practice research prototype, not an automated hiring system.
 
-1. **Speech-to-Text and Semantic Grader** — transcription, timestamps, response latency, and answer scoring.
-2. **Vision Engine** — face landmarks, emotion, gaze, blinks, and temporal action-unit features.
-3. **Prosody Extractor** — pitch, speech rate, energy, jitter, MFCCs, and personal baselines.
-4. **Multimodal Fusion Engine** — canonical 72-feature schema, normalization, missing-modality handling, concatenation, and attention fusion.
-5. **Skill Ontology Graph** — role templates, prerequisite relationships, and résumé/JD adaptation.
-6. **Competency Belief Updater** — per-skill Bayesian evidence accumulation and an aggregate competency verdict.
-7. **RL Interview Policy** — eight-action environment, replay data preparation, Implicit Q-Learning, checkpoint selection, and policy evaluation gates.
-8. **LLM Question Generator** — contextual question generation and streaming through Ollama.
-9. **TTS and Avatar Baseline** — local speech synthesis and avatar-frame interface.
-10. **Cognitive Load Separator** — distinguishes low load, anxiety, and likely knowledge gaps.
-11. **Anti-Gaming Monitor** — gaze, latency, semantic-template, and assistance indicators.
-12. **Incongruence Detector** — compares semantic depth with vocal and behavioral confidence.
-13. **Fairness Auditor** — monitors exploration and treatment across interview trajectories.
-14. **Evaluation Engine** — competency scoring and structured narrative reports.
-15. **Feedback Logger** — stores trajectories and later hiring outcomes for controlled learning.
-
-## Belief-v2 and Offline RL
-
-The RL pipeline has been redesigned around immutable raw evidence, identity-safe dataset splits, deterministic replay, and locked evaluation.
-
-Key safeguards now include:
-
-- split isolation by connected résumé/JD identity components and content hashes;
-- an immutable, hash-addressed `BeliefModelConfig`;
-- training-only fitting of competency emission centers and scales;
-- validation-only tuning of repetition, effective-sample-size, aggregation, and abstention parameters;
-- explicit abstention when coverage, confidence, or evidence is insufficient;
-- a fixed 32-dimensional `aria-state-v2` representation;
-- replay of belief, state, reward, termination, labels, and action masks from raw transitions;
-- rejection of non-finite evidence and schema/configuration mismatches;
-- separate quality gates for raw evidence, validation calibration, locked testing, offline-RL support, and fresh learned-policy rollouts;
-- deterministic IQL training and atomic, metadata-rich checkpoint output;
-- a locked-test command that refuses to overwrite an existing report.
-
-### Benchmark Status
-
-The earlier benchmark produced roughly **0.39 micro-F1** and collapsed most terminal predictions into the Beginner class. That result was a metric over stored belief verdicts, not a valid evaluation of the learned IQL policy.
-
-The current target is **0.80–0.90 micro-F1**, but that result has **not** yet been established. The repository does not contain the raw transition dataset needed to produce a new measured result. Calibration cannot manufacture class information if evaluator scores are compressed or invalid, and fixed offline actions cannot honestly measure counterfactual policy performance.
-
-A defensible result requires:
-
-1. a sufficiently large, balanced, de-identified résumé/JD corpus;
-2. valid raw rollouts generated with distinct candidate and evaluator models;
-3. passing raw-evidence and offline-support gates;
-4. belief-v2 preparation and validation-only calibration;
-5. IQL training and checkpoint selection without reading test labels;
-6. fresh learned-policy rollouts tied to the selected checkpoint hash;
-7. one post-freeze evaluation on the locked test set.
-
-See [ARIA_RL_IMPROVEMENT_CHANGES.md](ARIA_RL_IMPROVEMENT_CHANGES.md) for the complete belief-v2 and replay-v2 design.
-
-## Quick Start
+## Quick start
 
 ### Prerequisites
 
-- Python 3.10 or newer;
-- Node.js and npm compatible with Vite 8;
-- [Ollama](https://ollama.com/) with the configured local model;
-- `ffmpeg` available on `PATH` for recorded audio answers;
-- optional NVIDIA CUDA support for the full speech, vision, and prosody stack.
-- Docker Desktop for the local PostgreSQL 17 database;
-- a Google OAuth web client with the callback `http://localhost:8000/api/auth/google/callback`.
+The commands below target **Windows PowerShell**, the project's development environment.
 
-### Install
+| Dependency | Used for |
+| --- | --- |
+| Python **3.11** | Backend, perception modules, and offline learning |
+| Node.js **22.12+** and npm | React 19 / Vite 8 frontend |
+| Docker Desktop with Compose | Local PostgreSQL 17 database |
+| Ollama | Local ontology and question generation |
+| `ffmpeg` on `PATH` | Decoding recorded audio for transcription |
+| Google OAuth web client | OpenID Connect login |
+
+Development targets an RTX 4060 laptop with 8 GB VRAM. Selected modules support CPU execution through `ARIA_DEVICE=cpu`; latency and simultaneous model residency depend on the enabled stack. Speech and perception components may download model weights on first use.
+
+### Install and configure
+
+For a fresh checkout:
 
 ```powershell
 git clone https://github.com/KV225511/ARIA.git
-cd ARIA
+Set-Location ARIA
 
-python -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 Copy-Item .env.example .env
 python scripts/generate_dev_keys.py
-# Copy the printed ARIA_OAUTH_ENCRYPTION_KEY into .env, then add your
-# ARIA_GOOGLE_CLIENT_ID and ARIA_GOOGLE_CLIENT_SECRET values.
-
-ollama pull llama3.1
 
 Set-Location frontend
 npm ci
 Set-Location ..
+
+ollama pull qwen2.5:7b
 ```
 
-### Run the Application
+The key generator creates local JWT signing keys and prints an `ARIA_OAUTH_ENCRYPTION_KEY`. Copy that value into `.env`, supply your Google client credentials, and add the Ollama settings:
 
-The launcher starts PostgreSQL, applies Alembic migrations, starts the durable worker and FastAPI backend on port `8000`, and runs the Vite frontend on port `5173`:
+```dotenv
+ARIA_GOOGLE_CLIENT_ID=your-google-web-client-id
+ARIA_GOOGLE_CLIENT_SECRET=your-google-web-client-secret
+ARIA_OAUTH_ENCRYPTION_KEY=the-value-printed-by-generate_dev_keys
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+Set the Google client's authorized redirect URI to `http://localhost:8000/api/auth/google/callback`. Use `http://localhost:5173` as the frontend origin. Setting `OLLAMA_MODEL` explicitly gives ontology and question generation the same installed model. Keep Ollama running before starting an interview.
+
+### Run the application
 
 ```powershell
 .\run.ps1
 ```
 
-Or run the services separately:
+The launcher starts PostgreSQL, applies migrations, starts the API and durable worker, then runs Vite. It clears an existing process on port `8000` before starting the backend.
+
+| Service | Address |
+| --- | --- |
+| Application | [localhost:5173](http://localhost:5173) |
+| Interactive API docs | [localhost:8000/docs](http://localhost:8000/docs) |
+| API and database health | [localhost:8000/api/health](http://localhost:8000/api/health) |
+
+Sign in with Google, accept the privacy consent, upload two text-extractable PDFs, and wait for processing to finish. Start an interview, submit typed or recorded answers, then resume it from history or explicitly complete or cancel it. PDF uploads are limited to **10 MB and 50 pages each**.
+
+<details>
+<summary><strong>Run the services separately</strong></summary>
+
+From the repository root, activate the virtual environment and start the database. Wait until `docker compose ps` reports PostgreSQL as healthy before applying migrations.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+docker compose up -d postgres
+docker compose ps
+python -m alembic upgrade head
+```
+
+Then use three terminals:
 
 ```powershell
 # Terminal 1 — repository root
-.\.venv\Scripts\alembic.exe upgrade head
 .\.venv\Scripts\python.exe -m backend.server --port 8000
 
 # Terminal 2 — repository root
 .\.venv\Scripts\python.exe -m backend.worker
 
-# Terminal 3
+# Terminal 3 — repository root
 Set-Location frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`. API documentation is available at `http://localhost:8000/docs`.
+The `backend.server` entry point selects a Windows-compatible event loop for Psycopg's asynchronous connections. Vite proxies `/api` and `/ws` to the backend.
 
-### Configuration
+</details>
 
-ARIA reads the following environment variables, including values placed in a root `.env` file:
+<details>
+<summary><strong>Configuration reference</strong></summary>
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama service used by ontology, question, and report generation |
-| `OLLAMA_MODEL` | `llama3.1` | Live ontology/question/report model |
-| `ARIA_DEVICE` | `cuda` | Primary ML execution device; use `cpu` when CUDA is unavailable |
-| `ARIA_DATABASE_URL` | local PostgreSQL | Async application database connection |
-| `ARIA_GOOGLE_CLIENT_ID` / `ARIA_GOOGLE_CLIENT_SECRET` | none | Google OpenID Connect web client |
-| `ARIA_OAUTH_ENCRYPTION_KEY` | none | Fernet key for temporary PKCE verifier encryption |
-| `ARIA_JWT_PRIVATE_KEY_PATH` / `ARIA_JWT_PUBLIC_KEY_PATH` | `.aria-private/…` | ARIA access-token signing keys |
-| `ARIA_PUBLIC_ORIGIN` | `http://localhost:5173` | Exact permitted browser origin |
-| `ARIA_STORAGE_ROOT` | `data/private_documents` | Private local PDF storage root |
-| `ARIA_CANDIDATE_MODEL` | `qwen2.5:7b` | Synthetic candidate model used during rollout generation |
-| `ARIA_EVALUATOR_MODEL` | `gemma3:4b` | Independent semantic evaluator used during rollout generation |
-| `L2CS_WEIGHTS_PATH` | `models/L2CSNet_gaze360.pkl` | Gaze-estimation checkpoint path |
+| Setting | Default or location | Purpose |
+| --- | --- | --- |
+| `ARIA_DATABASE_URL` | PostgreSQL at `127.0.0.1:55432/aria` | Async application database |
+| `ARIA_MIGRATION_DATABASE_URL` | Same local database | Alembic migrations |
+| `ARIA_PUBLIC_ORIGIN` | `http://localhost:5173` | Permitted frontend origin |
+| `ARIA_API_ORIGIN` | `http://localhost:8000` | API origin |
+| `ARIA_GOOGLE_REDIRECT_URI` | `http://localhost:8000/api/auth/google/callback` | OAuth callback |
+| `ARIA_JWT_PRIVATE_KEY_PATH` / `ARIA_JWT_PUBLIC_KEY_PATH` | `.aria-private/` | Access-token signing keys |
+| `ARIA_STORAGE_ROOT` | `data/private_documents` | Private uploaded PDFs |
+| `ARIA_DEVICE` | `cuda` | ML device selection |
+| `OLLAMA_HOST` | `http://localhost:11434` | Local model service |
+| `OLLAMA_MODEL` | Set explicitly during setup | Live ontology and question model |
+| `ARIA_CANDIDATE_MODEL` / `ARIA_EVALUATOR_MODEL` | `qwen2.5:7b` / `gemma3:4b` | Distinct models for offline synthetic evidence |
 
-Candidate and evaluator models must remain distinct when generating benchmark evidence.
+See [`.env.example`](.env.example), [backend settings](backend/settings.py), and [model settings](config/settings.py). JWT keys, credentials, and private candidate files belong in their existing ignored locations.
 
-## Testing
+</details>
 
-Run the Python test suite from the repository root:
+## Architecture
 
-```powershell
-pytest -q
+The application and offline learning pipeline have distinct execution paths. **`backend.api` is the served application**, re-exported by `app.py`. PostgreSQL owns account and interview history; Module 15's standalone SQLite logger serves a separate research workflow.
+
+```mermaid
+flowchart LR
+    Browser[React interview workspace]
+    Google[Google OpenID Connect]
+    API[FastAPI REST + WebSocket]
+    DB[(PostgreSQL)]
+    Files[(Private PDF storage)]
+    Worker[Durable background worker]
+    Grounding[Role profile + skill ontology]
+    LLM[Ollama question generation]
+    STT[ffmpeg + faster-whisper]
+
+    Browser -->|Login| Google
+    Google -->|Callback| API
+    Browser <-->|Authenticated requests + events| API
+    API <--> DB
+    API --> Files
+    Worker <--> DB
+    Worker -->|Extract documents| Files
+    Worker -->|Prepare interview| Grounding
+    API -->|Restore grounded context| Grounding
+    API <-->|Generate + validate questions| LLM
+    API <-->|Recorded audio to transcript| STT
 ```
 
-Check the frontend separately:
+The frontend owns uploads, recording, transcript display, connection state, and history navigation. The backend owns accepted answers, final questions, session revisions, checkpoints, and lifecycle transitions. Generated text can stream before validation; only an accepted question becomes authoritative history.
+
+### Module map
+
+| Area | Modules | Implementation and integration |
+| --- | --- | --- |
+| Perception | **01** speech and semantic grading · **02** vision · **03** prosody | Speech transcription is live. Semantic grading, facial/gaze features, acoustic features, and personal baselines have separate implementations. |
+| Fusion | **04** multimodal fusion | Fixed 72-feature schema, normalization, modality availability, attention gating, and concatenation baseline; pending live integration. |
+| Assessment | **05** skill ontology · **06** competency beliefs | Grounded ontology is live. The calibrated assessment path runs offline; live evidence remains a placeholder. |
+| Interview control | **07** offline RL · **08** question generation | Custom IQL training and validated inference exist offline. Grounded Ollama question generation is live. |
+| Speech delivery | **09** TTS/avatar | Browser speech synthesis is live. Server TTS is a separate prototype; avatar output remains a placeholder. |
+| Context and auditing | **10** cognitive load · **11** integrity signals · **12** incongruence · **13** fairness | Independent analysis modules; full live orchestration and validation remain open. |
+| Reports and feedback | **14** evaluation · **15** feedback | Structured reports, evaluation tooling, and SQLite trajectory logging; final user-facing reporting is pending. |
+
+Explore the [complete module diagram](docs/architecture/README.md) and its editable Excalidraw source. Older design documents preserve historical implementations; the contracts described here reflect the current code.
+
+## Engineering details
+
+### Durable interviews and recoverable operations
+
+- **Owned data at the database boundary.** Composite foreign keys bind interview inputs to both the account and document kind. A résumé belonging to another account cannot be attached as an interview input. See [database models](backend/models.py).
+- **Idempotent submissions.** Document and interview creation use request IDs. Answers bind a client submission ID to a request fingerprint, so a repeated accepted submission can return its original result while conflicting reuse is rejected. See [interview operations](backend/interviews.py).
+- **Versioned runtime checkpoints.** Accepted questions and answers advance the interview revision and persist reconstructable ontology/belief state. A question generated against a stale revision is rejected before commit.
+- **One active writer.** An authenticated WebSocket holds a PostgreSQL lease identified by a connection ID and epoch. Heartbeats renew the lease; other tabs can read and explicitly request control. Completion and cancellation invalidate active control.
+- **Durable background work.** Document processing, session preparation, and deletion use persisted jobs. Workers claim queued work with PostgreSQL row locks and `SKIP LOCKED`. Question generation records its own jobs and validation attempts. See [worker](backend/worker.py) and [API](backend/api.py).
+
+Google OIDC uses state, nonce, and PKCE. ARIA then issues RS256 access tokens and rotating refresh tokens in HttpOnly cookies, with origin and CSRF checks on browser writes. Uploaded PDFs use private filesystem storage; recorded audio is transient and only its transcript is retained.
+
+### Grounded question generation
+
+The [ontology and grounding layer](modules/module_05_ontology/grounding.py) connects skills to evidence spans in the job description and records résumé overlap. Question generation receives a selected action, target skill, source context, and conversation history. Outputs are normalized and checked before acceptance; rejected attempts receive corrective context and remain outside the final question history.
+
+This establishes a testable boundary: interview strategy selects **what to ask**, while the language model expresses **how to ask it**. The current live strategy cycles through fixed actions; the trained policy will replace that selector when integration is complete.
+
+<a id="beliefs-and-policy"></a>
+
+### Calibrated beliefs and the eight-action policy
+
+Each skill has a probability distribution over **Beginner, Mid, and Expert**. The [belief updater](modules/module_06_belief/belief_state.py) applies semantic-score likelihoods in log space, weights updates by evidence reliability, discounts repeated evidence, and caps effective sample size. Aggregation uses visited skills, with explicit coverage and abstention conditions. Behavioral inputs do not directly alter the technical-competency likelihood.
+
+The representations have separate contracts:
+
+| Representation | Shape | Meaning |
+| --- | --- | --- |
+| Multimodal fusion | **72 features** | 11 text, 33 vision, and 28 prosody features |
+| Policy state | **33 features**, `aria-state-v4` | Global and focused beliefs, entropy, coverage, turn/evidence progress, previous evidence/context, previous action, and availability flags |
+| Valid-action mask | **8 entries**, separate from state | Which interview actions are legal at this step |
+
+The eight actions are `increase_difficulty`, `decrease_difficulty`, `ask_follow_up_same_topic`, `switch_topic`, `probe_foundation`, `ask_behavioral`, `ask_situational`, and `conclude_interview`.
+
+[Custom PyTorch IQL](modules/module_07_rl/train.py) uses a value network, twin Q networks, and an eight-action policy network, each with two 256-unit hidden layers. Training combines expectile value regression, Q learning, and advantage-weighted policy learning. The [inference runtime](modules/module_07_rl/iql_policy.py) normalizes probabilities over legal actions and rejects malformed states or masks with no legal action.
+
+Loading a validated checkpoint requires the matching **calibration protocol, protocol state, development bundle, split manifest, and belief configuration**. The loader checks their provenance hashes, the ordered state features, checkpoint schema, embedded configuration, and network compatibility before inference.
+
+### Reproducible offline learning
+
+```mermaid
+flowchart LR
+    Sources[Resume + JD source inventory] --> Evidence[Grounded synthetic trajectories]
+    Evidence --> Audit[Raw evidence + action-support audits]
+    Audit --> Split[Identity-component splits]
+    Split --> Development[Training-only calibration selection]
+    Split --> Locked[Locked test]
+    Development --> Replay[Replay beliefs, states, rewards and masks]
+    Replay --> IQL[IQL training + checkpoint selection]
+    IQL --> Policy[Policy rollouts + off-policy evaluation]
+    Development --> Frozen[Frozen belief configuration]
+    Frozen --> Release[One-attempt stored-belief evaluation]
+    Locked --> Release
+```
+
+Résumés and job descriptions are grouped by connected identity components to prevent source overlap across splits. Replay derives states and rewards from recorded evidence under a frozen belief configuration. Logged action probabilities, masks, and schema versions make those transitions auditable.
+
+The v7 calibration protocol restricts selection to the original training components because its parent validation set has already been observed. Its locked test is reserved for the final release evaluation. Policy comparison tooling separately includes scripted baselines, behavior cloning, CQL, a Decision Transformer adaptation, and off-policy estimators.
+
+Existing datasets and trained checkpoints are preserved. Running the application does not retrain the policy. See the [experiment runbook](docs/runbooks/benchmarks/SOTA_TRAINING_RUNBOOK.md) and [v7 protocol implementation](modules/module_07_rl/calibration_protocol_v7.py) for the research workflow.
+
+## Evaluation
+
+The saved **v7 locked synthetic evaluation** measures terminal competency classification by the belief model across **91 episodes from 6 identity components**.
+
+| Metric | Recorded value |
+| --- | ---: |
+| Accuracy | **91.21%** |
+| Macro F1 | **0.9168** |
+| Balanced accuracy | **92.27%** |
+| Expected calibration error | **0.0870** |
+| Brier score | **0.1395** |
+| Classification coverage | **100%** |
+
+Source: [saved evaluation artifact](data/synthetic/v3/production-grounding-v10/derived-calibration-v7/release/locked_test_evaluation_v1.json). The report explicitly records `evaluates_learned_policy: false`. These are stored-belief results on synthetic episodes; they do not establish learned-policy benefit, human-interview performance, or fairness. See [reproducibility details](paper/reproducibility_statement.md) and [evaluation limitations](paper/limitations_and_nonclaims.md).
+
+## Development
+
+### Checks
+
+From the repository root with the virtual environment active:
+
+```powershell
+python -m pytest -q
+```
+
+For a focused check of authentication/persistence contracts, grounding, and policy inference:
+
+```powershell
+python -m pytest -q tests/test_auth_persistence_contracts.py tests/test_grounding.py tests/test_iql_policy.py
+```
+
+Frontend checks:
 
 ```powershell
 Set-Location frontend
@@ -217,102 +293,70 @@ npm run lint
 npm run build
 ```
 
-Tests cover speech, vision, prosody, fusion, ontology adaptation, beliefs, cognitive load, anti-gaming, final modules, dataset splitting, calibration, replay, metrics, locked evaluation, and IQL training contracts.
+Test files cover belief calibration, replay provenance, split isolation, action masks, grounded generation, document validation, and persistence contracts. GPU/openSMILE tests require their model dependencies. The PostgreSQL integration test is opt-in through `ARIA_RUN_POSTGRES_TESTS=1` and requires a migrated test database. Some legacy in-memory transport tests are explicitly skipped after the move to authenticated PostgreSQL sessions; a default test run is not a complete live-session acceptance test.
 
-## RL Data and Training Workflow
-
-Raw benchmark inputs are intentionally not committed. Place valid PDF documents in:
-
-```text
-data/resumes/
-data/jds/
-```
-
-Generate a balanced synthetic rollout log with distinct local models:
-
-```powershell
-$env:ARIA_CANDIDATE_MODEL = "qwen2.5:7b"
-$env:ARIA_EVALUATOR_MODEL = "llama3.1"
-
-python -m modules.module_07_rl.llm_simulator `
-  --sweep `
-  --max_episodes 300 `
-  --max_concurrent 2 `
-  --episode-retries 2 `
-  --seed 42
-```
-
-To preserve an existing raw corpus and add new episodes, use `--append`; a plain
-`--sweep` refuses to erase an existing dataset. See
-[the 8 GB Ollama append workflow](docs/OLLAMA_APPEND_WORKFLOW.md) for model
-residency settings, append safeguards, and the complete post-generation command
-sequence.
-
-Prepare the identity-safe split, calibration, and replay-v2 artifacts:
-
-```powershell
-python -m modules.module_07_rl.prepare_belief_pipeline `
-  data/synthetic/qwen_rl_dataset.json `
-  data/synthetic/derived
-```
-
-Train and select the IQL checkpoint using only train and validation data:
-
-```powershell
-python -m modules.module_07_rl.train `
-  --train-file data/synthetic/derived/splits/train.json `
-  --validation-file data/synthetic/derived/splits/validation.json `
-  --belief-config data/synthetic/derived/belief_model_v2.json
-```
-
-Only after calibration and checkpoint selection are frozen, write the locked stored-belief report once:
-
-```powershell
-python -m modules.module_07_rl.evaluate_locked_test `
-  data/synthetic/derived/splits/test.json `
-  data/synthetic/derived/belief_model_v2.json `
-  data/synthetic/derived/locked_test_report_v2.json `
-  --confirm-config-frozen
-```
-
-This stored-belief report does not replace fresh learned-policy rollouts.
-
-## Repository Layout
+### Repository map
 
 ```text
 ARIA/
-├── app.py                         # FastAPI and WebSocket orchestrator
-├── frontend/                      # React/Vite candidate interface
-├── config/                        # Runtime and model settings
-├── modules/                       # Modules 1–15
-│   ├── module_01_stt/
-│   ├── module_02_vision/
-│   ├── ...
-│   └── module_15_feedback/
-├── tests/                         # Unit, integration, RL, and benchmark tests
-├── tools/                         # Live calibration utilities
-├── docs/examples/belief_v2/      # Non-benchmark artifact schema examples
-├── architecture.md               # Detailed system design reference
-└── ARIA_RL_IMPROVEMENT_CHANGES.md
+├── app.py                 # Re-exports the served backend.api application
+├── backend/               # Auth, REST/WebSocket, storage, jobs, session state
+├── frontend/              # React/Vite interview UI and API client
+├── modules/               # Fifteen perception, assessment, and research modules
+├── config/                # Model settings and comparator registry
+├── migrations/            # Alembic database migrations
+├── scripts/               # Setup utilities, including local key generation
+├── tests/                 # Contract, module, integration, and benchmark tests
+├── tools/                 # Calibration and evaluation entry points
+├── data/                  # Source data and versioned research artifacts
+├── paper/                 # Manuscripts, figures, and reproducibility records
+├── docs/                  # Architecture, specifications, runbooks, and reports
+├── compose.yaml           # Local PostgreSQL service
+└── run.ps1                # Windows development launcher
 ```
 
-## Hardware Target
+### Next integration milestones
 
-ARIA is designed to operate locally on a system with an NVIDIA GeForce RTX 4060 and 8 GB of VRAM. The architecture uses quantized models, staged loading, and modular execution to stay within that budget. CPU execution is possible for selected modules but will be slower, and the full perception stack requires its external model weights to be present under `models/` or configured through environment variables.
+1. Connect measured semantic evidence and the saved calibrated belief configuration to live answers.
+2. Load the matching frozen IQL checkpoint and enforce the 33-feature state and action-mask contracts in live interviews.
+3. Complete multimodal availability handling, auxiliary analysis, and evidence-backed final reports.
+4. Verify full-session recovery, concurrent-session isolation, cancellation, cleanup, latency, and candidate experience.
 
-## Next Milestones
+## FAQ
 
-1. Build a balanced, de-identified source corpus and regenerate valid raw evidence.
-2. Run belief-v2 preparation, quality gates, IQL training, and fresh policy rollouts.
-3. Wire the selected IQL policy and calibrated semantic evidence into `app.py`.
-4. Connect vision, prosody, fusion, cognitive-load, integrity, and fairness signals to every live turn.
-5. Complete the report/feedback user flow and replace the avatar baseline with synchronized output.
-6. Perform privacy, accessibility, fairness, adversarial, and human-review validation before any real hiring use.
+<details>
+<summary><strong>Does the web application already use the learned policy?</strong></summary>
 
-## Further Documentation
+No. The offline training and inference path exists, but the live backend currently uses a fixed action cycle and placeholder evidence. The current interface is useful for exercising grounded conversation and session persistence; its belief displays are not validated assessments of an answer's quality.
 
-- [System architecture](architecture.md)
-- [RL benchmark diagnosis](ARIA_Benchmark_Diagnosis.md)
-- [Belief-v2 and replay-v2 changes](ARIA_RL_IMPROVEMENT_CHANGES.md)
-- [Frontend guide](frontend/README.md)
-- [Coding assistant and module contracts](ARIA_Coding_Assistant_Guide.md)
+</details>
+
+<details>
+<summary><strong>Does candidate content leave the machine?</strong></summary>
+
+With the documented local configuration, PDF processing, transcription, and Ollama inference run locally. Google handles sign-in. PDFs and interview text persist in local private storage and PostgreSQL; recorded audio is transient. Changing a model-service endpoint changes where its inputs are processed.
+
+</details>
+
+<details>
+<summary><strong>What if uploads stay queued or questions fail?</strong></summary>
+
+Confirm PostgreSQL is healthy and `python -m backend.worker` is running for document and session preparation. For question generation, check Ollama is running, the model named by `OLLAMA_MODEL` is installed, and the PDFs contain extractable text. Accepted answers are persisted before the next question is generated, so generation failures can be retried without replacing the saved answer.
+
+</details>
+
+## Documentation
+
+Start with the [categorized documentation index](docs/README.md).
+
+- [Authentication and interview persistence specification](docs/specs/001-auth-and-interview-persistence.md): approved contracts, lifecycle, storage, and acceptance criteria.
+- [Complete architecture diagram](docs/architecture/README.md): all fifteen modules, execution boundaries, and editable sources.
+- [Software engineering study guide](docs/interview-prep/ARIA-software-engineering-study-guide.md): a technical walkthrough of the repository.
+- [Experiment runbook](docs/runbooks/benchmarks/SOTA_TRAINING_RUNBOOK.md): evidence preflight, local baselines, and policy comparisons.
+- [Research reproducibility record](paper/reproducibility_statement.md): saved artifacts, configuration, and result provenance.
+
+---
+
+<div align="center">
+<sub>ARIA · Technical interview practice · Grounded generation, durable sessions, and offline policy research</sub>
+</div>

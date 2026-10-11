@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="884" viewBox="0 0 1440 884" role="img" aria-labelledby="title desc">
+<title id="title">ARIA application and offline learning architecture</title>
+<desc id="desc">The live React workspace communicates with FastAPI and local model services, backed by Google OIDC, PostgreSQL, private PDF storage, and background jobs. A separate offline pipeline performs evidence auditing, belief calibration, replay, and IQL training. Live scoring and policy integration remain in progress.</desc>
+<rect width="1440" height="884" rx="20" fill="#0b1220"/>
+<text x="64" y="54.96" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="600" fill="#6ddbc8">ARIA / ENGINEERING OVERVIEW</text>
+<text x="64" y="117.02" font-family="Segoe UI,Arial,sans-serif" font-size="42" font-weight="600" fill="#f0f5fc">From source documents to interview state.</text>
+<text x="64" y="161.82" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="400" fill="#abbcd1">A live application backed by a separate, reproducible learning pipeline.</text>
+<path d="M 64 190 L 1376 190" stroke="#29394f" stroke-width="2" fill="none"/>
+<text x="64" y="223.96" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="600" fill="#6ddbc8">01 / LIVE APPLICATION</text>
+<text x="1010" y="223.15" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="600" fill="#abbcd1">OWNER-SCOPED · LOCAL-FIRST</text>
+<rect x="64" y="250" width="400" height="158" rx="14" fill="#111f31" stroke="#29394f"/>
+<text x="88" y="281.34" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" fill="#6ddbc8">CLIENT</text>
+<text x="88" y="318.87" font-family="Segoe UI,Arial,sans-serif" font-size="27" font-weight="600" fill="#f0f5fc">Interview workspace</text>
+<text x="88" y="346.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">React 19 / Vite 8</text>
+<text x="88" y="369.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">PDF setup, text and recorded answers</text>
+<text x="88" y="392.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Transcript, history and browser speech</text>
+<rect x="520" y="250" width="400" height="158" rx="14" fill="#111f31" stroke="#29394f"/>
+<text x="544" y="281.34" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" fill="#6ddbc8">API</text>
+<text x="544" y="318.87" font-family="Segoe UI,Arial,sans-serif" font-size="27" font-weight="600" fill="#f0f5fc">Session orchestration</text>
+<text x="544" y="346.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">FastAPI / REST + WebSocket</text>
+<text x="544" y="369.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Grounded questions and saved answers</text>
+<text x="544" y="392.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Checkpoints, revisions and writer lease</text>
+<rect x="976" y="250" width="400" height="158" rx="14" fill="#111f31" stroke="#29394f"/>
+<text x="1000" y="281.34" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" fill="#6ddbc8">INFERENCE</text>
+<text x="1000" y="318.87" font-family="Segoe UI,Arial,sans-serif" font-size="27" font-weight="600" fill="#f0f5fc">Local model services</text>
+<text x="1000" y="346.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Ollama / faster-whisper</text>
+<text x="1000" y="369.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Role profile and skill ontology</text>
+<text x="1000" y="392.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Question generation and transcription</text>
+<path d="M 474 327 L 510 327" stroke="#6ddbc8" stroke-width="2" fill="none"/>
+<path d="M 503 322 L 510 327" stroke="#6ddbc8" stroke-width="2" fill="none"/>
+<path d="M 503 332 L 510 327" stroke="#6ddbc8" stroke-width="2" fill="none"/>
+<path d="M 930 327 L 966 327" stroke="#6ddbc8" stroke-width="2" fill="none"/>
+<path d="M 959 322 L 966 327" stroke="#6ddbc8" stroke-width="2" fill="none"/>
+<path d="M 959 332 L 966 327" stroke="#6ddbc8" stroke-width="2" fill="none"/>
+<path d="M 720 408 L 720 434" stroke="#6ddbc8" stroke-width="2" fill="none"/>
+<rect x="64" y="434" width="1312" height="81" rx="14" fill="#0e1a29" stroke="#29394f"/>
+<text x="88" y="461.53" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="600" fill="#6ddbc8">IDENTITY</text>
+<text x="88" y="493.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Google OIDC / ARIA auth sessions</text>
+<text x="544" y="461.53" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="600" fill="#6ddbc8">PERSISTENCE</text>
+<text x="544" y="493.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">PostgreSQL / private PDF storage</text>
+<text x="1000" y="461.53" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="600" fill="#6ddbc8">BACKGROUND JOBS</text>
+<text x="1000" y="493.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Extraction / preparation / deletion</text>
+<text x="64" y="551.34" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" fill="#f0c47f">LIVE POLICY TODAY</text>
+<text x="242" y="553.39" font-family="Segoe UI,Arial,sans-serif" font-size="19" font-weight="400" fill="#abbcd1">Fixed action cycle + placeholder evidence scores</text>
+<path d="M 64 581 L 1376 581" stroke="#29394f" stroke-width="2" fill="none"/>
+<text x="64" y="617.96" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="600" fill="#f0c47f">02 / OFFLINE LEARNING</text>
+<text x="928" y="617.15" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="600" fill="#f0c47f">LIVE POLICY INTEGRATION PENDING</text>
+<rect x="64" y="645" width="400" height="158" rx="14" fill="#111f31" stroke="#29394f"/>
+<text x="88" y="676.34" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" fill="#f0c47f">EVIDENCE</text>
+<text x="88" y="713.87" font-family="Segoe UI,Arial,sans-serif" font-size="27" font-weight="600" fill="#f0f5fc">Grounded trajectories</text>
+<text x="88" y="741.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Separate candidate and evaluator models</text>
+<text x="88" y="764.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Identity-component splits</text>
+<text x="88" y="787.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Recorded probabilities and legal masks</text>
+<rect x="520" y="645" width="400" height="158" rx="14" fill="#111f31" stroke="#29394f"/>
+<text x="544" y="676.34" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" fill="#f0c47f">ASSESSMENT</text>
+<text x="544" y="713.87" font-family="Segoe UI,Arial,sans-serif" font-size="27" font-weight="600" fill="#f0f5fc">Calibrated beliefs + replay</text>
+<text x="544" y="741.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Per-skill competency distributions</text>
+<text x="544" y="764.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Reliability, coverage and abstention</text>
+<text x="544" y="787.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Frozen configuration and provenance</text>
+<rect x="976" y="645" width="400" height="158" rx="14" fill="#111f31" stroke="#29394f"/>
+<text x="1000" y="676.34" font-family="Segoe UI,Arial,sans-serif" font-size="14" font-weight="600" fill="#f0c47f">CONTROL</text>
+<text x="1000" y="713.87" font-family="Segoe UI,Arial,sans-serif" font-size="27" font-weight="600" fill="#f0f5fc">IQL policy + evaluation</text>
+<text x="1000" y="741.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">33-feature state / 8 legal-action flags</text>
+<text x="1000" y="764.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Provenance-checked checkpoint inference</text>
+<text x="1000" y="787.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">Policy evaluation separate from beliefs</text>
+<path d="M 474 722 L 510 722" stroke="#f0c47f" stroke-width="2" fill="none"/>
+<path d="M 503 717 L 510 722" stroke="#f0c47f" stroke-width="2" fill="none"/>
+<path d="M 503 727 L 510 722" stroke="#f0c47f" stroke-width="2" fill="none"/>
+<path d="M 930 722 L 966 722" stroke="#f0c47f" stroke-width="2" fill="none"/>
+<path d="M 959 717 L 966 722" stroke="#f0c47f" stroke-width="2" fill="none"/>
+<path d="M 959 727 L 966 722" stroke="#f0c47f" stroke-width="2" fill="none"/>
+<text x="64" y="844.53" font-family="Segoe UI,Arial,sans-serif" font-size="13" font-weight="600" fill="#abbcd1">SEPARATE CONTRACTS</text>
+<text x="247" y="846.58" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="400" fill="#abbcd1">72-feature multimodal fusion  /  33-feature policy state  /  8 interview actions</text>
+</svg>
