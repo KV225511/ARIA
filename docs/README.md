@@ -12,6 +12,7 @@ Historical reports and plans describe the repository at the time they were writt
 | [Repository guidelines](../AGENTS.md) | Current goals, architecture boundaries, and development safeguards |
 | [Authentication and interview persistence specification](specs/001-auth-and-interview-persistence.md) | Approved authentication, ownership, and persistence contracts |
 | [Frontend guide](../frontend/README.md) | Frontend setup and development |
+| [Application launcher](../run.ps1) | Root PowerShell launcher; retained at its documented executable path |
 
 ## Architecture and module contracts
 
@@ -61,6 +62,7 @@ These documents share a directory so the legacy runbook's link to its replacemen
 | [Project context and results](../ARIA_PROJECT_CONTEXT_AND_RESULTS.md) | Historical 25-model rapid-run matrix and execution context |
 | [Benchmark diagnosis](../ARIA_Benchmark_Diagnosis.md) | Historical benchmark validity and leakage investigation |
 | [Training and debugging report](reports/training/ARIA_TRAINING_AND_DEBUGGING_REPORT.md) | Historical dataset, calibration, and training diagnostic report |
+| [Training output log](reports/training/train_output.txt) | Existing empty training log, preserved without adding output |
 
 ## Council decisions
 
@@ -109,3 +111,5 @@ The following documents remain in the root intentionally:
 | `notes.md` | Its unchanged relative links require the root coding assistant guide beside it |
 
 [Relocation manifest](organization/root-document-moves.json) records original and organized paths, SHA-256 hashes, byte sizes, categories, and Git tracking status for the moved files and retained root documents. Existing document text, scripts, datasets, model artifacts, research records, and configuration were not edited. Historical filename mentions in prose remain verbatim; use this index and manifest to locate moved files.
+
+[Training log relocation record](organization/root-log-move.json) records the subsequent move of the empty root training log. `.codex-finalizer-review2/`, `.codex-finalizer-review2-expanded/`, and `.aria-private/` are covered by the existing Git ignore rules and remain untouched.

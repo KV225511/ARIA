@@ -1,0 +1,16 @@
+{
+    "schema_version":  1,
+    "organized_on":  "2026-10-12",
+    "original_path":  "train_output.txt",
+    "organized_path":  "docs/reports/training/train_output.txt",
+    "category":  "training output",
+    "size_bytes":  0,
+    "sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "git_tracked":  true,
+    "contents_changed":  false,
+    "ignored_directories_left_untouched":  [
+                                               ".codex-finalizer-review2",
+                                               ".codex-finalizer-review2-expanded",
+                                               ".aria-private"
+                                           ]
+}
